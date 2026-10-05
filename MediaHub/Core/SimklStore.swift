@@ -44,6 +44,7 @@ private struct Entry: Decodable {
     let status: String?; let movie: Media?; let show: Media?
     // ISO-8601 strings sort correctly as plain text, so no date parsing is needed to order by recency.
     let lastWatchedAt: String?; let addedToWatchlistAt: String?
+    let watchedEpisodesCount: Int?; let totalEpisodesCount: Int?
     var activity: String { lastWatchedAt ?? addedToWatchlistAt ?? "" }
 }
 private struct Media: Decodable {
@@ -70,6 +71,9 @@ private enum SimklError: LocalizedError {
     }
 }
 
+/// Episodes watched / in total for one Simkl show.
+struct SimklEpisodeCount: Sendable { let watched: Int; let total: Int }
+
 private enum PollResult { case tokens(TokenResponse), pending, slowDown, failed(String), transient }
 
 /// Simkl AUTH V2 via the OAuth 2.0 device flow (RFC 8628): `POST /oauth2/device`, then poll `POST /oauth2/token`.
@@ -84,6 +88,8 @@ private enum PollResult { case tokens(TokenResponse), pending, slowDown, failed(
 final class SimklStore {
     private(set) var token: String? = Keychain.get("simkl.token")
     private(set) var library: [CatalogRow] = []
+    /// Per-title episode counts from Simkl (id = IMDb or "tmdb:<id>", same as the library items). Feeds the profile statistics.
+    private(set) var episodeCounts: [String: SimklEpisodeCount] = [:]
     private(set) var isSyncing = false
     private(set) var pin: DeviceAuthorization?
     private(set) var loginError: String?
@@ -316,7 +322,7 @@ final class SimklStore {
     }
 
     func disconnect() {
-        loginTask?.cancel(); pin = nil; library = []; loginStatus = nil; syncError = nil
+        loginTask?.cancel(); pin = nil; library = []; episodeCounts = [:]; loginStatus = nil; syncError = nil
         // Revoking either token ends the whole grant. Fire and forget: the endpoint always answers 200.
         if let rt = refreshToken {
             let r = oauthRequest("/oauth2/revoke", form: ["client_id": clientID, "token": rt])
@@ -353,6 +359,12 @@ final class SimklStore {
                     logo: nil, description: nil, releaseInfo: m.year.map(String.init))
             }
         }
+        var counts: [String: SimklEpisodeCount] = [:]
+        for e in entries {
+            guard let m = e.show, let id = m.ids.imdb ?? m.ids.tmdb.map({ "tmdb:\($0)" }) else { continue }
+            counts[id] = SimklEpisodeCount(watched: e.watchedEpisodesCount ?? 0, total: e.totalEpisodesCount ?? 0)
+        }
+        episodeCounts = counts
         let sections: [(String, String, String)] = [("watching", "Watching", "eye.fill"),
                                                     ("plantowatch", "Plan to Watch", "bookmark.fill"),
                                                     ("completed", "Completed", "checkmark.circle.fill")]
