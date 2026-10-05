@@ -125,9 +125,15 @@ private struct SubtitlePreviewText: View {
 /// Settings page: default language + look.
 struct SubtitleSettingsView: View {
     @AppStorage("sub.lang") private var lang = "off"
+    @AppStorage("subs.online") private var online = true
 
     var body: some View {
         Form {
+            Section {
+                Toggle("Find subtitles on OpenSubtitles", isOn: $online)
+            } footer: {
+                Text("Adds an OpenSubtitles list to the player's subtitle panel (no account needed). If your default language isn't in the file, the best match is loaded automatically.")
+            }
             Section {
                 Picker("Default language", selection: $lang) {
                     Text("Off").tag("off")
