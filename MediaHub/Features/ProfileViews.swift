@@ -33,15 +33,31 @@ struct ProfileAvatar: View {
 struct ProfileToolbar: ViewModifier {
     @Environment(ProfileStore.self) private var profiles
     @State private var showing = false
+    @State private var scrolled = false
+    @State private var onScreen = true
+
+    /// Only at the top of a page that is actually showing.
+    private var visible: Bool { !scrolled && onScreen }
 
     func body(content: Content) -> some View {
         content
+            // Scrolling down hides the button; scrolling back to the top brings it back.
+            .onScrollGeometryChange(for: Bool.self) { g in g.contentOffset.y + g.contentInsets.top > 24 } action: { _, isScrolled in
+                withAnimation(.easeInOut(duration: 0.2)) { scrolled = isScrolled }
+            }
+            // Leaving the page (another tab, or a title opening on top) hides it too, so it never lingers.
+            .onAppear { withAnimation(.easeInOut(duration: 0.2)) { onScreen = true } }
+            .onDisappear { onScreen = false }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button { showing = true } label: { ProfileAvatar(profile: profiles.active, size: 30) }
-                        .accessibilityLabel("Profile")
-                        .accessibilityValue(profiles.active.name)
+                    if visible {
+                        Button { showing = true } label: { ProfileAvatar(profile: profiles.active, size: 30) }
+                            .accessibilityLabel("Profile")
+                            .accessibilityValue(profiles.active.name)
+                            .transition(.opacity)
+                    }
                 }
+                .sharedBackgroundVisibility(visible ? .automatic : .hidden)   // no empty glass bubble when hidden
             }
             .sheet(isPresented: $showing) { ProfileSheet() }
     }
