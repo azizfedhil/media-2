@@ -48,6 +48,16 @@ final class ProfileStore {
         activeID = list.contains { $0.id == saved } ? saved : list[0].id
     }
 
+    /// Re-reads profiles from storage (after a settings import).
+    func reload() {
+        var list = UserDefaults.standard.data(forKey: ProfileKeys.list)
+            .flatMap { try? JSONDecoder().decode([Profile].self, from: $0) } ?? []
+        if list.isEmpty { list = [Profile(id: Profile.defaultID, name: "Me", colorHex: Theme.defaultHex)] }
+        let saved = ProfileKeys.activeID
+        profiles = list
+        activeID = list.contains { $0.id == saved } ? saved : list[0].id
+    }
+
     var active: Profile { profiles.first { $0.id == activeID } ?? profiles[0] }
     var canAdd: Bool { profiles.count < Self.limit }
 
