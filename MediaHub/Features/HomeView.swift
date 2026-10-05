@@ -158,7 +158,7 @@ struct HomeView: View {
             .task(id: store.addons.map(\.id)) { await model.load(addons: store.addons) }
             .task(id: mdbKey + mdbLists) { await model.loadLists(selected: selectedLists) }
             .task(id: tmdbKey + (history.lastWatched?.id ?? "")) { await model.loadSuggestions(last: history.lastWatched) }
-            .task(id: history.finishedSeries.map(\.id).joined(separator: ",")) { await model.loadUpNext(history.finishedSeries) }
+            .task(id: history.finishedSeries) { await model.loadUpNext(history.finishedEntries) }
         }
     }
 
@@ -173,7 +173,7 @@ struct HomeView: View {
         async let a: () = model.load(addons: store.addons)
         async let b: () = model.loadSuggestions(last: history.lastWatched)
         async let c: () = model.loadLists(selected: selectedLists)
-        async let d: () = model.loadUpNext(history.finishedSeries)
+        async let d: () = model.loadUpNext(history.finishedEntries)
         _ = await (a, b, c, d)
     }
 }
