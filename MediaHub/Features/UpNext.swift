@@ -8,6 +8,8 @@ struct UpNextItem: Identifiable, Hashable {
     let title: String
     let thumb: URL?
     let runtime: Int?
+    /// When the finished episode was watched; orders this card among Continue Watching cards.
+    let updated: Date
     var id: String { "\(item.id):\(season):\(episode)" }
 }
 
@@ -33,7 +35,8 @@ enum UpNext {
     static func resolve(_ entry: WatchHistory.Entry) async -> UpNextItem? {
         guard let se = entry.seasonEpisode, let n = await next(for: entry.item, after: se.season, se.episode) else { return nil }
         return UpNextItem(item: entry.item, season: n.season, episode: n.episode.id, title: n.episode.name,
-                          thumb: n.episode.image ?? entry.item.backdropURL, runtime: n.episode.runtime)
+                          thumb: n.episode.image ?? entry.item.backdropURL, runtime: n.episode.runtime,
+                          updated: entry.updated)
     }
 
     private static func aired(_ e: EpisodeItem) -> Bool {
