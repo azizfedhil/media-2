@@ -95,6 +95,10 @@ struct LibraryView: View {
                 }
             }
             .scrollIndicators(.hidden)
+            // One solid surface: the nav bar and the pinned section header are the same black, so they read as a single bar.
+            .toolbarBackground(Color(.systemBackground), for: .navigationBar)
+            .toolbarBackgroundVisibility(.visible, for: .navigationBar)
+            .scrollEdgeEffectHidden(true, for: .top)
             .overlay {
                 if secs.isEmpty {
                     if simkl.isConnected {
