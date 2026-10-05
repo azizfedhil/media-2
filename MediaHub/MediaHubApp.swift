@@ -59,6 +59,9 @@ struct MediaHubApp: App {
     @State private var profiles = ProfileStore()
     @State private var library = LocalLibrary()
 
+    // Locks the UI to portrait; the player unlocks landscape while it is on screen (see Core/Orientation.swift).
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+
     var body: some Scene {
         WindowGroup {
             RootView()

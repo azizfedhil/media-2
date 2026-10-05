@@ -14,21 +14,20 @@ enum OrientationLock {
 final class AppDelegate: NSObject, UIApplicationDelegate {
     func application(_ application: UIApplication,
                      supportedInterfaceOrientationsFor window: UIWindow?) -> UIInterfaceOrientationMask {
-        maskNow
+        Self.maskNow
     }
-
-    private var supportedInterfaceOrientationsFor: UIInterfaceOrientationMask { maskNow }
 
     private static var maskNow: UIInterfaceOrientationMask {
         OrientationLock.playerActive ? [.landscapeLeft, .landscapeRight] : .portrait
     }
 
-    /// Re-asks the system for the current mask and snaps back to portrait as soon as the player closes.
+    /// Pushes the current mask to the foreground window scene. `requestGeometryUpdate` both updates the scene's
+    /// effective geometry preferences and asks the system to rotate immediately.
     /// Called on every player appear/disappear, so repeated enter/exit cycles never leave the app stuck in landscape.
     static func applyOrientation() {
         guard let scene = activeScene else { return }
+        // iOS 16+ real API: updates the scene's geometry preferences and requests the rotation in one call.
         scene.requestGeometryUpdate(.iOS(interfaceOrientations: maskNow)) { _ in }
-        scene.coordinator.updateGeometryPreferences()
     }
 
     private static var activeScene: UIWindowScene? {
@@ -46,29 +45,36 @@ extension View {
 }
 
 private struct LandscapeWhileVisible: ViewModifier {
-    @Environment(\.displayRotationAngle) private var rotation
+    /// True while the presented view is laid out wider than tall — i.e. the interface actually rotated into
+    /// landscape. Fed by `OrientationProbe` below.
+    @State private var isLandscape = false
 
     func body(content: Content) -> some View {
         content
+            .background(OrientationProbe { landscape in isLandscape = landscape })
             // Belt and braces: if the system keeps the cover portrait, rotate the content itself into
             // landscape rather than leaving the viewer with a tiny letterboxed video.
-            .rotationEffect(.degrees(rotation.angle == 0 ? 90 : 0))
+            .rotationEffect(.degrees(isLandscape ? 0 : 90))
             .statusBarHidden(true)
             .onAppear { OrientationLock.playerActive = true }
             .onDisappear { OrientationLock.playerActive = false }
     }
 }
 
-private extension UIInterfaceOrientation.Angle {
-    /// Non-zero only while the interface is actually rotated, so the fallback kick-in above stays invisible
-    /// whenever the geometry update succeeded.
-    var angle: Double {
-        switch self {
-        case .up: return 0
-        case .down: return 180
-        case .right: return 90
-        case .left: return -90
-        @unknown default: return 0
+/// Geometry reader that reports whether the space it occupies is currently landscape-shaped. When the
+/// `requestGeometryUpdate` above succeeds, the full-screen cover grows wider than tall and the report flips
+/// to true; if the system refuses to rotate, it stays portrait-shaped and the fallback rotation kicks in.
+private struct OrientationProbe: View {
+    let onChange: (Bool) -> Void
+
+    var body: some View {
+        GeometryReader { proxy in
+            Color.clear
+                .onAppear { onChange(proxy.size.width > proxy.size.height) }
+                .onChange(of: proxy.size) { _, size in
+                    onChange(size.width > size.height)
+                }
         }
+        .allowsHitTesting(false)
     }
 }
