@@ -550,7 +550,7 @@ struct CatalogRowView: View {
                             Image(systemName: "arrow.right.circle").font(.title)
                             Text("See all").font(.footnote.weight(.semibold))
                         }
-                        .foregroundStyle(.secondary).frame(width: 100, height: 195)
+                        .foregroundStyle(.secondary).frame(width: 67, height: 131)
                     }
                     .buttonStyle(.plain)
                 }
@@ -578,12 +578,15 @@ struct PressableStyle: ButtonStyle {
 /// Tap opens the detail page; long tap shows the actions dropdown (watched / library / details).
 struct PosterCard: View {
     let item: MetaPreview
-    var width: CGFloat? = 130
+    var width: CGFloat? = 87          // 33% smaller than the old 130, closer to the Apple TV+ look
     var showsTitle = false
     @Environment(WatchHistory.self) private var history
     @Environment(ThemeStore.self) private var theme
     @AppStorage("ui.networkBadges") private var showNetwork = true
     @State private var network: TMDBClient.NetworkBadge?
+
+    /// Small row posters get slightly smaller badges so they don't cover the artwork.
+    private var compact: Bool { (width ?? 130) < 100 }
 
     private var caption: String {
         [item.year.map(String.init), item.typeLabel].compactMap { $0 }.joined(separator: " · ")
@@ -606,9 +609,9 @@ struct PosterCard: View {
     @ViewBuilder private var watchedBadge: some View {
         if history.entry(for: item.id)?.isFinished == true {
             Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 17, weight: .bold))
+                .font(.system(size: compact ? 14 : 17, weight: .bold))
                 .foregroundStyle(.white, theme.accent)
-                .padding(6)
+                .padding(compact ? 4 : 6)
                 .accessibilityLabel("Watched")
         }
     }
@@ -619,19 +622,19 @@ struct PosterCard: View {
                 RemoteImage(url: item.posterURL, size: (width ?? 120) * 1.5)
                     .aspectRatio(2.0 / 3.0, contentMode: .fit)
                     .frame(width: width)
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .clipShape(RoundedRectangle(cornerRadius: compact ? 9 : 12, style: .continuous))
                     .overlay(alignment: .topLeading) { watchedBadge }
                     .overlay(alignment: .topLeading) {
                         if let logo = network?.logo {
                             LogoImage(url: logo)
-                                .frame(maxWidth: 34, maxHeight: 14)
-                                .padding(.horizontal, 6).padding(.vertical, 5)
-                                .background(.white.opacity(0.92), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                                .padding(6)
+                                .frame(maxWidth: compact ? 24 : 34, maxHeight: compact ? 10 : 14)
+                                .padding(.horizontal, compact ? 4 : 6).padding(.vertical, compact ? 3 : 5)
+                                .background(.white.opacity(0.92), in: RoundedRectangle(cornerRadius: compact ? 6 : 8, style: .continuous))
+                                .padding(compact ? 4 : 6)
                                 .accessibilityLabel(network?.name ?? "")
                         }
                     }
-                    .overlay(alignment: .bottomLeading) { RatingChip(item: item).padding(6) }
+                    .overlay(alignment: .bottomLeading) { RatingChip(item: item).padding(compact ? 4 : 6) }
                 if showsTitle {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(item.name).font(.footnote.weight(.semibold))
