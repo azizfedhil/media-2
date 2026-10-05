@@ -53,7 +53,7 @@ struct ProfileToolbar: ViewModifier {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     if logo && visible {
-                        PearWordmark(height: 20)
+                        PearWordmark(height: 34)
                             .shadow(color: .black.opacity(0.35), radius: 6)
                             .transition(.opacity)
                     }
