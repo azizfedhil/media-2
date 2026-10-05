@@ -51,14 +51,6 @@ struct ProfileToolbar: ViewModifier {
             .onAppear { withAnimation(.easeInOut(duration: 0.2)) { onScreen = true } }
             .onDisappear { onScreen = false }
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    if logo && visible {
-                        PearWordmark(height: 72)
-                            .shadow(color: .black.opacity(0.35), radius: 6)
-                            .transition(.opacity)
-                    }
-                }
-                .sharedBackgroundVisibility(.hidden)                          // plain logo, no glass bubble
                 ToolbarItem(placement: .topBarTrailing) {
                     if visible {
                         Button { showing = true } label: { ProfileAvatar(profile: profiles.active, size: 30) }
@@ -69,7 +61,27 @@ struct ProfileToolbar: ViewModifier {
                 }
                 .sharedBackgroundVisibility(visible ? .automatic : .hidden)   // no empty glass bubble when hidden
             }
+            // The wordmark is drawn over the page, not in the toolbar: toolbar items are capped to the bar's height,
+            // which squeezed and clipped it. Vertically centred on the profile button.
+            .overlay(alignment: .topLeading) {
+                if logo && visible {
+                    PearWordmark(height: Self.logoHeight)
+                        .shadow(color: .black.opacity(0.35), radius: 6)
+                        .padding(.leading, 16)
+                        .padding(.top, Self.topInset + 10 - Self.logoHeight / 2)
+                        .transition(.opacity)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                }
+            }
             .sheet(isPresented: $showing) { ProfileSheet() }
+    }
+
+    /// Height of the "pear." wordmark on Home (about 160 pt wide).
+    private static let logoHeight: CGFloat = 56
+
+    private static var topInset: CGFloat {
+        (UIApplication.shared.connectedScenes.first as? UIWindowScene)?.keyWindow?.safeAreaInsets.top ?? 59
     }
 }
 
@@ -99,6 +111,8 @@ struct ProfileSheet: View {
     @Environment(ThemeStore.self) private var theme
     @State private var managing = false
     @State private var target: ProfileTarget?
+    @State private var showProfile = false
+    @State private var detent: PresentationDetent = .medium
 
     private let columns = [GridItem(.adaptive(minimum: 96, maximum: 120), spacing: 16, alignment: .top)]
 
@@ -106,6 +120,7 @@ struct ProfileSheet: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 28) {
+                    if !managing { profileLink }
                     LazyVGrid(columns: columns, spacing: 22) {
                         ForEach(profiles.profiles) { tile($0) }
                         if profiles.canAdd { addTile }
@@ -124,9 +139,30 @@ struct ProfileSheet: View {
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } }
             }
+            .navigationDestination(isPresented: $showProfile) { ProfileDetailView() }
         }
-        .presentationDetents([.medium, .large])
+        .presentationDetents([.medium, .large], selection: $detent)
         .sheet(item: $target) { ProfileEditor(target: $0) }
+    }
+
+    /// Opens the active profile's page (stats, integrations, taste). The sheet grows to full height for it.
+    private var profileLink: some View {
+        Button { detent = .large; showProfile = true } label: {
+            HStack(spacing: 12) {
+                ProfileAvatar(profile: profiles.active, size: 44)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("View \(profiles.active.name)'s profile").font(.headline)
+                    Text("Stats, integrations and taste").font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Image(systemName: "chevron.right").font(.footnote.weight(.bold)).foregroundStyle(.secondary)
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity)
+            .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        }
+        .buttonStyle(PressableStyle())
+        .accessibilityHint("Shows watch statistics for this profile")
     }
 
     private var footnote: String {
