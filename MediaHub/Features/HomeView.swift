@@ -136,8 +136,9 @@ struct HomeView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 30) {
                     if !model.hero.isEmpty { HeroCarousel(items: model.hero, tint: $tint) }
-                    if !history.continueEntries.isEmpty { ContinueRow(entries: history.continueEntries) }
-                    if !model.upNext.isEmpty { UpNextRow(items: model.upNext) }
+                    if !history.continueEntries.isEmpty || !model.upNext.isEmpty {
+                        ContinueRow(entries: history.continueEntries, upNext: model.upNext)
+                    }
                     ForEach(model.suggested) { CatalogRowView(row: $0) }
                     ForEach(model.lists) { CatalogRowView(row: $0) }
                     ForEach(model.rows) { CatalogRowView(row: $0) }
@@ -365,9 +366,32 @@ struct InlineRatings: View {
 
 // MARK: - Continue Watching
 
+/// One carousel holds both in-progress titles and the next episode of finished ones, most recent first.
 struct ContinueRow: View {
     let entries: [WatchHistory.Entry]
+    let upNext: [UpNextItem]
     @Environment(ThemeStore.self) private var theme
+
+    private enum Card: Identifiable {
+        case resume(WatchHistory.Entry)
+        case next(UpNextItem)
+        var id: String {
+            switch self {
+            case .resume(let e): return "r-\(e.id)"
+            case .next(let n): return "n-\(n.id)"
+            }
+        }
+        var date: Date {
+            switch self {
+            case .resume(let e): return e.updated
+            case .next(let n): return n.updated
+            }
+        }
+    }
+
+    private var cards: [Card] {
+        (entries.map(Card.resume) + upNext.map(Card.next)).sorted { $0.date > $1.date }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -378,7 +402,12 @@ struct ContinueRow: View {
             .padding(.horizontal, 16)
             ScrollView(.horizontal) {
                 LazyHStack(spacing: 14) {
-                    ForEach(entries) { ContinueCard(entry: $0) }
+                    ForEach(cards) { card in
+                        switch card {
+                        case .resume(let e): ContinueCard(entry: e)
+                        case .next(let n): UpNextCard(entry: n)
+                        }
+                    }
                 }
                 .scrollTargetLayout()
             }
@@ -454,31 +483,6 @@ private struct ContinueCard: View {
 }
 
 // MARK: - Up Next
-
-/// The next episode of shows you finished an episode of.
-struct UpNextRow: View {
-    let items: [UpNextItem]
-    @Environment(ThemeStore.self) private var theme
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 8) {
-                Image(systemName: "forward.end.circle.fill").font(.system(size: 15, weight: .bold)).foregroundStyle(theme.accent)
-                Text("Up Next").font(.title3.bold())
-            }
-            .padding(.horizontal, 16)
-            ScrollView(.horizontal) {
-                LazyHStack(spacing: 14) {
-                    ForEach(items) { UpNextCard(entry: $0) }
-                }
-                .scrollTargetLayout()
-            }
-            .contentMargins(.horizontal, 16, for: .scrollContent)
-            .scrollTargetBehavior(.viewAligned)
-            .scrollIndicators(.hidden)
-        }
-    }
-}
 
 private struct UpNextCard: View {
     let entry: UpNextItem
