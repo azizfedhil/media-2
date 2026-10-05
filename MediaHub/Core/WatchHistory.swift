@@ -27,6 +27,8 @@ final class WatchHistory {
             let p = key.split(separator: ":").compactMap { Int($0) }
             return p.count == 2 ? (p[0], p[1]) : nil
         }
+        /// Eligible for "Up Next": a finished series episode whose numbers we can read.
+        var isUpNextCandidate: Bool { isFinished && item.type == "series" && seasonEpisode != nil }
     }
     private(set) var entries: [Entry] = []
     @ObservationIgnored private var profileID = ProfileKeys.activeID
@@ -51,9 +53,11 @@ final class WatchHistory {
     var continueEntries: [Entry] {
         entries.filter { $0.position > 30 && !$0.isFinished }
     }
+    /// Ids of the shows whose last episode is done — cheap to diff, so views use them as `.task(id:)` keys.
+    var finishedSeries: Set<String> { Set(entries.compactMap { $0.isUpNextCandidate ? $0.id : nil }) }
     /// Shows whose last episode is done: candidates for "Up Next".
-    var finishedSeries: [Entry] {
-        entries.filter { $0.isFinished && $0.item.type == "series" && $0.seasonEpisode != nil }
+    var finishedEntries: [Entry] {
+        entries.filter { $0.isUpNextCandidate }
     }
     var continueWatching: [MetaPreview] { continueEntries.map(\.item) }
     func entry(for id: String) -> Entry? { entries.first { $0.id == id } }
