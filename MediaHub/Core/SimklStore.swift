@@ -40,7 +40,12 @@ private struct AllItems: Decodable {
         movies = list(.movies); shows = list(.shows); anime = list(.anime)
     }
 }
-private struct Entry: Decodable { let status: String?; let movie: Media?; let show: Media? }
+private struct Entry: Decodable {
+    let status: String?; let movie: Media?; let show: Media?
+    // ISO-8601 strings sort correctly as plain text, so no date parsing is needed to order by recency.
+    let lastWatchedAt: String?; let addedToWatchlistAt: String?
+    var activity: String { lastWatchedAt ?? addedToWatchlistAt ?? "" }
+}
 private struct Media: Decodable {
     let title: String; let year: Int?; let poster: String?; let ids: IDs
     struct IDs: Decodable {
@@ -340,7 +345,7 @@ final class SimklStore {
         lastSync = .now
         let entries = all.movies + all.shows + all.anime
         func items(_ status: String) -> [MetaPreview] {
-            entries.filter { $0.status == status }.compactMap { e in
+            entries.filter { $0.status == status }.sorted { $0.activity > $1.activity }.compactMap { e in
                 guard let m = e.movie ?? e.show,
                       let id = m.ids.imdb ?? m.ids.tmdb.map({ "tmdb:\($0)" }) else { return nil }
                 return MetaPreview(id: id, type: e.movie != nil ? "movie" : "series", name: m.title,
