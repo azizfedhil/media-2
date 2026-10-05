@@ -175,6 +175,13 @@ actor TMDBClient {
         try await get("/\(kind(type))/\(try await tmdbID(for: id, type: type))", ["append_to_response": "credits"])
     }
 
+    /// Details without credits (much smaller response). Used by the profile statistics.
+    func basicDetails(for id: String, type: String) async -> Details? {
+        guard hasKey, let tid = try? await tmdbID(for: id, type: type) else { return nil }
+        let d: Details? = try? await get("/\(kind(type))/\(tid)")
+        return d
+    }
+
     /// Cached details lookup for quick actions (long-press menus). nil when there is no key or the title fails to resolve.
     private var detailsCache: [String: Details] = [:]
     func cachedDetails(for id: String, type: String) async -> Details? {
