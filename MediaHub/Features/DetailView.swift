@@ -1,4 +1,5 @@
 import SwiftUI
+import SafariServices
 
 private struct SeasonChip: Identifiable {
     let id: Int          // season number
@@ -42,6 +43,8 @@ struct DetailView: View {
     @State private var episodes: [EpisodeItem] = []
     @State private var loadingEpisodes = false
     @State private var seasonsExpanded = false
+    @State private var trailers: [TMDBClient.Video] = []
+    @State private var openTrailer: TMDBClient.Video?
 
     private var isSeries: Bool { item.type == "series" }
 
@@ -94,6 +97,7 @@ struct DetailView: View {
                     }
                 header.padding(.horizontal, 20)
                 if isSeries { seasonSection }
+                if !trailers.isEmpty { trailersSection }
                 if !similar.isEmpty {
                     CatalogRowView(row: CatalogRow(id: "similar-\(item.id)", title: "More like this", items: similar))
                         .padding(.top, 8)
@@ -123,6 +127,8 @@ struct DetailView: View {
             ratings = await MDBListClient.shared.ratings(imdb: imdb, type: item.type)
         }
         .task { logoURL = await LogoResolver.shared.logo(for: item) }
+        .task { trailers = await TMDBClient.shared.videos(for: item.id, type: item.type) }
+
         .task { await configureFromHistory() }
         .task(id: season) { await loadEpisodes() }
         .task(id: showSources) {
@@ -142,16 +148,22 @@ struct DetailView: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 12) {
             TitleArt(item: item, maxWidth: 280, maxHeight: 100, font: .largeTitle.bold())
+            if let t = details?.tagline, !t.isEmpty { Text(t).italic().foregroundStyle(.secondary) }
             if let d = descriptionText { ExpandableText(text: d) }
-            if !metaLine.isEmpty { Text(metaLine).font(.subheadline).foregroundStyle(.secondary) }
-            if let n = networkText {
-                Label(n, systemImage: isSeries ? "tv" : "building.2").font(.subheadline).foregroundStyle(.secondary)
-            }
+            if !metaLine.isEmpty || networkText != nil { metaRow }
             if !allRatings.isEmpty { ratingsRow }
             actionBar
-            resumeBanner
-            if let t = details?.tagline, !t.isEmpty { Text(t).italic().foregroundStyle(.secondary) }
         }
+    }
+
+    /// Year, runtime and genres, with the network / studio right next to them.
+    private var metaRow: some View {
+        let icon = isSeries ? "tv" : "building.2"
+        let lead = metaLine.isEmpty ? "" : metaLine + "   "
+        return Group {
+            if let n = networkText { Text("\(lead)\(Image(systemName: icon)) \(n)") } else { Text(metaLine) }
+        }
+        .font(.subheadline).foregroundStyle(.secondary)
     }
 
     private var descriptionText: String? {
@@ -254,59 +266,6 @@ struct DetailView: View {
         } else if e.position > 30, !explicitStart, !userPicked {
             season = se.season; episode = se.episode
         }
-    }
-
-    @ViewBuilder private var resumeBanner: some View {
-        if let e = history.entry(for: item.id), !e.isFinished, e.position > 30 {
-            let se = e.seasonEpisode
-            banner(thumb: e.thumb.flatMap(URL.init(string:)) ?? item.backdropURL, label: "CONTINUE",
-                   title: continueTitle(e),
-                   detail: "\(Fmt.clock(e.position)) · \(Fmt.remaining(e.duration - e.position))", progress: e.progress) {
-                if let se { userPicked = true; season = se.season; episode = se.episode }
-                showSources = true
-            }
-        }
-    }
-
-    private func continueTitle(_ e: WatchHistory.Entry) -> String {
-        guard let se = e.seasonEpisode else { return item.name }
-        var t = "S\(se.season) · E\(se.episode)"
-        if let n = e.episodeTitle, !n.isEmpty { t += "  \(n)" }
-        return t
-    }
-
-    private func banner(thumb: URL?, label: String, title: String, detail: String?, progress: Double?,
-                        action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 12) {
-                Color.clear.aspectRatio(16.0 / 9.0, contentMode: .fit).frame(width: 112)
-                    .overlay { RemoteImage(url: thumb, size: 112) }
-                    .overlay(alignment: .bottom) {
-                        if let progress {
-                            GeometryReader { g in
-                                ZStack(alignment: .leading) {
-                                    Rectangle().fill(.white.opacity(0.3))
-                                    Rectangle().fill(theme.gradient).frame(width: g.size.width * progress)
-                                }
-                            }
-                            .frame(height: 3)
-                        }
-                    }
-                    .overlay { Image(systemName: "play.fill").font(.footnote.weight(.bold)).foregroundStyle(.white)
-                        .frame(width: 30, height: 30).background(.ultraThinMaterial, in: Circle()) }
-                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(label).font(.caption2.weight(.heavy)).tracking(1).foregroundStyle(theme.accent)
-                    Text(title).font(.subheadline.weight(.semibold)).lineLimit(2).multilineTextAlignment(.leading)
-                    if let detail { Text(detail).font(.caption).foregroundStyle(.secondary) }
-                }
-                Spacer(minLength: 0)
-                Image(systemName: "chevron.right").font(.footnote.weight(.bold)).foregroundStyle(.tertiary)
-            }
-            .padding(10)
-            .background(.quaternary.opacity(0.6), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        }
-        .buttonStyle(PressableStyle())
     }
 
     // MARK: Seasons + episodes
@@ -503,6 +462,26 @@ struct DetailView: View {
         guard !Task.isCancelled else { return }
         episodes = list
         loadingEpisodes = false
+    }
+
+    // MARK: Trailers
+
+    private var trailersSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Trailers & Extras").font(.title3.bold()).padding(.horizontal, 20)
+            ScrollView(.horizontal) {
+                LazyHStack(spacing: 12) {
+                    ForEach(trailers) { v in TrailerCard(video: v) { openTrailer = v } }
+                }
+                .scrollTargetLayout()
+            }
+            .contentMargins(.horizontal, 20, for: .scrollContent)
+            .scrollTargetBehavior(.viewAligned)
+            .scrollIndicators(.hidden)
+        }
+        .fullScreenCover(item: $openTrailer) { v in
+            if let u = v.watchURL { SafariView(url: u).ignoresSafeArea() }
+        }
     }
 
     // MARK: Details footer
