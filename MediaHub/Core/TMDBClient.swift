@@ -21,7 +21,8 @@ actor TMDBClient {
 
     struct Item: Decodable { let id: Int; let title: String?; let name: String?; let overview: String?
         let posterPath: String?; let backdropPath: String?; let releaseDate: String?; let firstAirDate: String?
-        let mediaType: String?; let voteAverage: Double? }
+        let mediaType: String?; let voteAverage: Double?
+        let genreIds: [Int]? }
     private struct Page: Decodable { let results: [Item] }
     private struct Find: Decodable { let movieResults: [Item]; let tvResults: [Item] }
     private struct External: Decodable { let imdbId: String? }
@@ -29,6 +30,12 @@ actor TMDBClient {
 
     struct Genre: Decodable, Identifiable, Hashable, Sendable { let id: Int; let name: String }
     private struct GenreList: Decodable { let genres: [Genre] }
+    private struct KeywordPage: Decodable {
+        struct K: Decodable { let id: Int; let name: String }
+        let results: [K]
+    }
+    /// "small town" -> TMDB keyword id. Kept on disk: ids never change, so each phrase is looked up once ever.
+    private var keywordCache: [String: Int] = (UserDefaults.standard.dictionary(forKey: "tmdb.keywordIDs") as? [String: Int]) ?? [:]
     private struct ImageSet: Decodable {
         struct Logo: Decodable { let filePath: String; let iso6391: String?; let voteAverage: Double?; let width: Int? }
         let logos: [Logo]?
@@ -212,6 +219,50 @@ actor TMDBClient {
         return f.string(from: .now)
     }
 
+    // MARK: Themed collections (Home)
+
+    private func keywordID(_ phrase: String) async -> Int? {
+        let q = phrase.lowercased()
+        if let hit = keywordCache[q] { return hit }
+        guard let p: KeywordPage = try? await get("/search/keyword", ["query": q]),
+              let k = p.results.first(where: { $0.name.lowercased() == q }) ?? p.results.first else { return nil }
+        keywordCache[q] = k.id
+        UserDefaults.standard.set(keywordCache, forKey: "tmdb.keywordIDs")
+        return k.id
+    }
+
+    /// Shows and movies tagged with any of the keywords, most popular first, shows and movies interleaved.
+    /// Each result carries its genre names for the card caption (discover only returns genre ids).
+    func themed(keywords: [String], limit: Int = 8) async -> [ThemedTitle] {
+        guard hasKey else { return [] }
+        var ids: [Int] = []
+        for q in keywords { if let id = await keywordID(q) { ids.append(id) } }
+        guard !ids.isEmpty else { return [] }
+        let joined = ids.map(String.init).joined(separator: "|")      // "|" = OR
+        async let tv = themedPage(kind: "tv", keywords: joined)
+        async let mv = themedPage(kind: "movie", keywords: joined)
+        let (t, m) = await (tv, mv)
+        var out: [ThemedTitle] = []
+        var seen = Set<String>()
+        for i in 0..<max(t.count, m.count) {
+            for list in [t, m] where i < list.count {
+                if seen.insert(list[i].item.id).inserted { out.append(list[i]) }
+            }
+        }
+        return Array(out.prefix(limit))
+    }
+
+    private func themedPage(kind: String, keywords: String) async -> [ThemedTitle] {
+        guard let p: Page = try? await get("/discover/\(kind)", [
+            "with_keywords": keywords, "sort_by": "popularity.desc", "include_adult": "false",
+            "vote_count.gte": kind == "tv" ? "100" : "200",
+        ]) else { return [] }
+        let names = Dictionary(await genres(kind).map { ($0.id, $0.name) }, uniquingKeysWith: { a, _ in a })
+        return p.results.filter { $0.posterPath != nil }.map { i in
+            ThemedTitle(item: preview(i, kind: kind), genres: Array((i.genreIds ?? []).compactMap { names[$0] }.prefix(2)))
+        }
+    }
+
     func imdbID(tmdb id: Int, type: String) async -> String? {
         let e: External? = try? await get("/\(kind(type))/\(id)/external_ids")
         return e?.imdbId
@@ -230,4 +281,11 @@ actor TMDBClient {
 enum DiscoverSort: String, CaseIterable, Identifiable, Sendable {
     case popular = "Popular", topRated = "Top rated", newest = "Newest"
     var id: String { rawValue }
+}
+
+/// A title in a themed Home row, with the genre names shown under its logo.
+struct ThemedTitle: Identifiable, Sendable {
+    let item: MetaPreview
+    let genres: [String]
+    var id: String { item.id }
 }
