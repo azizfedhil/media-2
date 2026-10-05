@@ -19,6 +19,8 @@ final class ThemeStore {
 
     init() { hex = UserDefaults.standard.string(forKey: "ui.accent") ?? Theme.defaultHex }
 
+    func reload() { hex = UserDefaults.standard.string(forKey: "ui.accent") ?? Theme.defaultHex }
+
     func setAccent(hex: String) {
         self.hex = hex
         UserDefaults.standard.set(hex, forKey: "ui.accent")
