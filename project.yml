@@ -23,6 +23,10 @@ targets:
       properties:
         # Needed for Picture in Picture and audio when the app is backgrounded.
         UIBackgroundModes: [audio]
+        # Portrait by default; the player unlocks landscape at runtime (see OrientationLock).
+        # Landscape must be declared here or the app can't rotate into it.
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
+        UISupportedInterfaceOrientations~ipad: [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
         # Many debrid links are plain http://. The player engine fetches with URLSession (not AVFoundation),
         # so it needs the general exception; the ForMedia key alone only covers AVPlayer.
         NSAppTransportSecurity:
