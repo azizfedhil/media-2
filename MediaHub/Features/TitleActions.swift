@@ -5,33 +5,22 @@ import SwiftUI
 /// library membership is LocalLibrary when Simkl isn't connected (Simkl's own library syncs itself).
 @MainActor
 enum TitleActions {
-    /// Marks a whole title watched. For series it also records the last season/episode (from TMDB when
-    /// a key is set) so Up Next offers what comes after; `season`/`episode` override that.
-    static func markWatched(_ item: MetaPreview, history: WatchHistory, season: Int? = nil, episode: Int? = nil) {
-        Task {
-            var s = season, e = episode
-            var minutes: Int?
-            if item.type == "series", s == nil || e == nil,
-               let d = await TMDBClient.shared.cachedDetails(for: item.id, type: item.type) {
-                s = s ?? d.seasons?.map(\.seasonNumber).max().flatMap { $0 == 0 ? nil : $0 } ?? d.numberOfSeasons
-                e = e ?? d.numberOfEpisodes
-                minutes = d.minutes
-            } else if item.type != "series",
-                      let d = await TMDBClient.shared.cachedDetails(for: item.id, type: item.type) {
-                minutes = d.minutes
-            }
-            if item.type == "series" {
-                history.markWatched(item, key: "\(s ?? 1):\(e ?? 1)", season: s, episode: e,
-                                    duration: Double(max(minutes ?? 45, 20) * max(e ?? 1, 1) * 60))
-            } else {
-                history.markWatched(item, duration: Double(max(minutes ?? 120, 30)) * 60)
-            }
-        }
+    /// Marks a whole title watched via the show-level flag only. No progress record is created and no
+    /// fabricated season-total duration is written, so this can never leak into Continue Watching or
+    /// imply watched state for individual episodes beyond the explicit whole-show flag.
+    static func markWatched(_ item: MetaPreview, history: WatchHistory) {
+        history.setSeriesWatched(item.id, watched: true)
     }
 
     static func unmarkWatched(_ item: MetaPreview, history: WatchHistory) {
-        history.unmarkWatched(item.id)
+        history.clearWatched(item.id)
     }
+
+    /// Marks exactly one episode watched/unwatched — nothing else in the show changes.
+    static func setEpisodeWatched(_ item: MetaPreview, history: WatchHistory, season: Int, episode: Int, watched: Bool) {
+        history.setEpisodeWatched(item.id, season: season, episode: episode, watched: watched)
+    }
+
 
     /// Adds to the local library as planned, or flips an existing saved entry to watched.
     static func addToList(_ item: MetaPreview, library: LocalLibrary) {
@@ -49,7 +38,9 @@ struct PosterContextMenu: View {
     @Environment(WatchHistory.self) private var history
     @Environment(LocalLibrary.self) private var library
 
-    private var isWatched: Bool { history.entry(for: item.id)?.isFinished ?? false }
+    /// Whole-title watched state: the explicit flag, or every listed episode marked (movies have no
+    /// episodes, so the show-level flag is what counts there). Never inferred from playback position.
+    private var isWatched: Bool { history.isSeriesWatched(item.id) }
     private var inList: Bool { library.entry(for: item.id) != nil }
 
     var body: some View {
