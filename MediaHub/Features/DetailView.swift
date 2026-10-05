@@ -142,6 +142,7 @@ struct DetailView: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 12) {
             TitleArt(item: item, maxWidth: 280, maxHeight: 100, font: .largeTitle.bold())
+            if let d = descriptionText { ExpandableText(text: d) }
             if !metaLine.isEmpty { Text(metaLine).font(.subheadline).foregroundStyle(.secondary) }
             if let n = networkText {
                 Label(n, systemImage: isSeries ? "tv" : "building.2").font(.subheadline).foregroundStyle(.secondary)
@@ -150,8 +151,11 @@ struct DetailView: View {
             actionBar
             resumeBanner
             if let t = details?.tagline, !t.isEmpty { Text(t).italic().foregroundStyle(.secondary) }
-            if let d = details?.overview ?? item.description { Text(d) }
         }
+    }
+
+    private var descriptionText: String? {
+        [details?.overview, item.description].lazy.compactMap { $0 }.first { !$0.isEmpty }
     }
 
     // MARK: Action bar (play + small round buttons)
@@ -253,12 +257,7 @@ struct DetailView: View {
     }
 
     @ViewBuilder private var resumeBanner: some View {
-        if let n = upNext {
-            banner(thumb: n.thumb, label: "UP NEXT", title: "S\(n.season) · E\(n.episode)  \(n.title)",
-                   detail: n.runtime.map { "\($0) min" }, progress: nil) {
-                userPicked = true; season = n.season; episode = n.episode; showSources = true
-            }
-        } else if let e = history.entry(for: item.id), !e.isFinished, e.position > 30 {
+        if let e = history.entry(for: item.id), !e.isFinished, e.position > 30 {
             let se = e.seasonEpisode
             banner(thumb: e.thumb.flatMap(URL.init(string:)) ?? item.backdropURL, label: "CONTINUE",
                    title: continueTitle(e),
@@ -469,8 +468,10 @@ struct DetailView: View {
     }
 
     private func episodeCard(_ ep: EpisodeItem) -> some View {
-        EpisodeCard(ep: ep, selected: ep.id == episode,
-                    watched: history.isWatched(id: item.id, season: season, episode: ep.id),
+        let watched = history.isWatched(id: item.id, season: season, episode: ep.id)
+        return EpisodeCard(ep: ep, selected: ep.id == episode,
+                    watched: watched,
+                    upNext: !watched && upNext?.season == season && upNext?.episode == ep.id,
                     onTap: { userPicked = true; episode = ep.id; showSources = true }) {
             // Same actions in the long-press menu and the card's "..." button.
             Button("Mark as Watched", systemImage: "checkmark.circle") {
