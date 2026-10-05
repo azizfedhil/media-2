@@ -9,6 +9,12 @@ struct ThemeRow: Identifiable, Sendable {
     let id: String
     let title: String
     let items: [ThemedTitle]
+
+    /// Only movies ("movie") or only shows ("series"); nil when too few are left to fill a row.
+    func filtered(type: String) -> ThemeRow? {
+        let kept = items.filter { $0.item.type == type }
+        return kept.count >= 3 ? ThemeRow(id: id + "-" + type, title: title, items: kept) : nil
+    }
 }
 
 enum ThemeCatalog {
@@ -28,11 +34,32 @@ enum ThemeCatalog {
         ThemeDef(title: "Survival Against the Odds", keywords: ["survival", "wilderness"]),
     ]
 
-    /// The same pair all day, a new pair tomorrow.
-    static func today(count: Int) -> [ThemeDef] {
+    /// The same themes all day, new ones tomorrow. `offset` lets another screen take the themes after Home's,
+    /// so Home (offset 0, 2 rows) and Explore (offset 2) never show the same one.
+    static func today(count: Int, offset: Int = 0) -> [ThemeDef] {
         let day = Calendar.current.ordinality(of: .day, in: .era, for: .now) ?? 0
-        let start = (day * count) % all.count
-        return (0..<count).map { all[(start + $0) % all.count] }
+        let start = (day * 2) % all.count
+        return (0..<count).map { all[(start + offset + $0) % all.count] }
+    }
+
+    /// Loads the rows concurrently and reports after each one lands (in theme order). A theme with too little data is skipped.
+    static func load(count: Int, offset: Int = 0, limit: Int = 8,
+                     update: @MainActor @escaping ([ThemeRow]) -> Void) async {
+        guard TMDBClient.shared.hasKey else { await update([]); return }
+        var done: [Int: ThemeRow] = [:]
+        await withTaskGroup(of: (Int, ThemeRow?).self) { group in
+            for (i, t) in today(count: count, offset: offset).enumerated() {
+                group.addTask {
+                    let items = await TMDBClient.shared.themed(keywords: t.keywords, limit: limit)
+                    return (i, items.count >= 3 ? ThemeRow(id: "theme-\(t.title)", title: t.title, items: items) : nil)
+                }
+            }
+            for await (i, row) in group {
+                guard let row else { continue }
+                done[i] = row
+                await update(done.keys.sorted().compactMap { done[$0] })
+            }
+        }
     }
 }
 
