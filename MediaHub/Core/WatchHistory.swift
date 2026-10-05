@@ -31,19 +31,36 @@ final class WatchHistory {
         var isUpNextCandidate: Bool { isFinished && item.type == "series" && seasonEpisode != nil }
     }
     private(set) var entries: [Entry] = []
+    /// Everything that dropped off `entries` (the list is capped at 30 for Continue Watching) or was removed from it.
+    /// Never shown in the UI; the profile statistics read it so no watched title is ever forgotten.
+    private(set) var archive: [Entry] = []
     @ObservationIgnored private var profileID = ProfileKeys.activeID
     private var storeKey: String { ProfileKeys.scoped("watch.history", profileID) }
+    private var archiveKey: String { ProfileKeys.scoped("watch.archive", profileID) }
 
-    init() { entries = Self.read(storeKey) }
+    init() { entries = Self.read(storeKey); archive = Self.read(archiveKey) }
 
     /// Re-reads the active profile's history from storage (after a settings import).
-    func reload() { profileID = ProfileKeys.activeID; entries = Self.read(storeKey) }
+    func reload() { profileID = ProfileKeys.activeID; entries = Self.read(storeKey); archive = Self.read(archiveKey) }
 
     /// Switches to another profile's history. No-op when it is already loaded.
     func load(profile id: String) {
         guard id != profileID else { return }
         profileID = id
         entries = Self.read(storeKey)
+        archive = Self.read(archiveKey)
+    }
+
+    /// Live entries plus archived ones (a live entry wins when a title is in both).
+    var allEntries: [Entry] {
+        let live = Set(entries.map(\.id))
+        return entries + archive.filter { !live.contains($0.id) }
+    }
+
+    private func stash(_ e: Entry) {
+        archive.removeAll { $0.id == e.id }
+        archive.append(e)
+        persistArchive()
     }
 
     private static func read(_ key: String) -> [Entry] {
@@ -70,11 +87,20 @@ final class WatchHistory {
         entries.removeAll { $0.id == item.id }
         entries.insert(Entry(item: item, key: key, position: position, duration: duration, updated: .now,
                              season: season, episode: episode, episodeTitle: episodeTitle, thumb: thumb), at: 0)
-        entries = Array(entries.prefix(30))
+        if !archive.isEmpty, archive.contains(where: { $0.id == item.id }) {
+            archive.removeAll { $0.id == item.id }
+            persistArchive()
+        }
+        if entries.count > 30 {
+            for dropped in entries[30...] { stash(dropped) }
+            entries = Array(entries.prefix(30))
+        }
         persist()
     }
 
+    /// Hides a title from Continue Watching. Its progress still counts in the profile statistics.
     func remove(_ id: String) {
+        if let e = entries.first(where: { $0.id == id }) { stash(e) }
         entries.removeAll { $0.id == id }
         persist()
     }
@@ -144,6 +170,9 @@ final class WatchHistory {
 
     private func persist() {
         if let d = try? JSONEncoder().encode(entries) { UserDefaults.standard.set(d, forKey: storeKey) }
+    }
+    private func persistArchive() {
+        if let d = try? JSONEncoder().encode(archive) { UserDefaults.standard.set(d, forKey: archiveKey) }
     }
 }
 
