@@ -28,59 +28,87 @@ struct ProfileAvatar: View {
 
 // MARK: - Top-right button
 
-/// Adds the profile avatar to the top-right of a screen, like the Apple TV app. Toolbar items get the
-/// Liquid Glass treatment from the system, so the avatar sits in a glass circle. Tapping opens the profile picker.
+/// Profile avatar at the top-right of every tab, like the Apple TV app.
+/// - Most screens: a normal toolbar item. The system draws the Liquid Glass circle and keeps it steady while you scroll.
+/// - Home (`logo: true`): the nav bar is hidden and the header is drawn here instead, the "pear." wordmark on the left and
+///   a glass avatar button on the right. Both fade with the scroll position itself (no on/off switch and no timed
+///   animation), so they follow your finger and nothing pops, lags or drops down.
 struct ProfileToolbar: ViewModifier {
-    /// Also shows the "pear." wordmark on the leading side (Home).
     var logo = false
     @Environment(ProfileStore.self) private var profiles
     @State private var showing = false
-    @State private var scrolled = false
+    /// 0 at the top of the page, 1 once scrolled `fadeDistance` points. Drives the Home header directly.
+    @State private var progress: CGFloat = 0
     @State private var onScreen = true
 
-    /// Only at the top of a page that is actually showing.
-    private var visible: Bool { !scrolled && onScreen }
-
+    @ViewBuilder
     func body(content: Content) -> some View {
+        if logo { home(content) } else { standard(content) }
+    }
+
+    // MARK: Standard tabs
+
+    private func standard(_ content: Content) -> some View {
         content
-            // Scrolling down hides the button; scrolling back to the top brings it back.
-            .onScrollGeometryChange(for: Bool.self) { g in g.contentOffset.y + g.contentInsets.top > 24 } action: { _, isScrolled in
-                withAnimation(.easeInOut(duration: 0.2)) { scrolled = isScrolled }
-            }
-            // Leaving the page (another tab, or a title opening on top) hides it too, so it never lingers.
-            .onAppear { withAnimation(.easeInOut(duration: 0.2)) { onScreen = true } }
-            .onDisappear { onScreen = false }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    if visible {
-                        Button { showing = true } label: { ProfileAvatar(profile: profiles.active, size: 30) }
-                            .accessibilityLabel("Profile")
-                            .accessibilityValue(profiles.active.name)
-                            .transition(.opacity)
-                    }
-                }
-                .sharedBackgroundVisibility(visible ? .automatic : .hidden)   // no empty glass bubble when hidden
-            }
-            // The wordmark is drawn over the page, not in the toolbar: toolbar items are capped to the bar's height,
-            // which squeezed and clipped it. Vertically centred on the profile button.
-            .overlay(alignment: .topLeading) {
-                if logo && visible {
-                    PearWordmark(height: Self.logoHeight)
-                        .shadow(color: .black.opacity(0.35), radius: 6)
-                        .padding(.leading, 16)
-                        .padding(.top, Self.statusBar + (Self.barHeight - Self.logoHeight) / 2)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                        .ignoresSafeArea()
-                        .transition(.opacity)
-                        .allowsHitTesting(false)
-                        .accessibilityHidden(true)
+                    Button { showing = true } label: { ProfileAvatar(profile: profiles.active, size: 30) }
+                        .accessibilityLabel("Profile")
+                        .accessibilityValue(profiles.active.name)
                 }
             }
             .sheet(isPresented: $showing) { ProfileSheet() }
     }
 
-    /// Height of the "pear." wordmark on Home (about 160 pt wide).
-    private static let logoHeight: CGFloat = 56
+    // MARK: Home
+
+    private func home(_ content: Content) -> some View {
+        content
+            // Continuous 0...1 value, rounded so SwiftUI only re-renders when it visibly changes.
+            .onScrollGeometryChange(for: CGFloat.self) { g in
+                let raw = (g.contentOffset.y + g.contentInsets.top) / Self.fadeDistance
+                return (min(max(raw, 0), 1) * 100).rounded() / 100
+            } action: { _, new in progress = new }
+            .onAppear { onScreen = true }
+            .onDisappear { onScreen = false }
+            .toolbar(.hidden, for: .navigationBar)
+            .overlay(alignment: .top) { homeHeader }
+            .sheet(isPresented: $showing) { ProfileSheet() }
+    }
+
+    private var homeHeader: some View {
+        HStack(alignment: .center, spacing: 0) {
+            PearWordmark(height: Self.logoHeight)
+                .shadow(color: .black.opacity(0.35), radius: 6)
+                .padding(.leading, 20)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+            Spacer(minLength: 0)
+            Button { showing = true } label: {
+                ProfileAvatar(profile: profiles.active, size: 32)
+                    .frame(width: 46, height: 46)
+                    .glassEffect(.regular.interactive(), in: .circle)
+            }
+            .buttonStyle(.plain)
+            .padding(.trailing, 16)
+            .allowsHitTesting(onScreen && progress < 0.5)
+            .accessibilityLabel("Profile")
+            .accessibilityValue(profiles.active.name)
+        }
+        .frame(height: Self.barHeight)
+        .padding(.top, Self.statusBar)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .ignoresSafeArea()
+        .opacity(onScreen ? 1 - progress : 0)
+        .offset(y: -progress * 8)                       // drifts up with the content instead of dropping
+        .animation(.easeOut(duration: 0.2), value: onScreen)
+    }
+
+    /// Scroll distance over which the Home header fades out.
+    private static let fadeDistance: CGFloat = 60
+
+    /// Height of the "pear." wordmark on Home (about 93 pt wide).
+    private static let logoHeight: CGFloat = 32
 
     private static let barHeight: CGFloat = 44
 
