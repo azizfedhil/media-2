@@ -29,24 +29,9 @@ final class HomeModel {
         }
     }
 
-    /// Two themed collections, different every day. A theme whose keywords return too little is skipped.
+    /// Two themed collections, different every day.
     func loadThemes() async {
-        guard TMDBClient.shared.hasKey else { themes = []; return }
-        let picks = ThemeCatalog.today(count: 2)
-        var done: [Int: ThemeRow] = [:]
-        await withTaskGroup(of: (Int, ThemeRow?).self) { group in
-            for (i, t) in picks.enumerated() {
-                group.addTask {
-                    let items = await TMDBClient.shared.themed(keywords: t.keywords)
-                    return (i, items.count >= 3 ? ThemeRow(id: "theme-\(t.title)", title: t.title, items: items) : nil)
-                }
-            }
-            for await (i, row) in group {
-                guard let row else { continue }
-                done[i] = row
-                themes = done.keys.sorted().compactMap { done[$0] }
-            }
-        }
+        await ThemeCatalog.load(count: 2) { [weak self] rows in self?.themes = rows }
     }
 
     func loadLists(selected: Set<Int>) async {
