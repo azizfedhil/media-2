@@ -1220,11 +1220,13 @@ private struct SkipOverlay: View {
     /// appears it goes away again after a few seconds. (The parent gives this view a new identity per episode.)
     @State private var fallbackUsed = false
     @State private var fallbackExpired = false
+    /// Resumed mid-episode (playback opened past the start): the manual skip isn't offered at all.
+    @State private var resumed = false
     private static let fallbackLife: Double = 12
 
     /// Would the manual button be on screen if it hadn't expired? Also drives the expiry timer.
     private var fallbackEligible: Bool {
-        guard loaded, segments.isEmpty, fallback != nil, !fallbackUsed else { return false }
+        guard loaded, !resumed, segments.isEmpty, fallback != nil, !fallbackUsed, !fallbackExpired else { return false }
         let p = playhead.position
         return playhead.duration > 0 && p >= 3 && p <= 420
     }
@@ -1237,7 +1239,7 @@ private struct SkipOverlay: View {
             return Choice(title: "Next Episode", symbol: "forward.end.fill", target: nil)
         }
         if let seg { return Choice(title: seg.label, symbol: "forward.fill", target: seg.end ?? d) }
-        if fallbackEligible, !fallbackExpired, let f = fallback {
+        if fallbackEligible, let f = fallback {
             return Choice(title: "Skip \(Int(f))s", symbol: "goforward", target: p + f, isFallback: true)
         }
         return nil
@@ -1263,8 +1265,8 @@ private struct SkipOverlay: View {
         }
         .animation(.snappy(duration: 0.25), value: c?.title)
         // Fresh timer every time the manual button becomes eligible (controls shown again); cleared when it stops.
+        .onAppear { resumed = playhead.position > 30 }
         .task(id: fallbackEligible) {
-            fallbackExpired = false
             guard fallbackEligible else { return }
             try? await Task.sleep(for: .seconds(Self.fallbackLife))
             if !Task.isCancelled { fallbackExpired = true }
