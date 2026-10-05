@@ -139,6 +139,16 @@ actor TMDBClient {
         try await get("/\(kind(type))/\(try await tmdbID(for: id, type: type))", ["append_to_response": "credits"])
     }
 
+    /// Cached details lookup for quick actions (long-press menus). nil when there is no key or the title fails to resolve.
+    private var detailsCache: [String: Details] = [:]
+    func cachedDetails(for id: String, type: String) async -> Details? {
+        guard hasKey else { return nil }
+        if let hit = detailsCache[id] { return hit }
+        guard let d = try? await details(for: id, type: type) else { return nil }
+        detailsCache[id] = d
+        return d
+    }
+
     /// Episodes of one season with still image, overview and TMDB rating.
     func episodes(for id: String, type: String, season: Int) async -> [EpisodeInfo] {
         let key = "\(id):\(season)"

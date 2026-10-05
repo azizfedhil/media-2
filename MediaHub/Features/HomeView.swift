@@ -437,6 +437,8 @@ private struct ContinueCard: View {
             Button("Remove from Continue Watching", systemImage: "xmark.circle", role: .destructive) {
                 withAnimation { history.remove(entry.id) }
             }
+            Divider()
+            PosterContextMenu(item: entry.item)
         }
     }
 
@@ -569,10 +571,13 @@ struct PressableStyle: ButtonStyle {
 
 /// Poster with a rating chip and an optional network icon (shows only). `width: nil` fills its grid column.
 /// `showsTitle` adds the title and year underneath (grids and search).
+/// Tap opens the detail page; long tap shows the actions dropdown (watched / library / details).
 struct PosterCard: View {
     let item: MetaPreview
     var width: CGFloat? = 130
     var showsTitle = false
+    @Environment(WatchHistory.self) private var history
+    @Environment(ThemeStore.self) private var theme
     @AppStorage("ui.networkBadges") private var showNetwork = true
     @State private var network: TMDBClient.NetworkBadge?
 
@@ -581,9 +586,48 @@ struct PosterCard: View {
     }
 
     var body: some View {
+        poster
+            .frame(width: width, alignment: .topLeading)
+            // Visible cards only (LazyHStack/LazyVGrid); cancelled when scrolled away, cached afterwards.
+            .task(id: item.id) {
+                network = nil
+                guard showNetwork, item.type == "series", TMDBClient.shared.hasKey else { return }
+                network = await TMDBClient.shared.network(for: item.id, type: item.type)
+            }
+            // Long tap: dropdown with mark as watched / add to library / details.
+            .posterContextMenu(item)
+    }
+
+    /// Checkmark shown over posters of titles marked as watched.
+    @ViewBuilder private var watchedBadge: some View {
+        if history.entry(for: item.id)?.isFinished == true {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 17, weight: .bold))
+                .foregroundStyle(.white, theme.accent)
+                .padding(6)
+                .accessibilityLabel("Watched")
+        }
+    }
+
+    private var poster: some View {
         NavigationLink(value: item) {
             VStack(alignment: .leading, spacing: 7) {
-                poster
+                RemoteImage(url: item.posterURL, size: (width ?? 120) * 1.5)
+                    .aspectRatio(2.0 / 3.0, contentMode: .fit)
+                    .frame(width: width)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .overlay(alignment: .topLeading) { watchedBadge }
+                    .overlay(alignment: .topLeading) {
+                        if let logo = network?.logo {
+                            LogoImage(url: logo)
+                                .frame(maxWidth: 34, maxHeight: 14)
+                                .padding(.horizontal, 6).padding(.vertical, 5)
+                                .background(.white.opacity(0.92), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                                .padding(6)
+                                .accessibilityLabel(network?.name ?? "")
+                        }
+                    }
+                    .overlay(alignment: .bottomLeading) { RatingChip(item: item).padding(6) }
                 if showsTitle {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(item.name).font(.footnote.weight(.semibold))
@@ -593,32 +637,7 @@ struct PosterCard: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
-            .frame(width: width, alignment: .topLeading)
         }
         .buttonStyle(PressableStyle())
-        // Visible cards only (LazyHStack/LazyVGrid); cancelled when scrolled away, cached afterwards.
-        .task(id: item.id) {
-            network = nil
-            guard showNetwork, item.type == "series", TMDBClient.shared.hasKey else { return }
-            network = await TMDBClient.shared.network(for: item.id, type: item.type)
-        }
-    }
-
-    private var poster: some View {
-        RemoteImage(url: item.posterURL, size: (width ?? 120) * 1.5)
-            .aspectRatio(2.0 / 3.0, contentMode: .fit)
-            .frame(width: width)
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay(alignment: .topLeading) {
-                if let logo = network?.logo {
-                    LogoImage(url: logo)
-                        .frame(maxWidth: 34, maxHeight: 14)
-                        .padding(.horizontal, 6).padding(.vertical, 5)
-                        .background(.white.opacity(0.92), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                        .padding(6)
-                        .accessibilityLabel(network?.name ?? "")
-                }
-            }
-            .overlay(alignment: .bottomLeading) { RatingChip(item: item).padding(6) }
     }
 }
