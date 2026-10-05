@@ -404,6 +404,7 @@ struct PlayerScreen: View {
     let onClose: () -> Void
     @Environment(WatchHistory.self) private var history
     @Environment(LocalLibrary.self) private var library
+    @Environment(WatchLog.self) private var watchLog
     @Environment(SimklStore.self) private var simkl
     @Environment(ThemeStore.self) private var theme
     @Environment(AddonStore.self) private var store
@@ -425,6 +426,8 @@ struct PlayerScreen: View {
     @State private var hideTask: Task<Void, Never>?
     @State private var scrobbled = false
     @State private var closing = false
+    /// When playback time was last added to the watch log.
+    @State private var lastTick = Date()
     /// True until the first frame plays: the "pear." loader covers the black screen while the source opens.
     @State private var launching = true
     @State private var switching: Int?
@@ -476,6 +479,7 @@ struct PlayerScreen: View {
             // Coarse 10 s tick: negligible wakeups, still good resume accuracy.
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(10))
+                logPlayTime()
                 save()
             }
         }
@@ -1144,6 +1148,15 @@ struct PlayerScreen: View {
         }
     }
 
+    /// Adds the time since the last call to the watch log (only while the video is actually playing).
+    private func logPlayTime() {
+        let now = Date()
+        if model.isPlaying && !model.isPaused && !model.isBuffering {
+            watchLog.record(seconds: min(now.timeIntervalSince(lastTick), 20), at: now)
+        }
+        lastTick = now
+    }
+
     private func save() {
         let p = model.playhead.position, d = model.playhead.duration
         guard d > 0, p > 0 else { return }
@@ -1157,6 +1170,8 @@ struct PlayerScreen: View {
     /// Saves progress and tells Simkl we stopped. Used when leaving an episode (close or switch).
     private func finalizeCurrent() {
         hideTask?.cancel()
+        logPlayTime()
+        watchLog.flush()
         save()
         let d = model.playhead.duration
         if d > 0 { simkl.scrobble("stop", current, progress: model.playhead.position / d * 100) }
