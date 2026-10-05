@@ -15,15 +15,20 @@ actor AddonClient {
         session = URLSession(configuration: cfg)
     }
 
-    private func data(_ url: URL) async throws -> Data {
-        let (d, resp) = try await session.data(from: url)
+    private func data(_ url: URL, fresh: Bool = false) async throws -> Data {
+        var req = URLRequest(url: url)
+        if fresh { req.cachePolicy = .reloadIgnoringLocalCacheData }
+        let (d, resp) = try await session.data(for: req)
         guard (resp as? HTTPURLResponse)?.statusCode == 200 else { throw URLError(.badServerResponse) }
         return d
     }
 
-    func manifest(at url: URL) async throws -> AddonManifest {
-        try JSONDecoder().decode(AddonManifest.self, from: try await data(url))
+    func manifest(at url: URL, fresh: Bool = false) async throws -> AddonManifest {
+        try JSONDecoder().decode(AddonManifest.self, from: try await data(url, fresh: fresh))
     }
+
+    /// Drops every cached catalog / manifest response, so the next fetch goes to the network.
+    func clearCache() { session.configuration.urlCache?.removeAllCachedResponses() }
 
     /// `skip` pages through add-ons that declare it; `search` queries add-ons that declare it.
     func catalog(addon: Addon, catalog: AddonManifest.CatalogDef, skip: Int = 0, search: String? = nil) async throws -> [MetaPreview] {
