@@ -12,7 +12,7 @@ enum SettingsBackup {
     static let keys = [
         "addon.manifestURLs", "tmdb.key", "tvdb.key", "tvdb.pin", "mdblist.key", "mdblist.lists", "simkl.clientID",
         "ui.accent", "ui.networkBadges", "ui.titleLogos", "player.glass", "player.autoplayNext",
-        "skip.enabled", "skip.fallbackSeconds", "sub.lang", "sub.style", "library.collapsed",
+        "skip.enabled", "skip.fallbackSeconds", "sub.lang", "sub.style", "subs.online", "subs.baseURL", "library.collapsed",
         "profiles.list", "profiles.active", "pinned.sources",
     ]
     /// Per-profile data: "watch.history" and "library.local", plus their ".<profile id>" variants.
