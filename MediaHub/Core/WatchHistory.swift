@@ -36,6 +36,9 @@ final class WatchHistory {
 
     init() { entries = Self.read(storeKey) }
 
+    /// Re-reads the active profile's history from storage (after a settings import).
+    func reload() { profileID = ProfileKeys.activeID; entries = Self.read(storeKey) }
+
     /// Switches to another profile's history. No-op when it is already loaded.
     func load(profile id: String) {
         guard id != profileID else { return }
