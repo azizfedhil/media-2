@@ -23,6 +23,13 @@ targets:
       properties:
         # Needed for Picture in Picture and audio when the app is backgrounded.
         UIBackgroundModes: [audio]
+        # The whole app UI is portrait-only; the player opts into landscape at runtime through
+        # UIWindowScene.requestGeometryUpdate (see Core/Orientation.swift). All four masks are listed so
+        # UIKit permits those runtime requests; the scene's supported set stays portrait outside the player.
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
         # Many debrid links are plain http://. The player engine fetches with URLSession (not AVFoundation),
         # so it needs the general exception; the ForMedia key alone only covers AVPlayer.
         NSAppTransportSecurity:

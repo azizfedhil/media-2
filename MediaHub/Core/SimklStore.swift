@@ -358,7 +358,8 @@ final class SimklStore {
     }
 
     func addToWatchlist(_ imdb: String, type: String) async {
-        let body: [String: Any] = [type == "series" ? "shows" : "movies": [["to": "plantowatch", "ids": ["imdb": imdb]]]]
+        // "Add to Watchlist" means Watching (not Plan to Watch). Same /sync/add-to-list call as before.
+        let body: [String: Any] = [type == "series" ? "shows" : "movies": [["to": "watching", "ids": ["imdb": imdb]]]]
         await refreshIfNeeded()
         _ = try? await URLSession.shared.data(for: request("/sync/add-to-list", method: "POST", body: body))
         await sync(force: true)

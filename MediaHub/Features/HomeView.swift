@@ -129,6 +129,9 @@ struct HomeView: View {
     @State private var model = HomeModel()
     /// Colour pulled from the current hero artwork; washes softly behind the first rows.
     @State private var tint: Color?
+    /// Home's own profile avatar visibility, driven by scroll position (see `homeProfileBadge`).
+    @State private var profileVisible = true
+    @State private var showingProfiles = false
     private var selectedLists: Set<Int> { Set(mdbLists.split(separator: ",").compactMap { Int($0) }) }
 
     var body: some View {
@@ -146,9 +149,19 @@ struct HomeView: View {
                 .animation(.smooth(duration: 0.5), value: model.rows.count + model.suggested.count + model.lists.count + model.upNext.count)
                 .background(alignment: .top) { ambient }
             }
+            // Home drives the profile avatar itself, independently of the Liquid Glass navigation bar:
+            // visible at the top, faded out once the feed scrolls down, back in when it returns to the top.
+            // (The nav bar keeps its normal expansion/collapse behaviour untouched.)
+            .onScrollGeometryChange(for: CGFloat.self) { g in max(0, g.contentOffset.y) } action: { _, y in
+                let next: Bool
+                if y < 8 { next = true }          // near the top → show
+                else if y > 24 { next = false }   // clearly scrolled → hide
+                else { next = profileVisible }    // hysteresis band: keep the current state
+                if next != profileVisible { profileVisible = next }
+            }
+            .overlay(alignment: .topTrailing) { homeProfileBadge }
             .ignoresSafeArea(edges: .top)
             .navigationBarTitleDisplayMode(.inline)
-            .profileToolbar()
             .scrollIndicators(.hidden)
             .refreshable { await refresh() }
             .overlay { if model.rows.isEmpty && model.suggested.isEmpty { ProgressView() } }

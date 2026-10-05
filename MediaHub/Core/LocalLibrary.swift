@@ -5,7 +5,7 @@ import Observation
 /// whenever Simkl isn't connected (Simkl, when connected, is the library instead).
 @MainActor @Observable
 final class LocalLibrary {
-    enum Status: String, Codable, Sendable { case planToWatch, watched }
+    enum Status: String, Codable, Sendable { case planToWatch, watching, watched }
 
     struct Entry: Codable, Identifiable, Hashable {
         let item: MetaPreview
@@ -70,10 +70,17 @@ final class LocalLibrary {
 
     // MARK: Rows for the Library tab
 
-    /// "Watching" comes from the profile's watch history; the other two are what the user saved.
+    /// "Watching" comes from the profile's watch history plus titles explicitly saved as watching;
+    /// the other two rows are what the user saved.
     func rows(watching: [MetaPreview]) -> [CatalogRow] {
         let watched = entries.filter { $0.status == .watched }
-        let inProgress = watching.filter { w in !watched.contains { $0.item.id == w.id || $0.alias == w.id } }
+        let savedWatching = entries.filter { $0.status == .watching }.map(\.item)
+        // History progress first, then explicit Watchlist adds; a title never appears in both.
+        var inProgress = watching.filter { w in !watched.contains { $0.item.id == w.id || $0.alias == w.id } }
+        for item in savedWatching where !inProgress.contains(where: { $0.id == item.id }) &&
+                                      !watched.contains(where: { $0.item.id == item.id || $0.alias == item.id }) {
+            inProgress.append(item)
+        }
         var out: [CatalogRow] = []
         func add(_ key: String, _ title: String, _ symbol: String, _ items: [MetaPreview]) {
             guard !items.isEmpty else { return }
