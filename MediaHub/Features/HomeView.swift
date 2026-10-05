@@ -123,6 +123,7 @@ struct HomeView: View {
     @Environment(AddonStore.self) private var store
     @Environment(WatchHistory.self) private var history
     @Environment(ThemeStore.self) private var theme
+    @Environment(ProfileStore.self) private var profiles
     @AppStorage("tmdb.key") private var tmdbKey = ""
     @AppStorage("mdblist.key") private var mdbKey = ""
     @AppStorage("mdblist.lists") private var mdbLists = ""
@@ -160,6 +161,7 @@ struct HomeView: View {
                 if next != profileVisible { profileVisible = next }
             }
             .overlay(alignment: .topTrailing) { homeProfileBadge }
+            .sheet(isPresented: $showingProfiles) { ProfileSheet() }
             .ignoresSafeArea(edges: .top)
             .navigationBarTitleDisplayMode(.inline)
             .scrollIndicators(.hidden)
@@ -180,6 +182,26 @@ struct HomeView: View {
         LinearGradient(colors: [t.opacity(0.7), t.opacity(0.25), .clear], startPoint: .top, endPoint: .bottom)
             .frame(height: 1100)
             .allowsHitTesting(false)
+    }
+
+    /// Home's own profile avatar, floating top-right over the feed (kept in sync with `profileVisible`).
+    /// Kept as a small extracted subview so the body above stays cheap for the type checker.
+    private var homeProfileBadge: some View {
+        Button {
+            showingProfiles = true
+        } label: {
+            ProfileAvatar(profile: profiles.active, size: 30)
+                .padding(5)
+                .background(.ultraThinMaterial, in: Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Profile")
+        .accessibilityValue(profiles.active.name)
+        .opacity(profileVisible ? 1 : 0)
+        .scaleEffect(profileVisible ? 1 : 0.85)
+        .animation(.smooth(duration: 0.3), value: profileVisible)
+        .allowsHitTesting(profileVisible)
+        .safeAreaPadding([.top, .trailing], 14)
     }
 
     private func refresh() async {
