@@ -408,18 +408,18 @@ struct DetailView: View {
                 ForEach(seasonChips) { c in
                     Button { select(season: c.id) } label: {
                         VStack(alignment: .leading, spacing: 6) {
-                            RemoteImage(url: c.poster, size: 84).frame(width: 84, height: 126)
-                                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            RemoteImage(url: c.poster, size: 56).frame(width: 56, height: 84)
+                                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                                 .overlay(alignment: .topLeading) {
                                     if isSeasonWatched(c.id) {
                                         Image(systemName: "checkmark.circle.fill")
-                                            .font(.system(size: 15, weight: .bold))
-                                            .foregroundStyle(.white, theme.accent).padding(5)
+                                            .font(.system(size: 12, weight: .bold))
+                                            .foregroundStyle(.white, theme.accent).padding(3)
                                     }
                                 }
                                 .overlay {
-                                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                        .strokeBorder(Color.accentColor, lineWidth: c.id == season ? 3 : 0)
+                                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                        .strokeBorder(Color.accentColor, lineWidth: c.id == season ? 2 : 0)
                                 }
                             Text(c.title).font(.caption.weight(.medium)).lineLimit(1)
                             if let n = c.count { Text("\(n) episodes").font(.caption2).foregroundStyle(.secondary) }
