@@ -10,6 +10,7 @@ final class ExploreModel {
     private(set) var genres: [TMDBClient.Genre] = []
     private(set) var isLoading = false
     private(set) var hasMore = true
+    private(set) var themes: [ThemeRow] = []
     private var page = 0
     private var generation = 0
 
@@ -29,6 +30,13 @@ final class ExploreModel {
     func setYear(_ y: Int?) async { guard y != year else { return }; year = y; await reload() }
     func setSort(_ s: DiscoverSort) async { guard s != sort else { return }; sort = s; await reload() }
     func clearFilters() async { genre = nil; year = nil; sort = .popular; await reload() }
+
+    /// Three themed rows (the ones after Home's), shown above the grid while no filter is active.
+    func loadThemes() async {
+        await ThemeCatalog.load(count: 3, offset: 2, limit: 16) { [weak self] rows in self?.themes = rows }
+    }
+    /// Movies tab shows movie rows, Shows tab shows series rows.
+    var themeRows: [ThemeRow] { themes.compactMap { $0.filtered(type: kind == "tv" ? "series" : "movie") } }
 
     func loadGenres() async {
         let k = kind
@@ -83,8 +91,9 @@ struct ExploreView: View {
         .task(id: tmdbKey) {
             guard !tmdbKey.isEmpty else { return }
             async let g: () = model.loadGenres()
+            async let t: () = model.loadThemes()
             if model.items.isEmpty { await model.reload() }
-            await g
+            _ = await (g, t)
         }
     }
 
@@ -92,6 +101,12 @@ struct ExploreView: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 14) {
                 filters
+                if !model.hasFilters && !model.themeRows.isEmpty {
+                    VStack(alignment: .leading, spacing: 26) {
+                        ForEach(model.themeRows) { ThemeCarousel(row: $0) }
+                    }
+                    .padding(.bottom, 10)
+                }
                 HStack(spacing: 8) {
                     Image(systemName: model.isTrending ? "flame.fill" : "line.3.horizontal.decrease.circle.fill")
                         .foregroundStyle(model.isTrending ? .orange : Color.accentColor)
@@ -115,7 +130,11 @@ struct ExploreView: View {
             .padding(.vertical, 8)
         }
         .scrollIndicators(.hidden)
-        .refreshable { await model.reload() }
+        .refreshable {
+            async let t: () = model.loadThemes()
+            await model.reload()
+            await t
+        }
     }
 
     private var heading: String {
