@@ -53,16 +53,7 @@ final class PlayerModel {
 
     let playhead = Playhead()
 
-    /// Identity of the media the playhead currently describes (url + S/E). Progress writes are only
-    /// valid while this matches the request being played; see `PlayheadOwner.isCurrent`.
-    @ObservationIgnored private(set) var loadingFor: PlayRequest?
-    @ObservationIgnored private(set) var playingFor: PlayRequest?
-
     @ObservationIgnored private var bag = Set<AnyCancellable>()
-    /// Generation counter bumped on every new item. Engine events captured before a switch carry the
-    /// generation active when they were published, so late duration/clock values from the previous
-    /// episode can never be applied to the playhead of the next one.
-    @ObservationIgnored private var loadGen = 0
     @ObservationIgnored private var allCues: [SubCue] = []
     @ObservationIgnored private var mappedCount = 0
     @ObservationIgnored private var mappedFirst: Double?
@@ -96,10 +87,9 @@ final class PlayerModel {
         }
         guard let engine else { return }
         bind(engine)
-        resetForNewItem(r)
+        resetForNewItem()
         let startAt = (resume ?? 0) > 30 ? (resume ?? 0) : 0
         if startAt > 0 { playhead.position = startAt }      // seek bar shows the resume point while loading
-        let gen = loadGen
         do {
             if replacing { engine.stop() }
             var options = LoadOptions(httpHeaders: r.headers)
@@ -113,10 +103,8 @@ final class PlayerModel {
             // Open straight at the resume point. Loading at 0:00, playing, then seeking made the engine fetch the
             // head of the file, throw it away, and restart its producer at the target: the cut-and-reload on resume.
             try await engine.load(url: r.url, startPosition: startAt, options: options)
-            // The screen may have been closed — or another episode started — while this source was loading.
+            // The screen may have been closed while the source was loading.
             if isShutDown { engine.stop(); return }
-            guard gen == loadGen, loadingFor?.url == r.url else { return }
-            playingFor = r
             engine.play()
         } catch {
             self.error = error.localizedDescription
@@ -124,9 +112,7 @@ final class PlayerModel {
         }
     }
 
-    private func resetForNewItem(_ r: PlayRequest) {
-        loadGen += 1
-        loadingFor = r; playingFor = nil
+    private func resetForNewItem() {
         error = nil; didEnd = false
         isPlaying = false; isPaused = false
         setBuffering(true); showSpinner = true
@@ -137,13 +123,6 @@ final class PlayerModel {
         // Default language on first start, then whatever the viewer picked, across episodes.
         autoSelectSubtitle = preferredSubtitleLanguage != nil
         rateStale = rate != 1
-    }
-
-    /// True when `r` is still the item whose media the playhead describes. Used to reject progress
-    /// writes that would attribute one episode's position/duration to another episode.
-    func isCurrent(_ r: PlayRequest) -> Bool {
-        guard let live = playingFor ?? loadingFor else { return false }
-        return live.id == r.id && live.url == r.url
     }
 
     private func bind(_ engine: AetherEngine) {
@@ -162,29 +141,14 @@ final class PlayerModel {
             }
         }.store(in: &bag)
         engine.$duration.receive(on: DispatchQueue.main).sink { [weak self] d in
-            guard let self else { return }
-            // Duration published just before an episode switch belongs to the previous item. The
-            // generation captured here is compared on the main queue: if a new load started in the
-            // meantime, this stale value is dropped instead of becoming the new episode's duration
-            // (which could make a mid-episode position look like completion).
-            let gen = self.loadGen
-            DispatchQueue.main.async {
-                guard gen == self.loadGen else { return }
-                self.playhead.duration = Double(d)
-            }
+            self?.playhead.duration = Double(d)
         }.store(in: &bag)
         // 4 Hz is plenty for a progress bar.
         engine.clock.$currentTime
             .throttle(for: .milliseconds(250), scheduler: DispatchQueue.main, latest: true)
             .sink { [weak self] t in
                 guard let self, !playhead.scrubbing, !seekInFlight else { return }
-                // Same generation rule as duration: a clock tick queued around a switch must never
-                // write the previous episode's position into the new playhead.
-                let pos = Double(t), gen = self.loadGen
-                DispatchQueue.main.async {
-                    guard gen == self.loadGen else { return }
-                    self.playhead.position = pos
-                }
+                playhead.position = Double(t)
             }.store(in: &bag)
         // Buffered-ahead position drives the lighter segment of the seek bar; 2 Hz is plenty.
         engine.clock.$bufferedPosition
@@ -1046,25 +1010,19 @@ struct PlayerScreen: View {
     }
 
     private func save() {
-        let r = current
-        // Only the item the playhead actually describes may be written: if an episode switch is in
-        // flight, position/duration still belong to the previous episode and saving them against the
-        // new request would mark the wrong episode (possibly as complete).
-        guard model.isCurrent(r) else { return }
         let p = model.playhead.position, d = model.playhead.duration
         guard d > 0, p > 0 else { return }
-        history.update(r.item, key: r.key, position: p, duration: d,
-                       season: r.season, episode: r.episode,
-                       episodeTitle: r.episodeTitle, thumb: r.thumb?.absoluteString)
+        history.update(current.item, key: current.key, position: p, duration: d,
+                       season: current.season, episode: current.episode,
+                       episodeTitle: current.episodeTitle, thumb: current.thumb?.absoluteString)
         // A saved movie that has been watched through moves to "Watched" (Simkl does this itself when connected).
-        if r.item.type == "movie", p >= d * 0.92 { library.markWatchedIfSaved(r.item.id) }
+        if current.item.type == "movie", p >= d * 0.92 { library.markWatchedIfSaved(current.item.id) }
     }
 
     /// Saves progress and tells Simkl we stopped. Used when leaving an episode (close or switch).
     private func finalizeCurrent() {
         hideTask?.cancel()
         save()
-        guard model.isCurrent(current) else { return }
         let d = model.playhead.duration
         if d > 0 { simkl.scrobble("stop", current, progress: model.playhead.position / d * 100) }
     }

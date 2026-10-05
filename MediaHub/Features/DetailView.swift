@@ -215,15 +215,7 @@ struct DetailView: View {
         .accessibilityLabel(isWatched ? "Unmark as watched" : "Mark as watched")
     }
 
-    /// Explicit watched state only (whole-show flag, or every listed episode of every season marked).
-    /// Never inferred from playback progress: a finished/resumed episode can't flip the show's checkmark.
-    private var isWatched: Bool {
-        if history.isSeriesWatched(item.id) { return true }
-        guard isSeries else { return false }
-        let seasons = (details?.seasons ?? []).filter { ($0.episodeCount ?? 0) > 0 }
-        guard !seasons.isEmpty else { return false }
-        return seasons.allSatisfy { s in history.watchedCount(inSeason: item.id, season: s.seasonNumber) >= s.episodeCount! }
-    }
+    private var isWatched: Bool { history.entry(for: item.id)?.isFinished ?? false }
     private var inList: Bool { library.entry(for: item.id) != nil }
     private var listSaved: Bool { simkl.isConnected ? onWatchlist : inList }
 
@@ -374,35 +366,39 @@ struct DetailView: View {
         .scrollIndicators(.hidden)
     }
 
-    /// Per-season watched counts, straight from the explicit `watchedEpisodes` set — never inferred
-    /// from a playback-progress marker (the old "furthest watched episode" prefix logic is gone).
+    /// The show's watched marker sits on its last-watched episode; a season counts when that episode is inside it.
     private func seasonProgress(_ s: Int) -> (watchedEpisodes: Int, total: Int)? {
-        let total = details?.seasons?.first(where: { $0.seasonNumber == s })?.episodeCount
-            ?? (s == season && !episodes.isEmpty ? episodes.count : nil)
+        guard let en = history.entry(for: item.id), en.isFinished, let se = en.seasonEpisode else { return nil }
+        let total: Int?
+        if se.season == s { total = episodes.isEmpty ? details?.seasons?.first(where: { $0.seasonNumber == s })?.episodeCount : episodes.count }
+        else { total = details?.seasons?.first(where: { $0.seasonNumber == s })?.episodeCount }
         guard let total, total > 0 else { return nil }
-        return (min(history.watchedCount(inSeason: item.id, season: s), total), total)
+        if se.season < s { return (total, total) }
+        guard se.season == s else { return nil }
+        return (min(se.episode, total), total)
     }
 
     private func isSeasonWatched(_ s: Int) -> Bool {
-        if history.isSeriesWatched(item.id) { return true }
         guard let p = seasonProgress(s) else { return false }
         return p.watchedEpisodes >= p.total
     }
 
-    /// The real episode numbers of one season (loaded list, else TMDB's count).
-    private func seasonEpisodeNumbers(_ s: Int) -> [Int] {
-        if s == season, !episodes.isEmpty { return episodes.map(\.id) }
-        if let count = details?.seasons?.first(where: { $0.seasonNumber == s })?.episodeCount, count > 0 {
-            return Array(1...count)
-        }
-        return []
-    }
-
-    /// Marks/unmarks exactly the listed episodes of this season. Other seasons and the whole-show
-    /// flag are untouched; no progress record is created or modified.
     private func setSeasonWatched(_ s: Int, _ watched: Bool) {
         withAnimation {
-            history.setSeasonWatched(item.id, season: s, episodes: seasonEpisodeNumbers(s), watched: watched)
+            if watched {
+                let count = details?.seasons?.first(where: { $0.seasonNumber == s })?.episodeCount
+                    ?? (s == season && !episodes.isEmpty ? episodes.count : nil)
+                    ?? 10
+                TitleActions.markWatched(item, history: history, season: s, episode: count)
+            } else if isSeasonWatched(s), let en = history.entry(for: item.id), let se = en.seasonEpisode {
+                // Pull the marker back to the last episode of the previous season.
+                let prevSeason = max(se.season - 1, 1)
+                let prevCount = details?.seasons?.first(where: { $0.seasonNumber == prevSeason })?.episodeCount ?? 10
+                history.markWatched(item, key: "\(prevSeason):\(prevCount)", season: prevSeason, episode: prevCount,
+                                    duration: en.duration)
+            } else {
+                history.unmarkWatched(item.id)
+            }
         }
     }
 
@@ -522,16 +518,22 @@ struct DetailView: View {
         .buttonStyle(.plain)
         .contextMenu {
             Button("Mark as Watched", systemImage: "checkmark.circle") {
-                withAnimation { TitleActions.setEpisodeWatched(item, history: history, season: season, episode: ep.id, watched: true) }
-            }
-            Button("Unmark as Watched", systemImage: "circle", role: .destructive) {
-                withAnimation { TitleActions.setEpisodeWatched(item, history: history, season: season, episode: ep.id, watched: false) }
+                withAnimation {
+                    history.markWatched(item, key: "\(season):\(ep.id)", season: season, episode: ep.id,
+                                        duration: Double(ep.runtime ?? 45) * 60,
+                                        episodeTitle: ep.name, thumb: ep.image?.absoluteString)
+                }
             }
             Button("Mark Episodes Until Here as Watched", systemImage: "checkmark.circle.fill") {
                 withAnimation {
-                    // Only this season's listed episodes up to (and including) this one — never other seasons.
-                    history.setThroughWatched(item.id, season: season, listedEpisodes: episodes.map(\.id),
-                                              upToEpisode: ep.id, watched: true)
+                    history.markThrough(episode: ep.id, season: season, item: item,
+                                        duration: Double(ep.runtime ?? 45) * 60,
+                                        episodeTitle: ep.name, thumb: ep.image?.absoluteString)
+                }
+            }
+            Button("Unmark as Watched", systemImage: "circle", role: .destructive) {
+                withAnimation {
+                    history.unmarkThrough(episode: ep.id, season: season, item: item)
                 }
             }
         }
