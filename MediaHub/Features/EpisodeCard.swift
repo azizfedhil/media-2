@@ -35,7 +35,7 @@ struct EpisodeCard<Actions: View>: View {
         .frame(width: Self.width, height: Self.height)
         .overlay(alignment: .topLeading) { if watched { badge("checkmark.circle.fill", "Watched") } }
         .overlay(alignment: .topTrailing) {
-            if let r = ep.rating, r > 0 { badge(nil, String(format: "★ %.1f", r)) }
+            if let r = ep.rating, r > 0 { ratingBadge(r) }
         }
         .overlay(alignment: .bottomLeading) { text }
         .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
@@ -77,6 +77,19 @@ struct EpisodeCard<Actions: View>: View {
         .foregroundStyle(.white)
         .padding(.horizontal, 16).padding(.bottom, 14)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .allowsHitTesting(false)
+    }
+
+    /// Episode ratings come from TMDB, so the badge carries the TMDB mark.
+    private func ratingBadge(_ r: Double) -> some View {
+        HStack(spacing: 5) {
+            RatingLogo(label: "TMDB", height: 11)
+            Text(String(format: "%.1f", r)).monospacedDigit()
+        }
+        .font(.caption2.bold()).foregroundStyle(.white)
+        .padding(.horizontal, 8).padding(.vertical, 4)
+        .background(.black.opacity(0.55), in: Capsule())
+        .padding(10)
         .allowsHitTesting(false)
     }
 
