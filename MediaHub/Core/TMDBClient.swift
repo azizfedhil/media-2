@@ -43,6 +43,35 @@ actor TMDBClient {
 
     private static let img = "https://image.tmdb.org/t/p/"
 
+    struct Video: Decodable, Identifiable, Sendable, Hashable {
+        let id: String; let key: String; let name: String; let site: String; let type: String
+        let official: Bool?; let publishedAt: String?
+        var thumbnail: URL? { URL(string: "https://i.ytimg.com/vi/\(key)/hqdefault.jpg") }
+        var watchURL: URL? { URL(string: "https://www.youtube.com/watch?v=\(key)") }
+    }
+    private struct VideoPage: Decodable { let results: [Video] }
+    private var videoCache: [String: [Video]] = [:]
+
+    /// YouTube trailers, teasers and clips, trailers first, official and newest first within a kind.
+    func videos(for id: String, type: String) async -> [Video] {
+        guard hasKey else { return [] }
+        if let hit = videoCache[id] { return hit }
+        guard let tid = try? await tmdbID(for: id, type: type),
+              let p: VideoPage = try? await get("/\(kind(type))/\(tid)/videos", ["include_video_language": "en,null"]) else { return [] }
+        func rank(_ t: String) -> Int {
+            switch t { case "Trailer": return 0; case "Teaser": return 1; case "Clip": return 2
+            case "Featurette": return 3; case "Behind the Scenes": return 4; default: return 9 }
+        }
+        let out = p.results.filter { $0.site == "YouTube" && rank($0.type) < 9 }.sorted { a, b in
+            if rank(a.type) != rank(b.type) { return rank(a.type) < rank(b.type) }
+            if (a.official ?? false) != (b.official ?? false) { return a.official ?? false }
+            return (a.publishedAt ?? "") > (b.publishedAt ?? "")
+        }
+        let limited = Array(out.prefix(10))
+        videoCache[id] = limited
+        return limited
+    }
+
     /// Broadcaster / streamer icon shown on show posters.
     struct NetworkBadge: Sendable { let name: String; let logo: URL? }
     private struct TVNetworks: Decodable {
