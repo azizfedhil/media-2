@@ -448,7 +448,7 @@ struct DetailView: View {
                 ScrollView(.horizontal) {
                     LazyHStack(spacing: 12) {
                         if loadingEpisodes && episodes.isEmpty {
-                            ProgressView().frame(width: 280, height: 158)
+                            ProgressView().frame(width: EpisodeCard<EmptyView>.width, height: EpisodeCard<EmptyView>.height)
                         }
                         ForEach(episodes) { episodeCard($0).id($0.id) }
                     }
@@ -469,54 +469,10 @@ struct DetailView: View {
     }
 
     private func episodeCard(_ ep: EpisodeItem) -> some View {
-        let selected = ep.id == episode
-        return Button { userPicked = true; episode = ep.id; showSources = true } label: {
-            RemoteImage(url: ep.image, size: 300)
-                .frame(width: 280, height: 158)
-                .overlay(alignment: .bottom) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("\(ep.id). \(ep.name)").font(.subheadline.bold()).lineLimit(1)
-                        if let o = ep.overview, !o.isEmpty {
-                            Text(o).font(.caption).lineLimit(2).opacity(0.85)
-                        }
-                    }
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 12).padding(.bottom, 10).padding(.top, 36)
-                    .background(LinearGradient(colors: [.clear, .black.opacity(0.85)], startPoint: .top, endPoint: .bottom))
-                }
-                .overlay(alignment: .topTrailing) {
-                    if let r = ep.rating, r > 0 {
-                        HStack(spacing: 4) {
-                            RatingLogo(label: "TMDB", height: 11)
-                            Text(String(format: "%.1f", r))
-                        }
-                        .font(.caption2.bold()).foregroundStyle(.white)
-                        .padding(.horizontal, 8).padding(.vertical, 4)
-                        .background(.black.opacity(0.6), in: Capsule())
-                        .padding(8)
-                    }
-                }
-                .overlay(alignment: .topLeading) {
-                    if history.isWatched(id: item.id, season: season, episode: ep.id) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "checkmark.circle.fill")
-                            Text("Watched")
-                        }
-                        .font(.caption2.bold()).foregroundStyle(.white)
-                        .padding(.horizontal, 8).padding(.vertical, 4)
-                        .background(.black.opacity(0.6), in: Capsule())
-                        .padding(8)
-                    }
-                }
-                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .strokeBorder(Color.accentColor, lineWidth: selected ? 3 : 0)
-                }
-        }
-        .buttonStyle(.plain)
-        .contextMenu {
+        EpisodeCard(ep: ep, selected: ep.id == episode,
+                    watched: history.isWatched(id: item.id, season: season, episode: ep.id),
+                    onTap: { userPicked = true; episode = ep.id; showSources = true }) {
+            // Same actions in the long-press menu and the card's "..." button.
             Button("Mark as Watched", systemImage: "checkmark.circle") {
                 withAnimation {
                     history.markWatched(item, key: "\(season):\(ep.id)", season: season, episode: ep.id,
