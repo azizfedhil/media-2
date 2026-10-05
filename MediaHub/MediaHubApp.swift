@@ -86,12 +86,18 @@ struct MediaHubApp: App {
     @State private var profiles = ProfileStore()
     @State private var library = LocalLibrary()
 
+    init() {
+        // Builds the "pear." animation outlines in the background so the intro starts on its first frame.
+        Task.detached(priority: .userInitiated) { _ = PearGeometry.shared }
+    }
+
     var body: some Scene {
         WindowGroup {
             RootView()
                 .environment(store).environment(history).environment(simkl).environment(pins).environment(theme)
                 .environment(profiles).environment(library)
                 .preferredColorScheme(Theme.forceDark ? .dark : nil)
+                .pearLaunchScreen()
         }
     }
 }
