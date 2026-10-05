@@ -13,6 +13,7 @@ final class HomeModel {
     var suggested: [CatalogRow] = []
     var lists: [CatalogRow] = []
     var upNext: [UpNextItem] = []
+    var themes: [ThemeRow] = []
 
     /// Next episode for each show whose last episode you finished. Resolved concurrently, order kept.
     func loadUpNext(_ entries: [WatchHistory.Entry]) async {
@@ -24,6 +25,26 @@ final class HomeModel {
             for await (i, n) in group {
                 if let n { done[i] = n }
                 upNext = done.keys.sorted().compactMap { done[$0] }
+            }
+        }
+    }
+
+    /// Two themed collections, different every day. A theme whose keywords return too little is skipped.
+    func loadThemes() async {
+        guard TMDBClient.shared.hasKey else { themes = []; return }
+        let picks = ThemeCatalog.today(count: 2)
+        var done: [Int: ThemeRow] = [:]
+        await withTaskGroup(of: (Int, ThemeRow?).self) { group in
+            for (i, t) in picks.enumerated() {
+                group.addTask {
+                    let items = await TMDBClient.shared.themed(keywords: t.keywords)
+                    return (i, items.count >= 3 ? ThemeRow(id: "theme-\(t.title)", title: t.title, items: items) : nil)
+                }
+            }
+            for await (i, row) in group {
+                guard let row else { continue }
+                done[i] = row
+                themes = done.keys.sorted().compactMap { done[$0] }
             }
         }
     }
@@ -139,12 +160,14 @@ struct HomeView: View {
                     if !history.continueEntries.isEmpty || !model.upNext.isEmpty {
                         ContinueRow(entries: history.continueEntries, upNext: model.upNext)
                     }
+                    if let t = model.themes.first { ThemeCarousel(row: t) }
                     ForEach(model.suggested) { CatalogRowView(row: $0) }
+                    if model.themes.count > 1 { ThemeCarousel(row: model.themes[1]) }
                     ForEach(model.lists) { CatalogRowView(row: $0) }
                     ForEach(model.rows) { CatalogRowView(row: $0) }
                 }
                 .padding(.bottom, 40)
-                .animation(.smooth(duration: 0.5), value: model.rows.count + model.suggested.count + model.lists.count + model.upNext.count)
+                .animation(.smooth(duration: 0.5), value: model.rows.count + model.suggested.count + model.lists.count + model.upNext.count + model.themes.count)
                 .background(alignment: .top) { ambient }
             }
             .ignoresSafeArea(edges: .top)
@@ -157,6 +180,7 @@ struct HomeView: View {
             .navigationDestination(for: ResumeTarget.self) { DetailView(item: $0.item, startSeason: $0.season, startEpisode: $0.episode) }
             .navigationDestination(for: CatalogRow.self) { CatalogGridView(row: $0) }
             .task(id: store.addons.map(\.id)) { await model.load(addons: store.addons) }
+            .task(id: tmdbKey) { await model.loadThemes() }
             .task(id: mdbKey + mdbLists) { await model.loadLists(selected: selectedLists) }
             .task(id: tmdbKey + (history.lastWatched?.id ?? "")) { await model.loadSuggestions(last: history.lastWatched) }
             .task(id: history.finishedSeries) { await model.loadUpNext(history.finishedEntries) }
@@ -175,7 +199,8 @@ struct HomeView: View {
         async let b: () = model.loadSuggestions(last: history.lastWatched)
         async let c: () = model.loadLists(selected: selectedLists)
         async let d: () = model.loadUpNext(history.finishedEntries)
-        _ = await (a, b, c, d)
+        async let e: () = model.loadThemes()
+        _ = await (a, b, c, d, e)
     }
 }
 
