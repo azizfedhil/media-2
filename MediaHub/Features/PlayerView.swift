@@ -394,6 +394,9 @@ struct PlayerScreen: View {
     @State private var nextEp: NextEpisode?
     @State private var segments: [SkipSegment] = []
     @State private var segmentsLoaded = false
+    /// Shown above the title while paused. Both load in the background at start, so pausing never waits on the network.
+    @State private var pausedLogo: UIImage?
+    @State private var pausedOverview: String?
 
     init(request: PlayRequest, provider: EpisodeProvider? = nil, onClose: @escaping () -> Void) {
         _current = State(initialValue: request)
@@ -408,7 +411,7 @@ struct PlayerScreen: View {
             SubtitleOverlay(cues: model.activeCues, lift: showControls ? 112 : 0, style: SubtitleStyle.decode(subJSON))
                 .animation(.easeInOut(duration: 0.2), value: showControls)
             Color.clear.contentShape(Rectangle()).onTapGesture { tapBackground() }
-            if model.isPaused && model.error == nil && !showEpisodes && !showSubtitles && !showSources && !showSpeed { pausedOverlay }
+            if pausedDim { pausedOverlay }
             if model.showSpinner && model.error == nil && !showControls && !showEpisodes {
                 ProgressView().controlSize(.large).tint(.white)
             }
@@ -427,6 +430,9 @@ struct PlayerScreen: View {
         .animation(.snappy(duration: 0.25), value: notice)
         .task { await begin() }
         .task(id: current.id) { await loadAux() }
+        .task(id: current.id) { await loadPausedOverview() }
+        .task(id: current.item.id) { await loadPausedLogo() }
+        .animation(.easeInOut(duration: 0.25), value: pausedDim)
         .task {
             // Coarse 10 s tick: negligible wakeups, still good resume accuracy.
             while !Task.isCancelled {
@@ -495,6 +501,7 @@ struct PlayerScreen: View {
     /// seek bar, which sits at the very bottom. In a narrow window the icons drop below the text.
     private var bottomBar: some View {
         VStack(alignment: .leading, spacing: 10) {
+            if pausedDim { pausedInfo }
             ViewThatFits(in: .horizontal) {
                 HStack(alignment: .bottom, spacing: 16) { titleBlock; iconRow }
                 VStack(alignment: .leading, spacing: 12) {
@@ -948,18 +955,66 @@ struct PlayerScreen: View {
 
     // MARK: Paused + error
 
-    /// Title art when paused: the logo if we found one, otherwise the name as text.
+    /// Paused with the controls up and nothing else open.
+    private var pausedDim: Bool {
+        model.isPaused && model.error == nil && showControls && !showEpisodes && !showSubtitles && !showSources && !showSpeed
+    }
+
+    /// Dims the frozen frame with one flat gradient. A real blur would have to snapshot the video surface and
+    /// re-filter it every time, which costs far more than a single translucent layer.
     private var pausedOverlay: some View {
-        ZStack(alignment: .top) {
-            Color.black.opacity(0.4).ignoresSafeArea()
-            VStack(spacing: 12) {
-                TitleArt(item: current.item, maxWidth: 300, maxHeight: 90, font: .largeTitle.bold(), alignment: .center)
-                if let l = subtitleLine { Text(l).font(.title3.weight(.medium)).foregroundStyle(.white.opacity(0.85)) }
+        LinearGradient(colors: [.black.opacity(0.4), .black.opacity(0.6)], startPoint: .top, endPoint: .bottom)
+            .ignoresSafeArea()
+            .allowsHitTesting(false)
+            .transition(.opacity)
+    }
+
+    /// Stacked above the show title: episode description on top, the show logo right above the title.
+    /// Nothing is drawn for a part that has no data (no logo found, no description).
+    @ViewBuilder private var pausedInfo: some View {
+        if pausedLogo != nil || !(pausedOverview ?? "").isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                if let o = pausedOverview, !o.isEmpty {
+                    Text(o)
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.85))
+                        .lineLimit(3)
+                        .frame(maxWidth: 520, alignment: .leading)
+                        .shadow(color: .black.opacity(0.6), radius: 3)
+                }
+                if let logo = pausedLogo {
+                    Image(uiImage: logo).resizable().scaledToFit()
+                        .frame(maxWidth: 220, maxHeight: 48, alignment: .leading)
+                        .shadow(color: .black.opacity(0.45), radius: 6)
+                        .accessibilityHidden(true)
+                }
             }
-            .padding(.top, 70)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .allowsHitTesting(false)
+            .transition(.opacity)
         }
-        .allowsHitTesting(false)
-        .transition(.opacity)
+    }
+
+    /// Episode description (or the movie's / show's own when there is none). Looked up once per episode.
+    private func loadPausedOverview() async {
+        let req = current
+        var text: String?
+        if let s = req.season, let e = req.episode, let provider {
+            text = await provider.episodes(s).first(where: { $0.id == e })?.overview
+        }
+        if (text ?? "").isEmpty { text = req.item.description }
+        guard !Task.isCancelled else { return }
+        pausedOverview = text?.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Logo is per show, so it is fetched once and kept across episode changes. Downsampled and cached by ImagePipeline.
+    private func loadPausedLogo() async {
+        pausedLogo = nil
+        let item = current.item
+        var url = current.logo
+        if url == nil { url = await LogoResolver.shared.logo(for: item) }
+        guard let url, let img = await ImagePipeline.shared.image(for: url, maxPixel: 440), !Task.isCancelled else { return }
+        pausedLogo = img
     }
 
     private func errorCard(_ message: String) -> some View {
