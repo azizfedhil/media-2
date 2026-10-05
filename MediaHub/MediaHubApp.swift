@@ -49,8 +49,35 @@ extension Color {
     }
 }
 
+/// Which orientations the app may rotate to right now. Portrait everywhere except the player (landscape only).
+/// `AppDelegate` reports this mask to UIKit; `set` changes it and rotates the screen to match.
+enum OrientationLock {
+    static var mask: UIInterfaceOrientationMask = .portrait
+
+    @MainActor
+    static func set(_ new: UIInterfaceOrientationMask) {
+        mask = new
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        guard let scene = scenes.first(where: { $0.activationState == .foregroundActive }) ?? scenes.first else { return }
+        // Tell every controller in the presented chain to re-read the supported orientations.
+        var vc = scene.windows.first(where: \.isKeyWindow)?.rootViewController
+        while let v = vc {
+            v.setNeedsUpdateOfSupportedInterfaceOrientations()
+            vc = v.presentedViewController
+        }
+        scene.requestGeometryUpdate(.iOS(interfaceOrientations: new)) { _ in }
+    }
+}
+
+final class AppDelegate: NSObject, UIApplicationDelegate {
+    func application(_ application: UIApplication, supportedInterfaceOrientationsFor window: UIWindow?) -> UIInterfaceOrientationMask {
+        OrientationLock.mask
+    }
+}
+
 @main
 struct MediaHubApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var store = AddonStore()
     @State private var history = WatchHistory()
     @State private var simkl = SimklStore()
