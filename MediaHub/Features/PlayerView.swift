@@ -389,6 +389,8 @@ struct PlayerScreen: View {
     @State private var hideTask: Task<Void, Never>?
     @State private var scrobbled = false
     @State private var closing = false
+    /// True until the first frame plays: the "pear." loader covers the black screen while the source opens.
+    @State private var launching = true
     @State private var switching: Int?
     @State private var notice: String?
     @State private var nextEp: NextEpisode?
@@ -412,10 +414,11 @@ struct PlayerScreen: View {
                 .animation(.easeInOut(duration: 0.2), value: showControls)
             Color.clear.contentShape(Rectangle()).onTapGesture { tapBackground() }
             if pausedDim { pausedOverlay }
-            if model.showSpinner && model.error == nil && !showControls && !showEpisodes {
+            if model.showSpinner && model.error == nil && !showControls && !showEpisodes && !launching {
                 ProgressView().controlSize(.large).tint(.white)
             }
-            if showControls || model.error != nil { controls.transition(.opacity) }
+            if launching && model.error == nil { launchOverlay.transition(.opacity) }
+            if model.error != nil || (showControls && !launching) { controls.transition(.opacity) }
             if !showEpisodes && !showSubtitles && !showSources && !showSpeed && model.error == nil { skipLayer }
             if showEpisodes, let provider { episodePanel(provider).transition(.move(edge: .bottom).combined(with: .opacity)) }
             if showSubtitles { subtitlePanel.transition(.move(edge: .trailing).combined(with: .opacity)) }
@@ -442,6 +445,7 @@ struct PlayerScreen: View {
         }
         .onChange(of: model.isPlaying) { _, playing in
             if playing && !scrobbled { scrobbled = true; simkl.scrobble("start", current, progress: 0) }
+            if playing && launching { withAnimation(.easeOut(duration: 0.25)) { launching = false } }
             if playing { scheduleHide() } else { hideTask?.cancel() }
         }
         .onChange(of: model.isPaused) { _, paused in
@@ -459,6 +463,21 @@ struct PlayerScreen: View {
             OrientationLock.set(.portrait)           // back to portrait for the rest of the app
             // Normal exit goes through close(); this covers any other way the screen can go away.
             if !closing { finalizeCurrent(); model.shutdown() }
+        }
+    }
+
+    // MARK: Launch
+
+    /// Full-screen "pear." loader (loops at 2x) with a close button, so a slow source can still be cancelled.
+    private var launchOverlay: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+            PearAnimationView(mode: .loader).frame(maxWidth: 340).padding(.horizontal, 24)
+            VStack {
+                HStack { circleButton("xmark", size: 42, icon: 16) { close() }; Spacer() }
+                Spacer()
+            }
+            .padding(.horizontal, 24).padding(.top, 4)
         }
     }
 
