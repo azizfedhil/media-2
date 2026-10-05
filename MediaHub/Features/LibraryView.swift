@@ -128,7 +128,7 @@ struct LibraryView: View {
             }
             .padding(.horizontal, 16).padding(.vertical, 10)
             .frame(maxWidth: .infinity)
-            .background(.bar)
+            .background(Color(.systemBackground))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
