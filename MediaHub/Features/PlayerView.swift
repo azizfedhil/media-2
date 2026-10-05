@@ -633,6 +633,7 @@ struct PlayerScreen: View {
                             glass: glass,
                             onSeek: { t in Task { await model.seek(to: t); scheduleHide() } },
                             onNext: { playNext() })
+                    .id(current.id)          // new episode = fresh "used" / "expired" state
             }
             .padding(.trailing, 28)
             .padding(.bottom, showControls ? 140 : 40)
@@ -1194,7 +1195,20 @@ private struct SkipOverlay: View {
     let onSeek: (Double) -> Void
     let onNext: () -> Void
 
-    private struct Choice { let title: String; let symbol: String; let target: Double? }   // nil target = next episode
+    private struct Choice { let title: String; let symbol: String; let target: Double?; var isFallback = false }   // nil target = next episode
+
+    /// The manual "Skip 85s" button is a convenience, not a fixture: one tap per episode, and each time it
+    /// appears it goes away again after a few seconds. (The parent gives this view a new identity per episode.)
+    @State private var fallbackUsed = false
+    @State private var fallbackExpired = false
+    private static let fallbackLife: Double = 12
+
+    /// Would the manual button be on screen if it hadn't expired? Also drives the expiry timer.
+    private var fallbackEligible: Bool {
+        guard loaded, segments.isEmpty, fallback != nil, !fallbackUsed else { return false }
+        let p = playhead.position
+        return playhead.duration > 0 && p >= 3 && p <= 420
+    }
 
     private var choice: Choice? {
         let p = playhead.position, d = playhead.duration
@@ -1204,8 +1218,8 @@ private struct SkipOverlay: View {
             return Choice(title: "Next Episode", symbol: "forward.end.fill", target: nil)
         }
         if let seg { return Choice(title: seg.label, symbol: "forward.fill", target: seg.end ?? d) }
-        if loaded, segments.isEmpty, let f = fallback, p >= 3, p <= 420 {
-            return Choice(title: "Skip \(Int(f))s", symbol: "goforward", target: p + f)
+        if fallbackEligible, !fallbackExpired, let f = fallback {
+            return Choice(title: "Skip \(Int(f))s", symbol: "goforward", target: p + f, isFallback: true)
         }
         return nil
     }
@@ -1214,7 +1228,10 @@ private struct SkipOverlay: View {
         let c = choice
         ZStack {
             if let c {
-                Button { if let t = c.target { onSeek(t) } else { onNext() } } label: {
+                Button {
+                    if c.isFallback { fallbackUsed = true }
+                    if let t = c.target { onSeek(t) } else { onNext() }
+                } label: {
                     Label(c.title, systemImage: c.symbol)
                         .font(.system(size: 17, weight: .semibold)).foregroundStyle(.white)
                         .padding(.horizontal, 22).frame(height: 48)
@@ -1226,6 +1243,13 @@ private struct SkipOverlay: View {
             }
         }
         .animation(.snappy(duration: 0.25), value: c?.title)
+        // Fresh timer every time the manual button becomes eligible (controls shown again); cleared when it stops.
+        .task(id: fallbackEligible) {
+            fallbackExpired = false
+            guard fallbackEligible else { return }
+            try? await Task.sleep(for: .seconds(Self.fallbackLife))
+            if !Task.isCancelled { fallbackExpired = true }
+        }
     }
 }
 
