@@ -157,6 +157,8 @@ struct HomeView: View {
             }
             .ignoresSafeArea(edges: .top)
             .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
+            .scrollEdgeEffectHidden(true, for: .top)
             .profileToolbar(logo: true)
             .scrollIndicators(.hidden)
             .refreshable { await refresh() }
@@ -164,7 +166,7 @@ struct HomeView: View {
             .navigationDestination(for: MetaPreview.self) { DetailView(item: $0) }
             .navigationDestination(for: ResumeTarget.self) { DetailView(item: $0.item, startSeason: $0.season, startEpisode: $0.episode) }
             .navigationDestination(for: CatalogRow.self) { CatalogGridView(row: $0) }
-            .task(id: store.addons.map(\.id)) { await model.load(addons: store.addons) }
+            .task(id: store.addons.map(\.id) + [String(store.revision)]) { await model.load(addons: store.addons) }
             .task(id: tmdbKey) { await model.loadThemes() }
             .task(id: mdbKey + mdbLists) { await model.loadLists(selected: selectedLists) }
             .task(id: tmdbKey + (history.lastWatched?.id ?? "")) { await model.loadSuggestions(last: history.lastWatched) }
