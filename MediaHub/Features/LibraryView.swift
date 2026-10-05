@@ -95,8 +95,8 @@ struct LibraryView: View {
                 }
             }
             .scrollIndicators(.hidden)
-            // One solid surface: the nav bar and the pinned section header are the same black, so they read as a single bar.
-            .toolbarBackground(Color(.systemBackground), for: .navigationBar)
+            // Nav bar and pinned section header use the same blur material (.bar), so they read as one bar.
+            .toolbarBackground(.bar, for: .navigationBar)
             .toolbarBackgroundVisibility(.visible, for: .navigationBar)
             .scrollEdgeEffectHidden(true, for: .top)
             .overlay {
@@ -132,7 +132,7 @@ struct LibraryView: View {
             }
             .padding(.horizontal, 16).padding(.vertical, 10)
             .frame(maxWidth: .infinity)
-            .background(Color(.systemBackground))
+            .background(.bar)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
