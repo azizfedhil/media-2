@@ -59,6 +59,9 @@ final class LocalLibrary {
         persist()
     }
 
+    /// Drops a saved title from the library without touching its watch history.
+    func unsave(_ id: String) { remove(id) }
+
     /// Called by the player when a movie finishes: only titles already saved are moved, nothing new is added.
     func markWatchedIfSaved(_ id: String) {
         guard let e = entry(for: id), e.status != .watched else { return }

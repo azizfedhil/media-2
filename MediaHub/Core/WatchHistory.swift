@@ -72,6 +72,69 @@ final class WatchHistory {
         persist()
     }
 
+    // MARK: Mark as watched (used by long-press menus on posters, seasons and episodes)
+
+    /// Marks a whole title watched at once: an entry whose position sits at its end.
+    /// `duration` is the expected runtime in seconds (episode stills, season totals); when unknown,
+    /// the existing entry's duration is kept so Up Next can still resolve the following episode.
+    func markWatched(_ item: MetaPreview, key: String = "watched", season: Int? = nil, episode: Int? = nil,
+                     duration: Double? = nil, episodeTitle: String? = nil, thumb: String? = nil) {
+        let old = entry(for: item.id)
+        let d = max(duration ?? 0, old.map { $0.isFinished ? $0.duration : 0 } ?? 0, 60)
+        update(item, key: key, position: d, duration: d,
+               season: season ?? old?.season, episode: episode ?? old?.episode,
+               episodeTitle: episodeTitle ?? old?.episodeTitle, thumb: thumb ?? old?.thumb)
+    }
+
+    /// Clears the watched flag without dropping the rest of the record.
+    func unmarkWatched(_ id: String) {
+        guard let i = entries.firstIndex(where: { $0.id == id }), entries[i].isFinished else { return }
+        entries[i].position = min(entries[i].position, entries[i].duration * 0.5)
+        persist()
+    }
+
+    /// Everything up to and including `season`/`episode` counts as watched afterwards.
+    func isWatched(id: String? = nil, season s: Int, episode e: Int) -> Bool {
+        let target = id ?? lastWatchedSeriesID ?? ""
+        guard let en = entry(for: target), en.isFinished, let se = en.seasonEpisode else { return false }
+        return (se.season, se.episode) >= (s, e)
+    }
+
+    /// The show the caller most recently resolved ids for — used only as a hint; callers pass explicit ids where possible.
+    @ObservationIgnored var lastWatchedSeriesID: String?
+
+    /// Marks Sx·Ey finished for `item`, extending the run backwards to cover every earlier episode too.
+    func markThrough(episode ep: Int, season s: Int, item: MetaPreview, duration: Double?,
+                     episodeTitle: String? = nil, thumb: String? = nil) {
+        let old = entry(for: item.id)
+        let coversEarlier = old?.isFinished == true && old?.seasonEpisode.map({ ($0.season, $0.episode) >= (s, ep) }) == true
+        let d = max(duration ?? 0, old?.duration ?? 0, 60)
+        if coversEarlier, let se = old?.seasonEpisode {
+            update(item, key: "\(se.season):\(se.episode)", position: se.episode == ep && se.season == s ? d : d,
+                   duration: d, season: se.season, episode: se.episode,
+                   episodeTitle: episodeTitle ?? old?.episodeTitle, thumb: thumb ?? old?.thumb)
+            return
+        }
+        update(item, key: "\(s):\(ep)", position: d, duration: d, season: s, episode: ep,
+               episodeTitle: episodeTitle, thumb: thumb)
+    }
+
+    /// Pulls the watched marker back to just before Sx·Ey, so that episode (and everything after it) is unwatched.
+    func unmarkThrough(episode ep: Int, season s: Int, item: MetaPreview) {
+        guard let i = entries.firstIndex(where: { $0.id == item.id }), entries[i].isFinished,
+              let se = entries[i].seasonEpisode, (se.season, se.episode) >= (s, ep) else { return }
+        let prev: (season: Int, episode: Int)?
+        if ep > 1 { prev = (s, ep - 1) } else if s > 1 { prev = (s - 1, 99) } else { prev = nil }
+        if let p = prev {
+            entries[i].key = "\(p.season):\(p.episode)"
+            entries[i].season = p.season
+            entries[i].episode = p.episode
+        } else {
+            entries.remove(at: i)
+        }
+        persist()
+    }
+
     private func persist() {
         if let d = try? JSONEncoder().encode(entries) { UserDefaults.standard.set(d, forKey: storeKey) }
     }

@@ -147,55 +147,77 @@ struct DetailView: View {
                 Label(n, systemImage: isSeries ? "tv" : "building.2").font(.subheadline).foregroundStyle(.secondary)
             }
             if !allRatings.isEmpty { ratingsRow }
-            Button { showSources = true } label: {
-                Label(isSeries ? "Play S\(season):E\(episode)" : "Play", systemImage: "play.fill")
-                    .font(.headline).frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.glassProminent).controlSize(.large)
+            actionBar
             resumeBanner
-            if simkl.isConnected {
-                Button {
-                    Task {
-                        if let imdb = await stremioID() { await simkl.addToWatchlist(imdb, type: item.type); onWatchlist = true }
-                    }
-                } label: {
-                    Label(onWatchlist ? "On your watchlist" : "Add to Watchlist", systemImage: onWatchlist ? "checkmark" : "plus")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.glass).disabled(onWatchlist)
-            } else {
-                localLibraryMenu
-            }
             if let t = details?.tagline, !t.isEmpty { Text(t).italic().foregroundStyle(.secondary) }
             if let d = details?.overview ?? item.description { Text(d) }
         }
     }
 
-    // MARK: Local library (used when Simkl isn't connected; belongs to the active profile)
+    // MARK: Action bar (play + small round buttons)
 
-    private var localLibraryMenu: some View {
-        let status = library.entry(for: item.id)?.status
-        return Menu {
-            if status != .planToWatch {
-                Button("Add to Watchlist", systemImage: "bookmark") { saveLocal(.planToWatch) }
+    /// Play button with compact round actions next to it: library toggle and watched toggle.
+    private var actionBar: some View {
+        HStack(spacing: 10) {
+            Button { showSources = true } label: {
+                Label(isSeries ? "Play S\(season):E\(episode)" : "Play", systemImage: "play.fill")
+                    .font(.headline).frame(maxWidth: .infinity)
             }
-            if status != .watched {
-                Button("Mark as Watched", systemImage: "checkmark.circle") { saveLocal(.watched) }
-            }
-            if status != nil {
-                Button("Remove from Library", systemImage: "trash", role: .destructive) {
-                    withAnimation { library.remove(item.id) }
+            .buttonStyle(.glassProminent).controlSize(.large)
+            listButton
+            watchedButton
+        }
+    }
+
+    /// Round bookmark button: adds/removes the title from the watchlist (Simkl when connected).
+    private var listButton: some View {
+        Button {
+            if simkl.isConnected {
+                guard !onWatchlist else { return }
+                Task {
+                    if let imdb = await stremioID() { await simkl.addToWatchlist(imdb, type: item.type); onWatchlist = true }
+                }
+            } else {
+                withAnimation {
+                    if inList { library.remove(item.id) } else { saveLocal(.planToWatch) }
                 }
             }
         } label: {
-            switch status {
-            case .planToWatch: Label("On your watchlist", systemImage: "bookmark.fill").frame(maxWidth: .infinity)
-            case .watched: Label("Watched", systemImage: "checkmark.circle.fill").frame(maxWidth: .infinity)
-            case nil: Label("Add to Watchlist", systemImage: "plus").frame(maxWidth: .infinity)
-            }
+            Image(systemName: listSaved ? "bookmark.fill" : "bookmark")
+                .font(.system(size: 17, weight: .semibold))
+                .frame(width: 34, height: 34)
         }
-        .buttonStyle(.glass)
+        .buttonStyle(.bordered)
+        .buttonBorderShape(.circle)
+        .disabled(simkl.isConnected && onWatchlist)
+        .accessibilityLabel(listSaved ? "Remove from watchlist" : "Add to watchlist")
     }
+
+    /// Round checkmark button: marks the whole title watched, or unmarks it.
+    private var watchedButton: some View {
+        Button {
+            withAnimation {
+                if isWatched {
+                    TitleActions.unmarkWatched(item, history: history)
+                } else {
+                    TitleActions.markWatched(item, history: history)
+                    if let e = library.entry(for: item.id), e.status != .watched { library.set(e.item, status: .watched) }
+                }
+            }
+        } label: {
+            Image(systemName: isWatched ? "checkmark.circle.fill" : "checkmark.circle")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(isWatched ? theme.accent : Color.primary)
+                .frame(width: 34, height: 34)
+        }
+        .buttonStyle(.bordered)
+        .buttonBorderShape(.circle)
+        .accessibilityLabel(isWatched ? "Unmark as watched" : "Mark as watched")
+    }
+
+    private var isWatched: Bool { history.entry(for: item.id)?.isFinished ?? false }
+    private var inList: Bool { library.entry(for: item.id) != nil }
+    private var listSaved: Bool { simkl.isConnected ? onWatchlist : inList }
 
     /// Saves instantly, then looks up the title's other id in the background so it is recognised from any source.
     private func saveLocal(_ status: LocalLibrary.Status) {
@@ -329,11 +351,55 @@ struct DetailView: View {
                                          in: .capsule)
                     }
                     .buttonStyle(.plain)
+                    // Long tap: mark the whole season as watched (or unmark it).
+                    .contextMenu {
+                        if isSeasonWatched(c.id) {
+                            Button("Unmark Season as Watched", systemImage: "circle") { setSeasonWatched(c.id, false) }
+                        } else {
+                            Button("Mark Season as Watched", systemImage: "checkmark.circle") { setSeasonWatched(c.id, true) }
+                        }
+                    }
                 }
             }
             .padding(.horizontal, 20)
         }
         .scrollIndicators(.hidden)
+    }
+
+    /// The show's watched marker sits on its last-watched episode; a season counts when that episode is inside it.
+    private func seasonProgress(_ s: Int) -> (watchedEpisodes: Int, total: Int)? {
+        guard let en = history.entry(for: item.id), en.isFinished, let se = en.seasonEpisode else { return nil }
+        let total: Int?
+        if se.season == s { total = episodes.isEmpty ? details?.seasons?.first(where: { $0.seasonNumber == s })?.episodeCount : episodes.count }
+        else { total = details?.seasons?.first(where: { $0.seasonNumber == s })?.episodeCount }
+        guard let total, total > 0 else { return nil }
+        if se.season < s { return (total, total) }
+        guard se.season == s else { return nil }
+        return (min(se.episode, total), total)
+    }
+
+    private func isSeasonWatched(_ s: Int) -> Bool {
+        guard let p = seasonProgress(s) else { return false }
+        return p.watchedEpisodes >= p.total
+    }
+
+    private func setSeasonWatched(_ s: Int, _ watched: Bool) {
+        withAnimation {
+            if watched {
+                let count = details?.seasons?.first(where: { $0.seasonNumber == s })?.episodeCount
+                    ?? (s == season && !episodes.isEmpty ? episodes.count : nil)
+                    ?? 10
+                TitleActions.markWatched(item, history: history, season: s, episode: count)
+            } else if isSeasonWatched(s), let en = history.entry(for: item.id), let se = en.seasonEpisode {
+                // Pull the marker back to the last episode of the previous season.
+                let prevSeason = max(se.season - 1, 1)
+                let prevCount = details?.seasons?.first(where: { $0.seasonNumber == prevSeason })?.episodeCount ?? 10
+                history.markWatched(item, key: "\(prevSeason):\(prevCount)", season: prevSeason, episode: prevCount,
+                                    duration: en.duration)
+            } else {
+                history.unmarkWatched(item.id)
+            }
+        }
     }
 
     private var seasonPosters: some View {
@@ -342,18 +408,33 @@ struct DetailView: View {
                 ForEach(seasonChips) { c in
                     Button { select(season: c.id) } label: {
                         VStack(alignment: .leading, spacing: 6) {
-                            RemoteImage(url: c.poster, size: 110).frame(width: 110, height: 165)
-                                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            RemoteImage(url: c.poster, size: 84).frame(width: 84, height: 126)
+                                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                .overlay(alignment: .topLeading) {
+                                    if isSeasonWatched(c.id) {
+                                        Image(systemName: "checkmark.circle.fill")
+                                            .font(.system(size: 15, weight: .bold))
+                                            .foregroundStyle(.white, theme.accent).padding(5)
+                                    }
+                                }
                                 .overlay {
-                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    RoundedRectangle(cornerRadius: 10, style: .continuous)
                                         .strokeBorder(Color.accentColor, lineWidth: c.id == season ? 3 : 0)
                                 }
                             Text(c.title).font(.caption.weight(.medium)).lineLimit(1)
                             if let n = c.count { Text("\(n) episodes").font(.caption2).foregroundStyle(.secondary) }
                         }
-                        .frame(width: 110, alignment: .leading)
+                        .frame(width: 84, alignment: .leading)
                     }
                     .buttonStyle(.plain)
+                    // Long tap: mark the whole season as watched (or unmark it).
+                    .contextMenu {
+                        if isSeasonWatched(c.id) {
+                            Button("Unmark Season as Watched", systemImage: "circle") { setSeasonWatched(c.id, false) }
+                        } else {
+                            Button("Mark Season as Watched", systemImage: "checkmark.circle") { setSeasonWatched(c.id, true) }
+                        }
+                    }
                 }
             }
             .padding(.horizontal, 20)
@@ -416,6 +497,18 @@ struct DetailView: View {
                         .padding(8)
                     }
                 }
+                .overlay(alignment: .topLeading) {
+                    if history.isWatched(id: item.id, season: season, episode: ep.id) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "checkmark.circle.fill")
+                            Text("Watched")
+                        }
+                        .font(.caption2.bold()).foregroundStyle(.white)
+                        .padding(.horizontal, 8).padding(.vertical, 4)
+                        .background(.black.opacity(0.6), in: Capsule())
+                        .padding(8)
+                    }
+                }
                 .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                 .overlay {
                     RoundedRectangle(cornerRadius: 16, style: .continuous)
@@ -423,6 +516,27 @@ struct DetailView: View {
                 }
         }
         .buttonStyle(.plain)
+        .contextMenu {
+            Button("Mark as Watched", systemImage: "checkmark.circle") {
+                withAnimation {
+                    history.markWatched(item, key: "\(season):\(ep.id)", season: season, episode: ep.id,
+                                        duration: Double(ep.runtime ?? 45) * 60,
+                                        episodeTitle: ep.name, thumb: ep.image?.absoluteString)
+                }
+            }
+            Button("Mark Episodes Until Here as Watched", systemImage: "checkmark.circle.fill") {
+                withAnimation {
+                    history.markThrough(episode: ep.id, season: season, item: item,
+                                        duration: Double(ep.runtime ?? 45) * 60,
+                                        episodeTitle: ep.name, thumb: ep.image?.absoluteString)
+                }
+            }
+            Button("Unmark as Watched", systemImage: "circle", role: .destructive) {
+                withAnimation {
+                    history.unmarkThrough(episode: ep.id, season: season, item: item)
+                }
+            }
+        }
     }
 
     private func loadEpisodes() async {
