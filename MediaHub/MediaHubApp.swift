@@ -82,6 +82,7 @@ struct MediaHubApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var store = AddonStore()
     @State private var history = WatchHistory()
+    @State private var watchLog = WatchLog()
     @State private var simkl = SimklStore()
     @State private var pins = PinnedSources()
     @State private var theme = ThemeStore()
@@ -97,7 +98,7 @@ struct MediaHubApp: App {
         WindowGroup {
             RootView()
                 .environment(store).environment(history).environment(simkl).environment(pins).environment(theme)
-                .environment(profiles).environment(library)
+                .environment(profiles).environment(library).environment(watchLog)
                 .preferredColorScheme(Theme.forceDark ? .dark : nil)
                 .pearLaunchScreen()
         }
@@ -111,6 +112,7 @@ struct RootView: View {
     @Environment(ProfileStore.self) private var profiles
     @Environment(WatchHistory.self) private var history
     @Environment(LocalLibrary.self) private var library
+    @Environment(WatchLog.self) private var watchLog
 
     var body: some View {
         // System TabView gives Liquid Glass tab bar for free.
@@ -127,9 +129,12 @@ struct RootView: View {
         .onChange(of: profiles.activeID, initial: true) { _, id in
             history.load(profile: id)
             library.load(profile: id)
+            watchLog.load(profile: id)
         }
         .sensoryFeedback(.selection, trigger: profiles.activeID)
         .task { await simkl.sync() }
-        .onChange(of: phase) { _, p in if p == .active { Task { await simkl.sync() } } }
+        .onChange(of: phase) { _, p in
+            if p == .active { Task { await simkl.sync() } } else { watchLog.flush() }
+        }
     }
 }
