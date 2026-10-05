@@ -444,9 +444,13 @@ struct PlayerScreen: View {
         .onChange(of: model.didEnd) { _, ended in
             if ended, autoplayNext, nextEp != nil { playNext() }
         }
-        .onAppear { UIApplication.shared.isIdleTimerDisabled = true }
+        .onAppear {
+            UIApplication.shared.isIdleTimerDisabled = true
+            OrientationLock.set(.landscape)          // landscape only, free to flip 180°
+        }
         .onDisappear {
             UIApplication.shared.isIdleTimerDisabled = false
+            OrientationLock.set(.portrait)           // back to portrait for the rest of the app
             // Normal exit goes through close(); this covers any other way the screen can go away.
             if !closing { finalizeCurrent(); model.shutdown() }
         }
