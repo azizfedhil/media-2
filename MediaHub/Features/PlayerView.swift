@@ -47,6 +47,11 @@ final class PlayerModel {
     var activeAudioID: Int?
     var activeSubtitleID: Int?
     var activeCues: [SubCue] = []
+    /// OpenSubtitles files for the current title (see OpenSubtitlesClient).
+    var onlineSubs: [OnlineSubtitle] = []
+    var loadingOnline = false
+    @ObservationIgnored private var onlineFor: UUID?
+    @ObservationIgnored private var addedOnline: [String: Int] = [:]
     /// Playback speed, 0.5...2.0 in continuous steps. The engine clamps it again to what the active backend supports.
     private(set) var rate: Double = 1.0
     private(set) var engine: AetherEngine?
@@ -88,6 +93,7 @@ final class PlayerModel {
         guard let engine else { return }
         bind(engine)
         resetForNewItem()
+        Task { await loadOnlineSubtitles(for: r, auto: true) }
         let startAt = (resume ?? 0) > 30 ? (resume ?? 0) : 0
         if startAt > 0 { playhead.position = startAt }      // seek bar shows the resume point while loading
         do {
@@ -120,6 +126,7 @@ final class PlayerModel {
         seekTask?.cancel(); pendingTarget = nil; seekInFlight = false
         allCues = []; mappedCount = 0; mappedFirst = nil; activeCues = []
         activeSubtitleID = nil; subtitleTracks = []; audioTracks = []; activeAudioID = nil
+        onlineSubs = []; addedOnline = [:]; onlineFor = nil; loadingOnline = false
         // Default language on first start, then whatever the viewer picked, across episodes.
         autoSelectSubtitle = preferredSubtitleLanguage != nil
         rateStale = rate != 1
@@ -231,6 +238,35 @@ final class PlayerModel {
         }
         return hits.first { !Reflect.bool($0, "isForced") && !Reflect.bool($0, "isHearingImpaired") }
             ?? hits.first { !Reflect.bool($0, "isForced") } ?? hits.first
+    }
+
+    /// Looks up OpenSubtitles for this request. With `auto`, and a default language that the file itself doesn't
+    /// have, the best online match is added and switched on.
+    func loadOnlineSubtitles(for r: PlayRequest, auto: Bool) async {
+        guard OpenSubtitlesClient.shared.enabled, onlineFor != r.id else { return }
+        onlineFor = r.id; onlineSubs = []; loadingOnline = true
+        let list = await OpenSubtitlesClient.shared.search(imdb: r.imdb, season: r.season, episode: r.episode)
+        guard !Task.isCancelled, onlineFor == r.id else { return }
+        onlineSubs = list; loadingOnline = false
+        guard auto, let lang = preferredSubtitleLanguage else { return }
+        // Give the file's own tracks a moment to show up before deciding it has none in that language.
+        for _ in 0..<20 where !isPlaying { try? await Task.sleep(for: .milliseconds(500)) }
+        guard !Task.isCancelled, onlineFor == r.id, activeSubtitleID == nil, bestSubtitle(for: lang) == nil,
+              let s = list.first(where: { SubLanguages.matches($0.lang, lang) }) else { return }
+        useOnline(s)
+    }
+
+    /// Registers the downloaded file as an external track (once) and switches to it.
+    func useOnline(_ s: OnlineSubtitle) {
+        guard let engine else { return }
+        if let id = addedOnline[s.id], let t = subtitleTracks.first(where: { Reflect.int($0.id) == id }) {
+            selectSubtitle(t); return
+        }
+        let info = engine.addExternalSubtitleTrack(
+            ExternalSubtitleTrack(url: s.url, name: "OpenSubtitles", language: s.lang, httpHeaders: [:], formatHint: "srt"))
+        addedOnline[s.id] = Reflect.int(info.id)
+        subtitleTracks = engine.subtitleTracks
+        selectSubtitle(info)
     }
 
     func selectSubtitle(_ t: TrackInfo?) {
@@ -559,7 +595,7 @@ struct PlayerScreen: View {
             pillButton("speedometer", active: showSpeed || model.rate != 1) { toggleSpeed() }
             if provider != nil { pillButton("list.bullet") { openEpisodes() } }
             pillButton("rectangle.stack") { openSources() }
-            if !model.subtitleTracks.isEmpty {
+            if !model.subtitleTracks.isEmpty || OpenSubtitlesClient.shared.enabled {
                 pillButton(model.activeSubtitleID == nil ? "captions.bubble" : "captions.bubble.fill",
                            active: showSubtitles) { toggleSubtitles() }
             }
@@ -695,6 +731,7 @@ struct PlayerScreen: View {
                                 trackRow(Reflect.trackTitle(t), on: Reflect.int(t.id) == model.activeSubtitleID) { model.selectSubtitle(t) }
                             }
                         }
+                        onlineSubtitles
                         Text("APPEARANCE").font(.caption.weight(.bold)).tracking(1).foregroundStyle(.white.opacity(0.6))
                         SubtitleStyleControls(showsPreview: false, onDark: true)
                     }
@@ -707,6 +744,25 @@ struct PlayerScreen: View {
             .frame(width: 340)
             .modifier(GlassCard(on: glass))
             .padding(.vertical, 10).padding(.trailing, 10)
+        }
+    }
+
+    @ViewBuilder private var onlineSubtitles: some View {
+        let choices = OpenSubtitlesClient.choices(model.onlineSubs, preferred: subLang)
+        if model.loadingOnline || !choices.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    Text("OPENSUBTITLES").font(.caption.weight(.bold)).tracking(1).foregroundStyle(.white.opacity(0.6))
+                    if model.loadingOnline { ProgressView().controlSize(.small).tint(.white) }
+                }
+                VStack(spacing: 6) {
+                    ForEach(choices) { s in
+                        let n = choices.filter { $0.lang == s.lang }.firstIndex(of: s).map { $0 + 1 } ?? 1
+                        let multi = choices.filter { $0.lang == s.lang }.count > 1
+                        trackRow(multi ? "\(s.languageName) \(n)" : s.languageName, on: false) { model.useOnline(s) }
+                    }
+                }
+            }
         }
     }
 
