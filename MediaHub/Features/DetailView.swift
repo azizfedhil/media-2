@@ -109,6 +109,7 @@ struct DetailView: View {
         // then the player opens. This keeps dismissing the player reliable.
         .fullScreenCover(item: $playRequest) { r in
             PlayerScreen(request: r, provider: makeProvider(), onClose: { playRequest = nil })
+                .playerLandscape()   // landscape (both directions) while the player is up; portrait restored on exit
         }
         .task {
             // Native metadata + suggestions (no-ops without a TMDB key).
@@ -179,7 +180,8 @@ struct DetailView: View {
                 }
             } else {
                 withAnimation {
-                    if inList { library.remove(item.id) } else { saveLocal(.planToWatch) }
+                    // "Add to Watchlist" saves to Watching, never to Plan to Watch.
+                    if inList { library.remove(item.id) } else { saveLocal(.watching) }
                 }
             }
         } label: {
