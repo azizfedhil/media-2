@@ -68,7 +68,9 @@ struct ProfileToolbar: ViewModifier {
                     PearWordmark(height: Self.logoHeight)
                         .shadow(color: .black.opacity(0.35), radius: 6)
                         .padding(.leading, 16)
-                        .padding(.top, Self.topInset + 10 - Self.logoHeight / 2)
+                        .padding(.top, Self.statusBar + (Self.barHeight - Self.logoHeight) / 2)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                        .ignoresSafeArea()
                         .transition(.opacity)
                         .allowsHitTesting(false)
                         .accessibilityHidden(true)
@@ -80,8 +82,12 @@ struct ProfileToolbar: ViewModifier {
     /// Height of the "pear." wordmark on Home (about 160 pt wide).
     private static let logoHeight: CGFloat = 56
 
-    private static var topInset: CGFloat {
-        (UIApplication.shared.connectedScenes.first as? UIWindowScene)?.keyWindow?.safeAreaInsets.top ?? 59
+    private static let barHeight: CGFloat = 44
+
+    /// Status bar / Dynamic Island height only (not the nav bar).
+    private static var statusBar: CGFloat {
+        let scene = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
+        return scene?.keyWindow?.safeAreaInsets.top ?? 47
     }
 }
 
