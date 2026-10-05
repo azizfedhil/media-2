@@ -31,6 +31,8 @@ struct ProfileAvatar: View {
 /// Adds the profile avatar to the top-right of a screen, like the Apple TV app. Toolbar items get the
 /// Liquid Glass treatment from the system, so the avatar sits in a glass circle. Tapping opens the profile picker.
 struct ProfileToolbar: ViewModifier {
+    /// Also shows the "pear." wordmark on the leading side (Home).
+    var logo = false
     @Environment(ProfileStore.self) private var profiles
     @State private var showing = false
     @State private var scrolled = false
@@ -49,6 +51,14 @@ struct ProfileToolbar: ViewModifier {
             .onAppear { withAnimation(.easeInOut(duration: 0.2)) { onScreen = true } }
             .onDisappear { onScreen = false }
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    if logo && visible {
+                        PearWordmark(height: 20)
+                            .shadow(color: .black.opacity(0.35), radius: 6)
+                            .transition(.opacity)
+                    }
+                }
+                .sharedBackgroundVisibility(.hidden)                          // plain logo, no glass bubble
                 ToolbarItem(placement: .topBarTrailing) {
                     if visible {
                         Button { showing = true } label: { ProfileAvatar(profile: profiles.active, size: 30) }
@@ -65,7 +75,7 @@ struct ProfileToolbar: ViewModifier {
 
 extension View {
     /// Put this on the root content of each tab's NavigationStack.
-    func profileToolbar() -> some View { modifier(ProfileToolbar()) }
+    func profileToolbar(logo: Bool = false) -> some View { modifier(ProfileToolbar(logo: logo)) }
 }
 
 // MARK: - Picker sheet
