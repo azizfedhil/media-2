@@ -8,6 +8,7 @@ struct SettingsView: View {
     @Environment(ProfileStore.self) private var profiles
     @Environment(WatchHistory.self) private var history
     @Environment(LocalLibrary.self) private var library
+    @Environment(WatchLog.self) private var watchLog
     @Environment(PinnedSources.self) private var pins
     @AppStorage("tmdb.key") private var tmdbKey = ""
     @AppStorage("tvdb.key") private var tvdbKey = ""
@@ -197,7 +198,7 @@ struct SettingsView: View {
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
         do {
             let n = try SettingsBackup.restore(try Data(contentsOf: url))
-            theme.reload(); profiles.reload(); history.reload(); library.reload(); pins.reload()
+            theme.reload(); profiles.reload(); history.reload(); library.reload(); watchLog.reload(); pins.reload()
             Task { await store.reloadFromDefaults() }
             backupNote = "Imported \(n) settings."
         } catch {
