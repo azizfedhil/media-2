@@ -150,6 +150,8 @@ struct RootView: View {
     @Environment(PinnedSources.self) private var pinnedSources
     @Environment(DownloadManager.self) private var downloads
     @Environment(Connectivity.self) private var connectivity
+    /// True when the app launched without a connection: shows the Downloads page instead of the (empty) online tabs.
+    @State private var offlineMode = false
 
     var body: some View {
         // System TabView gives Liquid Glass tab bar for free.
@@ -174,6 +176,14 @@ struct RootView: View {
         .sensoryFeedback(.selection, trigger: profiles.activeID)
         .task { await refreshLibrary() }
         .task { downloads.configure(store: addonStore, pins: pinnedSources) }
+        // No connection at launch: start on the Downloads page (no slide-in animation, so it is simply the first screen).
+        .task {
+            let online = await connectivity.ready()
+            guard !online else { return }
+            var t = Transaction(); t.disablesAnimations = true
+            withTransaction(t) { offlineMode = true }
+        }
+        .fullScreenCover(isPresented: $offlineMode) { OfflineHome { offlineMode = false } }
         .onChange(of: connectivity.isOnline) { _, on in if on == true { downloads.networkReturned() } }
         .onChange(of: phase) { _, p in
             P2PManager.shared.scenePhaseChanged(p)
