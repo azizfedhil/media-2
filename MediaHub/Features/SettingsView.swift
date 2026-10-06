@@ -61,6 +61,22 @@ struct SettingsView: View {
                     VStack(alignment: .leading, spacing: 12) {
                         Text("Accent colour").font(.subheadline.weight(.medium))
                         LazyVGrid(columns: [GridItem(.adaptive(minimum: 40), spacing: 12)], spacing: 12) {
+                            Button { theme.setAccent(hex: Theme.systemHex) } label: {
+                                Circle().fill(.black).frame(width: 36, height: 36)
+                                    .overlay {
+                                        Circle().fill(.white).frame(width: 36, height: 36)
+                                            .mask(HStack(spacing: 0) { Rectangle(); Color.clear })
+                                    }
+                                    .overlay(Circle().strokeBorder(.white.opacity(0.18), lineWidth: 1))
+                                    .overlay {
+                                        if theme.isSystem {
+                                            Image(systemName: "checkmark").font(.footnote.weight(.black))
+                                                .foregroundStyle(Color(white: 0.5))
+                                        }
+                                    }
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("System (no accent)")
                             ForEach(Theme.presets, id: \.hex) { p in
                                 Button { theme.setAccent(hex: p.hex) } label: {
                                     Circle().fill(Color(hex: p.hex) ?? .gray).frame(width: 36, height: 36)

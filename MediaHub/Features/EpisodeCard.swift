@@ -46,8 +46,9 @@ struct EpisodeCard<Actions: View>: View {
         .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: radius, style: .continuous)
-                .strokeBorder(selected ? Color.accentColor : .white.opacity(0.1), lineWidth: selected ? 2.5 : 1)
+                .strokeBorder(.white.opacity(0.1), lineWidth: 1)
         }
+        .selectionRing(selected, radius: radius)
         // Whole card opens the sources sheet; the "..." sits on top so it takes its own taps.
         .overlay { Button(action: onTap) { Color.clear.contentShape(Rectangle()) }.buttonStyle(PressableStyle()) }
         .overlay(alignment: .bottomTrailing) {

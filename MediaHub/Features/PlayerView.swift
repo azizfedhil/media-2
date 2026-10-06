@@ -1538,10 +1538,7 @@ private struct EpisodePanel: View {
                         }
                     }
                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .strokeBorder(theme.accent, lineWidth: isCurrent ? 2.5 : 0)
-                    }
+                    .selectionRing(isCurrent, radius: 12)
                 Text(ep.name).font(.system(size: 16, weight: .semibold)).lineLimit(1)
                     .frame(width: cardWidth, alignment: .leading)
                 Text(extras.isEmpty ? " " : extras).font(.system(size: 13))

@@ -4,10 +4,11 @@ import UIKit
 /// Static look-and-feel constants. The accent colour itself is user-chosen: see `ThemeStore`.
 enum Theme {
     static let defaultHex = "#7D5CFF"      // electric violet
+    /// Stored in place of a hex value: no accent colour, the neutral iOS look (white in dark mode, black in light mode).
+    static let systemHex = "system"
     static let presets: [(name: String, hex: String)] = [
         ("Violet", "#7D5CFF"), ("Pink", "#FF5C8D"), ("Blue", "#2F80FF"), ("Cyan", "#14B8D4"),
         ("Green", "#22C55E"), ("Gold", "#F5B301"), ("Orange", "#FF8A1F"), ("Red", "#EF4444"),
-        ("White", "#FFFFFF"),
     ]
     /// Colourful glows and hero art read best on black. Set to false to follow the system appearance.
     static let forceDark = true
@@ -27,9 +28,17 @@ final class ThemeStore {
         UserDefaults.standard.set(hex, forKey: "ui.accent")
     }
 
-    var accent: Color { Color(hex: hex) ?? Color(hex: Theme.defaultHex) ?? .purple }
+    var isSystem: Bool { hex == Theme.systemHex }
+    private static let neutral = Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? .white : .black })
+    private static let neutralInverse = Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? .black : .white })
+
+    var accent: Color {
+        if isSystem { return Self.neutral }
+        return Color(hex: hex) ?? Color(hex: Theme.defaultHex) ?? .purple
+    }
     /// A neighbouring hue, for gradients (progress bars, glows).
     var accent2: Color {
+        if isSystem { return Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? UIColor(white: 0.68, alpha: 1) : UIColor(white: 0.32, alpha: 1) }) }
         var h: CGFloat = 0, s: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
         UIColor(accent).getHue(&h, saturation: &s, brightness: &b, alpha: &a)
         // Near-white / grey accents have no hue to shift, so step the brightness down instead.
@@ -37,7 +46,7 @@ final class ThemeStore {
         return Color(hue: Double((h + 0.1).truncatingRemainder(dividingBy: 1)), saturation: Double(min(s, 0.9)), brightness: Double(min(b + 0.1, 1)))
     }
     /// Text/icon colour that stays readable on top of the accent (black on white or other light accents, white otherwise).
-    var onAccent: Color { accent.contrastingForeground }
+    var onAccent: Color { isSystem ? Self.neutralInverse : accent.contrastingForeground }
     var gradient: LinearGradient { LinearGradient(colors: [accent, accent2], startPoint: .leading, endPoint: .trailing) }
 }
 
@@ -139,6 +148,8 @@ struct RootView: View {
             Tab(role: .search) { SearchView() }
         }
         .tint(theme.accent)
+        // With the neutral accent, switches would otherwise turn white-on-white; keep the stock green.
+        .toggleStyle(SwitchToggleStyle(tint: theme.isSystem ? .green : theme.accent))
         .tabBarMinimizeBehavior(.onScrollDown)
         // Each profile has its own watch history and local library; swap them when the profile changes.
         .onChange(of: profiles.activeID, initial: true) { _, id in

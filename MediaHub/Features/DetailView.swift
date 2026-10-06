@@ -379,10 +379,7 @@ struct DetailView: View {
                                             .foregroundStyle(theme.onAccent, theme.accent).padding(3)
                                     }
                                 }
-                                .overlay {
-                                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                        .strokeBorder(Color.accentColor, lineWidth: c.id == season ? 2 : 0)
-                                }
+                                .selectionRing(c.id == season, radius: 8, width: 1)
                             Text(c.title).font(.caption.weight(.medium)).lineLimit(1)
                             if let n = c.count { Text("\(n) episodes").font(.caption2).foregroundStyle(.secondary) }
                         }
