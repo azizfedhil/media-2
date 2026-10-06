@@ -14,11 +14,11 @@ struct ProfileAvatar: View {
             if profile.symbol.isEmpty {
                 Text(profile.initial)
                     .font(.system(size: size * 0.46, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(base.contrastingForeground)
             } else {
                 Image(systemName: profile.symbol)
                     .font(.system(size: size * 0.44, weight: .bold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(base.contrastingForeground)
             }
         }
         .frame(width: size, height: size)
@@ -308,9 +308,11 @@ struct ProfileEditor: View {
                         ForEach(Theme.presets, id: \.hex) { p in
                             Button { colorHex = p.hex } label: {
                                 Circle().fill(Color(hex: p.hex) ?? .gray).frame(width: 36, height: 36)
+                                    .overlay(Circle().strokeBorder(.white.opacity(0.18), lineWidth: 1))
                                     .overlay {
                                         if colorHex.uppercased() == p.hex.uppercased() {
-                                            Image(systemName: "checkmark").font(.footnote.weight(.black)).foregroundStyle(.white)
+                                            Image(systemName: "checkmark").font(.footnote.weight(.black))
+                                                .foregroundStyle((Color(hex: p.hex) ?? .gray).contrastingForeground)
                                         }
                                     }
                             }
@@ -366,7 +368,7 @@ struct ProfileEditor: View {
                     Image(systemName: s).font(.system(size: 17, weight: .bold))
                 }
             }
-            .foregroundStyle(on ? Color.white : Color.primary)
+            .foregroundStyle(on ? (Color(hex: colorHex) ?? .accentColor).contrastingForeground : Color.primary)
             .frame(width: 40, height: 40)
         }
         .buttonStyle(.plain)

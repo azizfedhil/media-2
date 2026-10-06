@@ -64,9 +64,11 @@ struct SettingsView: View {
                             ForEach(Theme.presets, id: \.hex) { p in
                                 Button { theme.setAccent(hex: p.hex) } label: {
                                     Circle().fill(Color(hex: p.hex) ?? .gray).frame(width: 36, height: 36)
+                                        .overlay(Circle().strokeBorder(.white.opacity(0.18), lineWidth: 1))
                                         .overlay {
                                             if theme.hex.uppercased() == p.hex {
-                                                Image(systemName: "checkmark").font(.footnote.weight(.black)).foregroundStyle(.white)
+                                                Image(systemName: "checkmark").font(.footnote.weight(.black))
+                                                    .foregroundStyle((Color(hex: p.hex) ?? .gray).contrastingForeground)
                                             }
                                         }
                                 }

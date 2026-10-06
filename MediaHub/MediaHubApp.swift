@@ -7,6 +7,7 @@ enum Theme {
     static let presets: [(name: String, hex: String)] = [
         ("Violet", "#7D5CFF"), ("Pink", "#FF5C8D"), ("Blue", "#2F80FF"), ("Cyan", "#14B8D4"),
         ("Green", "#22C55E"), ("Gold", "#F5B301"), ("Orange", "#FF8A1F"), ("Red", "#EF4444"),
+        ("White", "#FFFFFF"),
     ]
     /// Colourful glows and hero art read best on black. Set to false to follow the system appearance.
     static let forceDark = true
@@ -31,8 +32,12 @@ final class ThemeStore {
     var accent2: Color {
         var h: CGFloat = 0, s: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
         UIColor(accent).getHue(&h, saturation: &s, brightness: &b, alpha: &a)
+        // Near-white / grey accents have no hue to shift, so step the brightness down instead.
+        if s < 0.12 { return Color(hue: 0, saturation: 0, brightness: Double(b > 0.5 ? max(b - 0.3, 0) : min(b + 0.3, 1))) }
         return Color(hue: Double((h + 0.1).truncatingRemainder(dividingBy: 1)), saturation: Double(min(s, 0.9)), brightness: Double(min(b + 0.1, 1)))
     }
+    /// Text/icon colour that stays readable on top of the accent (black on white or other light accents, white otherwise).
+    var onAccent: Color { accent.contrastingForeground }
     var gradient: LinearGradient { LinearGradient(colors: [accent, accent2], startPoint: .leading, endPoint: .trailing) }
 }
 
@@ -43,6 +48,14 @@ extension Color {
         if s.hasPrefix("#") { s.removeFirst() }
         guard s.count == 6, let v = UInt32(s, radix: 16) else { return nil }
         self.init(red: Double((v >> 16) & 0xFF) / 255, green: Double((v >> 8) & 0xFF) / 255, blue: Double(v & 0xFF) / 255)
+    }
+    /// Black on light colours, white on dark ones (WCAG relative luminance).
+    var contrastingForeground: Color {
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        UIColor(self).getRed(&r, green: &g, blue: &b, alpha: &a)
+        func lin(_ c: CGFloat) -> CGFloat { c <= 0.03928 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4) }
+        let lum = 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b)
+        return lum > 0.5 ? .black : .white
     }
     var hexString: String {
         var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0

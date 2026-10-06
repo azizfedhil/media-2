@@ -162,7 +162,7 @@ struct LibraryView: View {
                 Text(title).font(.subheadline.weight(.semibold))
                 Text("\(count)").font(.subheadline.weight(.medium)).opacity(0.65)
             }
-            .foregroundStyle(on ? Color.white : Color.primary)
+            .foregroundStyle(on ? theme.onAccent : Color.primary)
             .padding(.horizontal, 14).padding(.vertical, 9)
             .glassEffect(on ? .regular.tint(theme.accent).interactive() : .regular.interactive(), in: .capsule)
         }

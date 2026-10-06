@@ -308,7 +308,8 @@ struct DetailView: View {
                     Button { select(season: c.id) } label: {
                         Text(c.title).font(.subheadline.weight(.semibold))
                             .padding(.horizontal, 16).padding(.vertical, 9)
-                            .glassEffect(c.id == season ? .regular.tint(.accentColor).interactive() : .regular.interactive(),
+                            .foregroundStyle(c.id == season ? theme.onAccent : Color.primary)
+                            .glassEffect(c.id == season ? .regular.tint(theme.accent).interactive() : .regular.interactive(),
                                          in: .capsule)
                     }
                     .buttonStyle(.plain)
@@ -375,7 +376,7 @@ struct DetailView: View {
                                     if isSeasonWatched(c.id) {
                                         Image(systemName: "checkmark.circle.fill")
                                             .font(.system(size: 12, weight: .bold))
-                                            .foregroundStyle(.white, theme.accent).padding(3)
+                                            .foregroundStyle(theme.onAccent, theme.accent).padding(3)
                                     }
                                 }
                                 .overlay {

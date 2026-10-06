@@ -1477,6 +1477,7 @@ private struct EpisodePanel: View {
                     Button { season = s.id } label: {
                         Text(s.title).font(.system(size: 16, weight: .semibold))
                             .padding(.horizontal, 16).padding(.vertical, 8)
+                            .foregroundStyle(s.id == season ? theme.onAccent : Color.white)
                             .background(s.id == season ? theme.accent : Color.white.opacity(0.14), in: Capsule())
                     }
                     .buttonStyle(PressableStyle())
@@ -1526,6 +1527,7 @@ private struct EpisodePanel: View {
                     .overlay(alignment: .topTrailing) {
                         if isCurrent {
                             Label("Playing", systemImage: "waveform").font(.system(size: 13, weight: .bold))
+                                .foregroundStyle(theme.onAccent)
                                 .padding(.horizontal, 8).padding(.vertical, 4)
                                 .background(theme.accent, in: Capsule()).padding(8)
                         }

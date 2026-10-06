@@ -10,6 +10,7 @@ struct EpisodeCard<Actions: View>: View {
     var upNext = false
     let onTap: () -> Void
     @ViewBuilder let actions: () -> Actions
+    @Environment(ThemeStore.self) private var theme
     @State private var tint: Color?
 
     static var width: CGFloat { 250 }
@@ -36,7 +37,7 @@ struct EpisodeCard<Actions: View>: View {
         .frame(width: Self.width, height: Self.height)
         .overlay(alignment: .topLeading) {
             if watched { badge("checkmark.circle.fill", "Watched") }
-            else if upNext { badge(nil, "UP NEXT", fill: Color.accentColor) }
+            else if upNext { badge(nil, "UP NEXT", fill: theme.accent, text: theme.onAccent) }
         }
         .overlay(alignment: .topTrailing) {
             if let r = ep.rating, r > 0 { ratingBadge(r) }
@@ -97,12 +98,12 @@ struct EpisodeCard<Actions: View>: View {
         .allowsHitTesting(false)
     }
 
-    private func badge(_ symbol: String?, _ label: String, fill: Color = .black.opacity(0.55)) -> some View {
+    private func badge(_ symbol: String?, _ label: String, fill: Color = .black.opacity(0.55), text: Color = .white) -> some View {
         HStack(spacing: 4) {
             if let symbol { Image(systemName: symbol) }
             Text(label)
         }
-        .font(.caption2.bold()).foregroundStyle(.white)
+        .font(.caption2.bold()).foregroundStyle(text)
         .padding(.horizontal, 8).padding(.vertical, 4)
         .background(fill, in: Capsule())
         .padding(10)

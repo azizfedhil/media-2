@@ -68,6 +68,7 @@ final class ExploreModel {
 }
 
 struct ExploreView: View {
+    @Environment(ThemeStore.self) private var theme
     @State private var model = ExploreModel()
     @AppStorage("tmdb.key") private var tmdbKey = ""
     private let columns = [GridItem(.adaptive(minimum: 104, maximum: 160), spacing: 12, alignment: .top)]
@@ -201,7 +202,7 @@ struct ExploreView: View {
             Text(title).font(.footnote.weight(.semibold))
                 .padding(.horizontal, 14).padding(.vertical, 8)
                 .background(on ? Color.accentColor : Color.white.opacity(0.1), in: Capsule())
-                .foregroundStyle(on ? Color.white : Color.primary)
+                .foregroundStyle(on ? theme.onAccent : Color.primary)
         }
         .buttonStyle(PressableStyle())
         .animation(.snappy(duration: 0.2), value: on)

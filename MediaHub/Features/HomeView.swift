@@ -564,7 +564,7 @@ private struct UpNextCard: View {
                             .overlay(Circle().strokeBorder(.white.opacity(0.25), lineWidth: 0.5))
                     }
                     .overlay(alignment: .topLeading) {
-                        Text("UP NEXT").font(.system(size: 10, weight: .heavy)).tracking(0.8).foregroundStyle(.white)
+                        Text("UP NEXT").font(.system(size: 10, weight: .heavy)).tracking(0.8).foregroundStyle(theme.onAccent)
                             .padding(.horizontal, 8).padding(.vertical, 4)
                             .background(theme.accent, in: Capsule()).padding(8)
                     }
@@ -672,7 +672,7 @@ struct PosterCard: View {
         if history.entry(for: item.id)?.isFinished == true {
             Image(systemName: "checkmark.circle.fill")
                 .font(.system(size: compact ? 14 : 17, weight: .bold))
-                .foregroundStyle(.white, theme.accent)
+                .foregroundStyle(theme.onAccent, theme.accent)
                 .padding(compact ? 4 : 6)
                 .accessibilityLabel("Watched")
         }
