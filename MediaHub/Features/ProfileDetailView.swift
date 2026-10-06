@@ -11,6 +11,7 @@ struct ProfileDetailView: View {
     @Environment(WatchLog.self) private var log
     @Environment(ThemeStore.self) private var theme
     @Environment(AddonStore.self) private var addons
+    @Environment(DownloadManager.self) private var downloads
     @AppStorage("tmdb.key") private var tmdbKey = ""
     @AppStorage("tvdb.key") private var tvdbKey = ""
     @AppStorage("mdblist.key") private var mdbKey = ""
@@ -36,6 +37,7 @@ struct ProfileDetailView: View {
                 integrationsCard
                 simklCard
                 libraryCard
+                downloadsCard
                 tiles
                 watchTimeCard
                 if tmdbKey.isEmpty { tmdbNote }
@@ -114,6 +116,18 @@ struct ProfileDetailView: View {
 
     private var libraryCard: some View {
         card("Library", symbol: "books.vertical.fill") { LibrarySourceControls() }
+    }
+
+    private var downloadsCard: some View {
+        card("Downloads", symbol: "arrow.down.circle.fill") {
+            HStack {
+                Text(downloads.records.isEmpty ? "Nothing downloaded yet"
+                     : "\(downloads.records.count) saved · \(DownloadFiles.sizeString(downloads.usedBytes)) used")
+                    .font(.footnote).foregroundStyle(.secondary)
+                Spacer()
+                NavigationLink { DownloadsView() } label: { Text("Open").font(.footnote.weight(.semibold)) }
+            }
+        }
     }
 
     private var integrationsCard: some View {
