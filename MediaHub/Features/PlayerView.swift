@@ -451,6 +451,7 @@ struct PlayerScreen: View {
     @AppStorage("player.glass") private var glassPref = true
     @AppStorage("player.autoplayNext") private var autoplayNext = true
     @AppStorage("skip.fallbackSeconds") private var fallbackSkip = 85
+    @AppStorage("player.levelGestures") private var levelGestures = true
     @State private var current: PlayRequest
     @State private var model = PlayerModel()
     @State private var showControls = true
@@ -477,6 +478,8 @@ struct PlayerScreen: View {
     @State private var pausedOverview: String?
     /// Subtitle look, decoded once per change instead of on every redraw of the player.
     @State private var subStyle = SubtitleStyle()
+    /// Brightness / volume swipes. A plain object: a swipe never changes SwiftUI state.
+    @State private var levels = LevelGestureController()
 
     /// Liquid Glass over live video is re-sampled every frame, so Low Power Mode (or a hot phone) uses the flat look.
     private var glass: Bool { glassPref && !PowerMode.shared.saving }
@@ -494,6 +497,7 @@ struct PlayerScreen: View {
             SubtitleOverlay(cues: model.activeCues, lift: showControls ? 112 : 0, style: subStyle)
                 .animation(.easeInOut(duration: 0.2), value: showControls)
             Color.clear.contentShape(Rectangle()).onTapGesture { tapBackground() }
+                .levelGestures(enabled: levelGestures, controller: levels, canStart: { levelGesturesAllowed })
             if pausedDim { pausedOverlay }
             if model.showSpinner && model.error == nil && !showControls && !showEpisodes && !launching {
                 ProgressView().controlSize(.large).tint(.white)
@@ -507,6 +511,7 @@ struct PlayerScreen: View {
             if showSpeed { speedLayer.transition(.move(edge: .bottom).combined(with: .opacity)) }
             if let e = model.error { errorCard(e) }
             if let n = notice { toast(n) }
+            if levelGestures { LevelHUDHost(controller: levels).allowsHitTesting(false) }
         }
         .preferredColorScheme(.dark)
         .statusBarHidden(!showControls)
@@ -548,6 +553,7 @@ struct PlayerScreen: View {
         .onDisappear {
             UIApplication.shared.isIdleTimerDisabled = false
             OrientationLock.set(.portrait)           // back to portrait for the rest of the app
+            levels.finish()                          // gives the screen brightness back, removes the HUD
             // Normal exit goes through close(); this covers any other way the screen can go away.
             if !closing { finalizeCurrent(); model.shutdown() }
         }
@@ -1081,6 +1087,11 @@ struct PlayerScreen: View {
     }
 
     // MARK: Paused + error
+
+    /// Brightness / volume swipes only start on the bare video: not over an open panel, the error card or the loader.
+    private var levelGesturesAllowed: Bool {
+        !showEpisodes && !showSubtitles && !showSources && !showSpeed && model.error == nil && !launching
+    }
 
     /// Paused with the controls up and nothing else open.
     private var pausedDim: Bool {
