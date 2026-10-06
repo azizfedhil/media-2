@@ -505,6 +505,10 @@ struct PlayerScreen: View {
     @State private var showSources = false
     @State private var showSpeed = false
     @State private var sourceGroups: [(Addon, [StreamItem])] = []
+    /// Add-on id the sources panel is narrowed to; nil = all add-ons.
+    @State private var sourceFilter: String?
+    /// Torrent sources per add-on that are hidden because P2P is switched off.
+    @State private var p2pOffCounts: [String: Int] = [:]
     @State private var loadingSources = false
     @State private var hideTask: Task<Void, Never>?
     @State private var scrobbled = false
@@ -963,6 +967,9 @@ struct PlayerScreen: View {
                 HStack {
                     Text("Sources").font(.title3.weight(.semibold))
                     Spacer()
+                    if sourceGroups.count > 1 {
+                        AddonFilterMenu(groups: sourceGroups, selection: $sourceFilter, onDark: true)
+                    }
                     circleButton("xmark", size: 34, icon: 13) { closeSources() }
                 }
                 ScrollView {
@@ -970,11 +977,17 @@ struct PlayerScreen: View {
                         if loadingSources && sourceGroups.isEmpty {
                             ProgressView().tint(.white).frame(maxWidth: .infinity).padding(.top, 30)
                         }
-                        ForEach(sourceGroups, id: \.0.id) { addon, items in
+                        ForEach(SourceFilter.apply(sourceGroups, sourceFilter), id: \.0.id) { addon, items in
                             VStack(alignment: .leading, spacing: 6) {
                                 Text(addon.manifest.name.uppercased()).font(.caption.weight(.bold)).tracking(1)
                                     .foregroundStyle(.white.opacity(0.6))
                                 ForEach(items) { s in sourceRow(addon, s) }
+                                if let n = p2pOffCounts[addon.id], n > 0 {
+                                    Label("\(n) torrent source\(n == 1 ? "" : "s") unavailable: P2P is off (Settings → Peer-to-peer)",
+                                          systemImage: "antenna.radiowaves.left.and.right.slash")
+                                        .font(.footnote).foregroundStyle(.white.opacity(0.6))
+                                        .padding(.horizontal, 4)
+                                }
                             }
                         }
                         if !loadingSources && sourceGroups.isEmpty {
@@ -1018,6 +1031,8 @@ struct PlayerScreen: View {
     private func openSources() {
         hideTask?.cancel()
         sourceGroups = []
+        sourceFilter = nil
+        p2pOffCounts = [:]
         withAnimation(.snappy(duration: 0.3)) { showSources = true; showSubtitles = false; showEpisodes = false; showSpeed = false; showControls = false }
         Task { await loadSources() }
     }
@@ -1035,12 +1050,17 @@ struct PlayerScreen: View {
         let groups = await AddonClient.shared.streams(for: sid, type: r.item.type, addons: store.addons)
         // Task-group results arrive in completion order; keep the user's add-on order.
         var ordered: [(Addon, [StreamItem])] = []
+        var off: [String: Int] = [:]
         for a in store.addons {
             guard let g = groups.first(where: { $0.0.id == a.id }) else { continue }
             let playable = g.1.filter(\.isPlayable)
-            if !playable.isEmpty { ordered.append((a, playable)) }
+            let hidden = g.1.filter(\.p2pOff).count
+            if hidden > 0 { off[a.id] = hidden }
+            // An add-on whose torrents are all hidden still gets a group, so the panel can say why.
+            if !playable.isEmpty || hidden > 0 { ordered.append((a, playable)) }
         }
         guard !Task.isCancelled, showSources else { return }
+        p2pOffCounts = off
         sourceGroups = ordered
     }
 
