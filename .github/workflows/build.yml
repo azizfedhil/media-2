@@ -8,15 +8,35 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: xcodebuild -version
-      - uses: actions/cache@v4
+      - name: Restore Cargo cache
+        id: cargo-cache
+        uses: actions/cache/restore@v4
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             p2p-core/target
-          key: cargo-${{ hashFiles('p2p-core/Cargo.toml', 'p2p-core/Cargo.lock') }}
+            p2p-core/uniffi-bindgen/target
+            p2p-core/Cargo.lock
+            p2p-core/uniffi-bindgen/Cargo.lock
+          key: cargo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('p2p-core/Cargo.toml', 'p2p-core/uniffi-bindgen/Cargo.toml') }}
+          restore-keys: |
+            cargo-${{ runner.os }}-${{ runner.arch }}-
       - name: Build P2PCore.xcframework
-        run: bash ./p2p-core/scripts/build-xcframework.sh
+        run: ./p2p-core/scripts/build-xcframework.sh
+      # Saved right after the Rust build, so a later Xcode failure can't lose the cache.
+      - name: Save Cargo cache
+        if: steps.cargo-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            p2p-core/target
+            p2p-core/uniffi-bindgen/target
+            p2p-core/Cargo.lock
+            p2p-core/uniffi-bindgen/Cargo.lock
+          key: ${{ steps.cargo-cache.outputs.cache-primary-key }}
       - run: brew install xcodegen && xcodegen
       - name: Build (unsigned)
         run: |
