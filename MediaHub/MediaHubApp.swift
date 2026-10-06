@@ -97,6 +97,12 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
     func application(_ application: UIApplication, supportedInterfaceOrientationsFor window: UIWindow?) -> UIInterfaceOrientationMask {
         OrientationLock.mask
     }
+
+    /// iOS relaunches the app to hand over finished background downloads; the manager reports back when it's done.
+    func application(_ application: UIApplication, handleEventsForBackgroundURLSession identifier: String,
+                     completionHandler: @escaping () -> Void) {
+        MainActor.assumeIsolated { DownloadManager.shared.backgroundCompletion = completionHandler }
+    }
 }
 
 @main
@@ -111,6 +117,8 @@ struct MediaHubApp: App {
     @State private var profiles = ProfileStore()
     @State private var library = LocalLibrary()
     @State private var libraryPrefs = LibraryPrefs()
+    @State private var downloads = DownloadManager.shared
+    @State private var connectivity = Connectivity.shared
 
     init() {
         // Builds the "pear." animation outlines in the background so the intro starts on its first frame.
@@ -122,6 +130,7 @@ struct MediaHubApp: App {
             RootView()
                 .environment(store).environment(history).environment(simkl).environment(pins).environment(theme)
                 .environment(profiles).environment(library).environment(watchLog).environment(libraryPrefs)
+                .environment(downloads).environment(connectivity)
                 .preferredColorScheme(Theme.forceDark ? .dark : nil)
                 .pearLaunchScreen()
         }
@@ -137,6 +146,10 @@ struct RootView: View {
     @Environment(LocalLibrary.self) private var library
     @Environment(WatchLog.self) private var watchLog
     @Environment(LibraryPrefs.self) private var libraryPrefs
+    @Environment(AddonStore.self) private var addonStore
+    @Environment(PinnedSources.self) private var pinnedSources
+    @Environment(DownloadManager.self) private var downloads
+    @Environment(Connectivity.self) private var connectivity
 
     var body: some View {
         // System TabView gives Liquid Glass tab bar for free.
@@ -160,6 +173,8 @@ struct RootView: View {
         }
         .sensoryFeedback(.selection, trigger: profiles.activeID)
         .task { await refreshLibrary() }
+        .task { downloads.configure(store: addonStore, pins: pinnedSources) }
+        .onChange(of: connectivity.isOnline) { _, on in if on == true { downloads.networkReturned() } }
         .onChange(of: phase) { _, p in
             P2PManager.shared.scenePhaseChanged(p)
             if p == .active { Task { await refreshLibrary() } } else { watchLog.flush() }
