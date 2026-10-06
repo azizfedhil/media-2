@@ -154,6 +154,8 @@ struct HomeView: View {
     @State private var model = HomeModel()
     /// Colour pulled from the current hero artwork; washes softly behind the first rows.
     @State private var tint: Color?
+    private var addonTaskID: [String] { store.enabledAddons.map { $0.id } + [String(store.revision)] }
+    private var heroDeps: Int { model.rows.count + model.suggested.count + model.lists.count + model.upNext.count + model.themes.count }
     private var selectedLists: Set<Int> { Set(mdbLists.split(separator: ",").compactMap { Int($0) }) }
 
     var body: some View {
@@ -172,8 +174,8 @@ struct HomeView: View {
                     ForEach(model.rows) { CatalogRowView(row: $0) }
                 }
                 .padding(.bottom, 40)
-                .animation(.smooth(duration: 0.5), value: model.rows.count + model.suggested.count + model.lists.count + model.upNext.count + model.themes.count)
-                .background(alignment: .top) { ambient }
+                .animation(.smooth(duration: 0.5), value: heroDeps)
+                .background(alignment: .top, content: { ambient })
             }
             .ignoresSafeArea(edges: .top)
             .navigationBarTitleDisplayMode(.inline)
@@ -187,7 +189,7 @@ struct HomeView: View {
             .navigationDestination(for: MetaPreview.self) { DetailView(item: $0) }
             .navigationDestination(for: ResumeTarget.self) { DetailView(item: $0.item, startSeason: $0.season, startEpisode: $0.episode) }
             .navigationDestination(for: CatalogRow.self) { CatalogGridView(row: $0) }
-            .task(id: store.enabledAddons.map(\.id) + [String(store.revision)]) { await model.load(addons: store.enabledAddons) }
+            .task(id: addonTaskID) { await model.load(addons: store.enabledAddons) }
             .task(id: tmdbKey) { await model.loadThemes() }
             .task(id: mdbKey + mdbLists) { await model.loadLists(selected: selectedLists) }
             .task(id: tmdbKey + (history.lastWatched?.id ?? "")) { await model.loadSuggestions(last: history.lastWatched) }
