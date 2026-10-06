@@ -12,8 +12,11 @@ extension StreamItem {
         (sources ?? []).compactMap { $0.hasPrefix("tracker:") ? String($0.dropFirst("tracker:".count)) : nil }
     }
 
+    /// A torrent stream while the P2P feature is switched off in Settings.
+    var p2pOff: Bool { isTorrent && !P2PSettings.isEnabled }
+
     /// P2P is on, but the current network isn't allowed (cellular / hotspot / Low Data Mode with "Wi-Fi only").
-    var p2pLocked: Bool { isTorrent && !P2PNetwork.shared.allowed }
+    var p2pLocked: Bool { isTorrent && P2PSettings.isEnabled && !P2PNetwork.shared.allowed }
 }
 
 extension StreamItem {
