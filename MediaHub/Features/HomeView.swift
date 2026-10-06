@@ -53,7 +53,21 @@ final class HomeModel {
         }
     }
 
-    /// Trending movies and shows interleaved, so the hero mixes both.
+    /// Calendar day number (local time). Changes at local midnight.
+    static var currentDay: Int { Calendar.current.ordinality(of: .day, in: .era, for: .now) ?? 0 }
+
+    /// Day the hero was last picked for. Stored so the hero is re-evaluated when it changes.
+    var heroDay: Int = HomeModel.currentDay
+
+    /// Re-picks the hero if the calendar day rolled over (call when the app returns to the foreground).
+    func refreshHeroDay() {
+        let d = Self.currentDay
+        if d != heroDay { heroDay = d }
+    }
+
+    /// Trending movies and shows interleaved, so the hero mixes both. TMDB's weekly trending barely moves day to day,
+    /// so instead of always taking the first 7, each day shows the next 7 along the list (wrapping around). Same
+    /// items all day, a fresh set tomorrow, and no overlap between consecutive days.
     var hero: [MetaPreview] {
         let m = suggested.first { $0.id == "trend-movie" }?.items ?? []
         let t = suggested.first { $0.id == "trend-tv" }?.items ?? []
@@ -63,7 +77,11 @@ final class HomeModel {
             if i < t.count { mixed.append(t[i]) }
         }
         let src = mixed.isEmpty ? (rows.first?.items ?? []) : mixed
-        return Array(src.filter { $0.backdropURL != nil || $0.posterURL != nil }.prefix(7))
+        let pool = src.filter { $0.backdropURL != nil || $0.posterURL != nil }
+        let size = 7
+        guard pool.count > size else { return pool }
+        let start = (heroDay * size) % pool.count
+        return (0..<size).map { pool[(start + $0) % pool.count] }
     }
 
     private nonisolated static func recommendations(after last: MetaPreview?) async -> [MetaPreview] {
@@ -129,6 +147,7 @@ struct HomeView: View {
     @Environment(AddonStore.self) private var store
     @Environment(WatchHistory.self) private var history
     @Environment(ThemeStore.self) private var theme
+    @Environment(\.scenePhase) private var phase
     @AppStorage("tmdb.key") private var tmdbKey = ""
     @AppStorage("mdblist.key") private var mdbKey = ""
     @AppStorage("mdblist.lists") private var mdbLists = ""
@@ -163,11 +182,12 @@ struct HomeView: View {
             .profileToolbar(logo: true)
             .scrollIndicators(.hidden)
             .refreshable { await refresh() }
+            .onChange(of: phase) { _, p in if p == .active { model.refreshHeroDay() } }
             .overlay { if model.rows.isEmpty && model.suggested.isEmpty { ProgressView() } }
             .navigationDestination(for: MetaPreview.self) { DetailView(item: $0) }
             .navigationDestination(for: ResumeTarget.self) { DetailView(item: $0.item, startSeason: $0.season, startEpisode: $0.episode) }
             .navigationDestination(for: CatalogRow.self) { CatalogGridView(row: $0) }
-            .task(id: store.addons.map(\.id) + [String(store.revision)]) { await model.load(addons: store.addons) }
+            .task(id: store.enabledAddons.map(\.id) + [String(store.revision)]) { await model.load(addons: store.enabledAddons) }
             .task(id: tmdbKey) { await model.loadThemes() }
             .task(id: mdbKey + mdbLists) { await model.loadLists(selected: selectedLists) }
             .task(id: tmdbKey + (history.lastWatched?.id ?? "")) { await model.loadSuggestions(last: history.lastWatched) }
@@ -183,7 +203,7 @@ struct HomeView: View {
     }
 
     private func refresh() async {
-        async let a: () = model.load(addons: store.addons)
+        async let a: () = model.load(addons: store.enabledAddons)
         async let b: () = model.loadSuggestions(last: history.lastWatched)
         async let c: () = model.loadLists(selected: selectedLists)
         async let d: () = model.loadUpNext(history.finishedEntries)
