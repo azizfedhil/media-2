@@ -180,13 +180,18 @@ final class P2PManager {
     }
 
     private static func map(_ e: Error) -> Error {
-        guard let e = e as? P2pError else { return e }
-        switch e {
-        case .metadataTimeout: return Failure.noPeers
-        case .noFile: return Failure.noVideo
-        case .stopped: return CancellationError()
-        case .invalidInput(let m), .torrent(let m), .io(let m): return Failure.engine(m)
+        let desc = String(describing: e)
+        if desc.localizedCaseInsensitiveContains("metadata") || desc.localizedCaseInsensitiveContains("timeout") {
+            return Failure.noPeers
         }
+        if desc.localizedCaseInsensitiveContains("nofile") || desc.localizedCaseInsensitiveContains("no file") {
+            return Failure.noVideo
+        }
+        if desc.localizedCaseInsensitiveContains("stopped") {
+            return CancellationError()
+        }
+        return Failure.engine(e.localizedDescription.isEmpty ? desc : e.localizedDescription)
+    
     }
 }
 
