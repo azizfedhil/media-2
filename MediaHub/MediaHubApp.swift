@@ -187,7 +187,13 @@ struct RootView: View {
         .onChange(of: connectivity.isOnline) { _, on in if on == true { downloads.networkReturned() } }
         .onChange(of: phase) { _, p in
             P2PManager.shared.scenePhaseChanged(p)
-            if p == .active { Task { await refreshLibrary() } } else { watchLog.flush() }
+            if p == .active {
+                ArtworkRotation.shared.refresh()          // the only place the day's artwork can change
+                Task { await refreshLibrary() }
+            } else {
+                watchLog.flush()
+                ArtworkPool.shared.flush()
+            }
         }
     }
 

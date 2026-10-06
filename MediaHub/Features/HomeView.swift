@@ -268,9 +268,9 @@ struct HeroCarousel: View {
         .task(id: currentID) { await updateTint() }
     }
 
-    private func updateTint() async {
+    @MainActor private func updateTint() async {
         guard let item = items.first(where: { $0.id == currentID }),
-              let url = item.heroURL(wide: wide),
+              let url = ArtworkRotation.shared.hero(for: item, wide: wide).url,
               let c = await ImagePipeline.shared.averageColor(for: url), !Task.isCancelled else { return }
         withAnimation(.easeInOut(duration: 0.9)) { tint = Color(uiColor: c) }
     }
@@ -290,7 +290,7 @@ private struct HeroPage: View {
                 // visible start line and no hard edge where the hero ends. One static mask, nothing animated.
                 ZStack {
                     KenBurns(active: active) {
-                        RemoteImage(url: item.heroURL(wide: wide), size: wide ? 1200 : 800)
+                        RotatingArtwork(item: item, kind: .hero(wide: wide), size: wide ? 1200 : 800)
                     }
                     LinearGradient.easedFade(start: 0.4, from: 0, to: 0.6)
                 }
@@ -521,7 +521,7 @@ private struct ContinueCard: View {
                 Color.clear
                     .aspectRatio(16.0 / 9.0, contentMode: .fit)
                     .frame(width: width)
-                    .overlay { RemoteImage(url: thumb, size: width) }
+                    .overlay { StillImage(url: thumb, size: width) }
                     .overlay { LinearGradient(colors: [.clear, .black.opacity(0.5)], startPoint: .center, endPoint: .bottom) }
                     .overlay {
                         Image(systemName: "play.fill").font(.system(size: 16, weight: .bold)).foregroundStyle(.white)
@@ -576,7 +576,7 @@ private struct UpNextCard: View {
                 Color.clear
                     .aspectRatio(16.0 / 9.0, contentMode: .fit)
                     .frame(width: width)
-                    .overlay { RemoteImage(url: entry.thumb, size: width) }
+                    .overlay { StillImage(url: entry.thumb, size: width) }
                     .overlay { LinearGradient(colors: [.clear, .black.opacity(0.5)], startPoint: .center, endPoint: .bottom) }
                     .overlay {
                         Image(systemName: "play.fill").font(.system(size: 16, weight: .bold)).foregroundStyle(.white)
@@ -701,7 +701,7 @@ struct PosterCard: View {
     private var poster: some View {
         NavigationLink(value: item) {
             VStack(alignment: .leading, spacing: 7) {
-                RemoteImage(url: item.posterURL, size: (width ?? 120) * 1.5)
+                RotatingArtwork(item: item, kind: .poster, size: (width ?? 120) * 1.5)
                     .aspectRatio(2.0 / 3.0, contentMode: .fit)
                     .frame(width: width)
                     .clipShape(RoundedRectangle(cornerRadius: compact ? 9 : 12, style: .continuous))

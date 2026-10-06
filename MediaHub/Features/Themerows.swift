@@ -102,7 +102,7 @@ private struct ThemeCard: View {
             Color.clear
                 .aspectRatio(4.0 / 5.0, contentMode: .fit)
                 .containerRelativeFrame(.horizontal) { w, _ in min(w - 56, 440) }
-                .overlay { RemoteImage(url: item.heroURL(wide: false), size: 440) }
+                .overlay { RotatingArtwork(item: item, kind: .hero(wide: false), size: 440) }
                 .overlay {
                     LinearGradient(stops: [.init(color: .clear, location: 0.4), .init(color: .black.opacity(0.85), location: 1)],
                                    startPoint: .top, endPoint: .bottom)

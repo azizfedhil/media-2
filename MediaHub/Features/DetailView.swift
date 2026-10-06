@@ -96,7 +96,7 @@ struct DetailView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                RemoteImage(url: item.backdropURL, size: 800)
+                RotatingArtwork(item: item, kind: .detail, size: 800)
                     .frame(height: 420)
                     .overlay(alignment: .bottom) {
                         LinearGradient(colors: [.clear, Color(.systemBackground)], startPoint: .top, endPoint: .bottom)
@@ -150,7 +150,7 @@ struct DetailView: View {
             guard let imdb = await ensureIMDB() else { return }
             let sid = isSeries ? "\(imdb):\(season):\(episode)" : imdb
             // Each add-on's answer is shown as it arrives, kept in the user's add-on order.
-            let addons = store.addons
+            let addons = store.enabledAddons
             for await group in AddonClient.shared.streamUpdates(for: sid, type: item.type, addons: addons) {
                 guard showSources else { return }
                 streams = AddonClient.ordered(streams + [group], by: addons)
@@ -684,7 +684,7 @@ struct DetailView: View {
     /// Lets the player browse episodes and jump to another one using the same add-ons and pins.
     private func makeProvider() -> EpisodeProvider? {
         guard isSeries else { return nil }
-        let item = item, addons = store.addons, pins = pins
+        let item = item, addons = store.enabledAddons, pins = pins
         let options = seasonChips.map { SeasonOption(id: $0.id, title: $0.title) }
         return EpisodeProvider(
             seasons: options,

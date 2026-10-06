@@ -7,6 +7,7 @@ enum ImageMemory {
     static let cache: NSCache<NSString, UIImage> = {
         let c = NSCache<NSString, UIImage>()
         c.totalCostLimit = 60 << 20
+        c.countLimit = 250
         return c
     }()
 
@@ -28,12 +29,28 @@ enum ImageMemory {
 /// - Bitmaps are never larger than the source image, so a 780 px backdrop isn't stretched into a 2400 px one.
 actor ImagePipeline {
     static let shared = ImagePipeline()
+
+    /// Who is asking. `.standard` is artwork the screen needs. `.upgrade` is optional, nicer artwork (rotated
+    /// posters): it never uses cellular, Low Data Mode, Low Power Mode or a hot device, and when any of those apply
+    /// it is served from the disk cache or not at all, so the radio stays off.
+    enum Tier: Sendable { case standard, upgrade }
+
+    /// Disk (oldest entries evicted first once 300 MB is reached) plus a small memory tier for raw bytes. A static so
+    /// cache probes (`isCached`) don't have to go through the actor.
+    nonisolated(unsafe) static let urlCache = URLCache(memoryCapacity: 30 << 20, diskCapacity: 300 << 20)
+
+    /// Hosts whose image paths are content-addressed (a changed image gets a new path), so a cached copy never needs
+    /// revalidating. Everything else follows normal HTTP caching: URLSession sends the stored ETag / Last-Modified
+    /// as If-None-Match / If-Modified-Since once an entry is stale, and a 304 reuses the cached bytes with no body.
+    private static let immutableHosts: Set<String> = ["image.tmdb.org"]
+
     private let session: URLSession = {
         let cfg = URLSessionConfiguration.default
-        cfg.urlCache = URLCache(memoryCapacity: 30 << 20, diskCapacity: 300 << 20)
-        cfg.requestCachePolicy = .returnCacheDataElseLoad
+        cfg.urlCache = ImagePipeline.urlCache
+        cfg.requestCachePolicy = .useProtocolCachePolicy
         return URLSession(configuration: cfg)
     }()
+    private let gate = DecodeGate()
     private var colorCache: [URL: UIColor] = [:]
     private var flights: [URL: DataFlight] = [:]
     private var nextWaiter = 0
@@ -45,10 +62,23 @@ actor ImagePipeline {
         init(_ task: Task<Data?, Never>) { self.task = task }
     }
 
-    func image(for url: URL, maxPixel: CGFloat) async -> UIImage? {
+    /// True when the bytes for `url` are already on disk / in the URL cache.
+    nonisolated static func isCached(_ url: URL) -> Bool {
+        urlCache.cachedResponse(for: URLRequest(url: url)) != nil
+    }
+
+    func image(for url: URL, maxPixel: CGFloat, tier: Tier = .standard) async -> UIImage? {
         if let hit = ImageMemory.get(url, maxPixel: maxPixel) { return hit }
-        guard let data = await download(url), !Task.isCancelled else { return nil }
-        let img = await Task.detached(priority: .userInitiated) { Self.decode(data, maxPixel: maxPixel) }.value
+        guard let data = await download(url, tier: tier), !Task.isCancelled else { return nil }
+        // At most a couple of decodes at once: a fast flick through a long row never piles up a dozen full-size
+        // decodes (CPU spike, heat, memory spike). A view that was scrolled away while waiting skips its decode.
+        await gate.enter()
+        var decoded: UIImage?
+        if !Task.isCancelled {
+            decoded = await Task.detached(priority: .userInitiated) { Self.decode(data, maxPixel: maxPixel) }.value
+        }
+        await gate.leave()
+        let img = decoded
         guard let img else { return nil }
         ImageMemory.cache.setObject(img, forKey: ImageMemory.key(url, maxPixel),
                                     cost: img.cgImage.map { $0.bytesPerRow * $0.height } ?? 0)
@@ -57,14 +87,31 @@ actor ImagePipeline {
 
     // MARK: Download (shared, cancel when nobody is waiting any more)
 
-    private func download(_ url: URL) async -> Data? {
+    private static func request(_ url: URL, tier: Tier) -> URLRequest {
+        var r = URLRequest(url: url)
+        let policy: URLRequest.CachePolicy = immutableHosts.contains(url.host ?? "") ? .returnCacheDataElseLoad : .useProtocolCachePolicy
+        switch tier {
+        case .standard:
+            r.cachePolicy = policy
+        case .upgrade where NetworkConditions.upgradesAllowed:
+            r.cachePolicy = policy
+            r.allowsExpensiveNetworkAccess = false          // also covers the network changing mid-download
+            r.allowsConstrainedNetworkAccess = false
+        case .upgrade:
+            r.cachePolicy = .returnCacheDataDontLoad        // cached copy or nothing
+        }
+        return r
+    }
+
+    private func download(_ url: URL, tier: Tier) async -> Data? {
         let flight: DataFlight
         if let running = flights[url] {
             flight = running
         } else {
             let session = session
-            let task = Task.detached(priority: .userInitiated) { () -> Data? in
-                guard let (data, response) = try? await session.data(from: url) else { return nil }
+            let request = Self.request(url, tier: tier)
+            let task = Task.detached(priority: tier == .upgrade ? .utility : .userInitiated) { () -> Data? in
+                guard let (data, response) = try? await session.data(for: request) else { return nil }
                 if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) { return nil }
                 return data
             }
@@ -137,10 +184,29 @@ actor ImagePipeline {
     }
 }
 
+/// Counting semaphore for decodes. Waiters are served first come, first served.
+private actor DecodeGate {
+    private let limit = max(2, ProcessInfo.processInfo.activeProcessorCount / 2)
+    private var running = 0
+    private var waiting: [CheckedContinuation<Void, Never>] = []
+
+    func enter() async {
+        if running < limit { running += 1; return }
+        await withCheckedContinuation { waiting.append($0) }
+    }
+
+    func leave() {
+        if waiting.isEmpty { running -= 1 } else { waiting.removeFirst().resume() }
+    }
+}
+
 struct RemoteImage: View {
     let url: URL?
     /// Longest edge in points; converted to pixels for downsampling.
     let size: CGFloat
+    /// Set when `url` is optional upgrade artwork (see `RotatingArtwork`): it is then loaded without touching
+    /// cellular / Low Data Mode, and if it can't be had, `fallback` (the standard artwork) is shown instead.
+    var fallback: URL? = nil
     @Environment(\.displayScale) private var scale
     @State private var image: UIImage?
     @State private var failed = false
@@ -166,7 +232,11 @@ struct RemoteImage: View {
                 failed = false
                 guard let url else { failed = true; return }
                 if let hit = ImageMemory.get(url, maxPixel: pixels) { image = hit; return }
-                let img = await ImagePipeline.shared.image(for: url, maxPixel: pixels)
+                var img = await ImagePipeline.shared.image(for: url, maxPixel: pixels, tier: fallback == nil ? .standard : .upgrade)
+                if img == nil, !Task.isCancelled, let fallback, fallback != url {
+                    img = ImageMemory.get(fallback, maxPixel: pixels)
+                    if img == nil { img = await ImagePipeline.shared.image(for: fallback, maxPixel: pixels) }
+                }
                 guard !Task.isCancelled else { return }
                 withAnimation(.easeOut(duration: 0.25)) { image = img }
                 if img == nil { failed = true }

@@ -29,7 +29,7 @@ struct EpisodeCard<Actions: View>: View {
             Color(white: 0.09)
             if let tint { tint.opacity(0.3).transition(.opacity) }
             // Still across the top ~60%, dissolving into the panel instead of ending at an edge.
-            RemoteImage(url: ep.image, size: Self.width)
+            StillImage(url: ep.image, size: Self.height * 0.62 * 16 / 9)
                 .frame(width: Self.width, height: Self.height * 0.62)
                 .mask {
                     LinearGradient(stops: [.init(color: .black, location: 0), .init(color: .black, location: 0.5),

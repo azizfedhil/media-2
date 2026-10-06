@@ -1073,7 +1073,7 @@ struct PlayerScreen: View {
         loadingSources = true; defer { loadingSources = false }
         let r = current
         let sid = (r.season != nil && r.episode != nil) ? "\(r.imdb):\(r.season ?? 0):\(r.episode ?? 0)" : r.imdb
-        let addons = store.addons
+        let addons = store.enabledAddons
         var raw: [(Addon, [StreamItem])] = []
         for await group in AddonClient.shared.streamUpdates(for: sid, type: r.item.type, addons: addons) {
             guard !Task.isCancelled, showSources else { return }
@@ -1611,7 +1611,7 @@ private struct EpisodePanel: View {
             .compactMap { $0 }.joined(separator: " · ")
         return Button { onSelect(season, ep) } label: {
             VStack(alignment: .leading, spacing: 6) {
-                RemoteImage(url: ep.image, size: cardWidth)
+                StillImage(url: ep.image, size: cardWidth)
                     .frame(width: cardWidth, height: cardHeight)
                     .overlay { LinearGradient(colors: [.clear, .black.opacity(0.5)], startPoint: .center, endPoint: .bottom) }
                     .overlay(alignment: .bottomLeading) {

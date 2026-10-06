@@ -51,7 +51,11 @@ actor TMDBClient {
     private var keywordCache: [String: Int] = (UserDefaults.standard.dictionary(forKey: "tmdb.keywordIDs") as? [String: Int]) ?? [:]
     private struct ImageSet: Decodable {
         struct Logo: Decodable { let filePath: String; let iso6391: String?; let voteAverage: Double?; let width: Int? }
+        /// Posters and backdrops arrive in the same response, so artwork rotation costs no extra request.
+        struct Art: Decodable { let filePath: String; let iso6391: String?; let voteAverage: Double?; let width: Int?; let height: Int? }
         let logos: [Logo]?
+        let posters: [Art]?
+        let backdrops: [Art]?
     }
 
     private static let img = "https://image.tmdb.org/t/p/"
@@ -222,10 +226,15 @@ actor TMDBClient {
         return try? await tmdbID(for: id, type: type)
     }
 
+    private static func raw(_ a: ImageSet.Art) -> ArtworkPool.Raw {
+        ArtworkPool.Raw(path: a.filePath, language: a.iso6391, width: a.width ?? 0, height: a.height ?? 0, votes: a.voteAverage ?? 0)
+    }
+
     /// Best title logo (transparent PNG): English or language-less, highest voted. SVGs are skipped (ImageIO can't draw them).
     func logo(for id: String, type: String) async -> URL? {
         guard hasKey, let tid = try? await tmdbID(for: id, type: type),
               let set: ImageSet = try? await get("/\(kind(type))/\(tid)/images", ["include_image_language": "en,null"]) else { return nil }
+        ArtworkPool.shared.ingest(id: id, posters: (set.posters ?? []).map(Self.raw), backdrops: (set.backdrops ?? []).map(Self.raw))
         let usable = (set.logos ?? []).filter { !$0.filePath.lowercased().hasSuffix(".svg") && ($0.iso6391 == "en" || $0.iso6391 == nil) }
         let best = usable.max { a, b in
             let la = a.iso6391 == "en" ? 1 : 0, lb = b.iso6391 == "en" ? 1 : 0
