@@ -135,6 +135,12 @@ struct LibraryView: View {
             .navigationSubtitle(subtitle)
             .navigationBarTitleDisplayMode(.large)
             .profileToolbar()
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    NavigationLink { DownloadsView() } label: { Image(systemName: "arrow.down.circle") }
+                        .accessibilityLabel("Downloads")
+                }
+            }
         }
     }
 
