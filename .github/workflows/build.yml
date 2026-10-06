@@ -23,7 +23,7 @@ jobs:
           restore-keys: |
             cargo-${{ runner.os }}-${{ runner.arch }}-
       - name: Build P2PCore.xcframework
-        run: ./p2p-core/scripts/build-xcframework.sh
+        run: bash ./p2p-core/scripts/build-xcframework.sh
       # Saved right after the Rust build, so a later Xcode failure can't lose the cache.
       - name: Save Cargo cache
         if: steps.cargo-cache.outputs.cache-hit != 'true'
