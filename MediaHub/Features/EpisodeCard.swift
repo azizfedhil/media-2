@@ -8,6 +8,8 @@ struct EpisodeCard<Actions: View>: View {
     let selected: Bool
     let watched: Bool
     var upNext = false
+    /// Download state for this episode (nil = not downloaded): drives the badge.
+    var download: DownloadRecord? = nil
     let onTap: () -> Void
     @ViewBuilder let actions: () -> Actions
     @Environment(ThemeStore.self) private var theme
@@ -36,8 +38,11 @@ struct EpisodeCard<Actions: View>: View {
         }
         .frame(width: Self.width, height: Self.height)
         .overlay(alignment: .topLeading) {
-            if watched { badge("checkmark.circle.fill", "Watched") }
-            else if upNext { badge(nil, "UP NEXT", fill: theme.accent, text: theme.onAccent) }
+            VStack(alignment: .leading, spacing: 0) {
+                if watched { badge("checkmark.circle.fill", "Watched") }
+                else if upNext { badge(nil, "UP NEXT", fill: theme.accent, text: theme.onAccent) }
+                if let download { downloadBadge(download, below: watched || upNext) }
+            }
         }
         .overlay(alignment: .topTrailing) {
             if let r = ep.rating, r > 0 { ratingBadge(r) }
@@ -97,6 +102,24 @@ struct EpisodeCard<Actions: View>: View {
         .background(.black.opacity(0.55), in: Capsule())
         .padding(10)
         .allowsHitTesting(false)
+    }
+
+    /// Saved / saving state. Solid accent once the file is on the device.
+    private func downloadBadge(_ d: DownloadRecord, below: Bool) -> some View {
+        let symbol: String, label: String
+        switch d.state {
+        case .done: symbol = "arrow.down.circle.fill"; label = "Downloaded"
+        case .downloading: symbol = "arrow.down.circle"; label = "\(Int(d.progress * 100))%"
+        case .queued: symbol = "clock"; label = "Queued"
+        case .failed: symbol = "exclamationmark.triangle.fill"; label = "Failed"
+        }
+        let done = d.state == .done
+        return HStack(spacing: 4) { Image(systemName: symbol); Text(label).monospacedDigit() }
+            .font(.caption2.bold()).foregroundStyle(done ? theme.onAccent : .white)
+            .padding(.horizontal, 8).padding(.vertical, 4)
+            .background(done ? theme.accent : Color.black.opacity(0.55), in: Capsule())
+            .padding(.leading, 10).padding(.top, below ? 0 : 10)
+            .allowsHitTesting(false)
     }
 
     private func badge(_ symbol: String?, _ label: String, fill: Color = .black.opacity(0.55), text: Color = .white) -> some View {
