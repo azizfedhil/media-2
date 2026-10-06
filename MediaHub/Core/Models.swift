@@ -167,11 +167,14 @@ struct StreamItem: Decodable, Identifiable, Sendable {
     let title: String?
     let description: String?
     let url: String?        // directly playable
-    let infoHash: String?   // torrent: not playable on iOS without a debrid add-on
+    let infoHash: String?   // torrent: only playable through the opt-in P2P engine (see P2PGate)
+    let fileIdx: Int?       // Torrentio: which file inside the torrent to play (season packs)
+    let sources: [String]?  // Torrentio: "tracker:<url>" / "dht:<hash>" entries
     let externalUrl: String?
     let behaviorHints: Hints?
     var id: String { url ?? infoHash ?? externalUrl ?? UUID().uuidString }
-    var isPlayable: Bool { url != nil }
+    /// Direct link, or a torrent the opt-in P2P engine can start right now (see StreamItem+P2P).
+    var isPlayable: Bool { url != nil || canStreamP2P }
 
     /// Optional add-on hints. Some debrid add-ons require custom request headers to fetch the file.
     struct Hints: Decodable, Sendable {

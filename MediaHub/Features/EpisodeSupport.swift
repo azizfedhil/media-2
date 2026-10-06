@@ -90,12 +90,12 @@ enum SourceResolver {
         if chosen == nil {
             for g in ordered { if let s = g.1.first(where: \.isPlayable) { chosen = (g.0, s); break } }
         }
-        guard let (addon, stream) = chosen, let url = stream.url.flatMap(URL.init(string:)) else { return nil }
+        guard let (addon, stream) = chosen, let target = stream.playTarget else { return nil }
 
-        return PlayRequest(url: url, headers: stream.requestHeaders, item: current.item,
+        return PlayRequest(url: target.url, headers: stream.requestHeaders, item: current.item,
                            key: "\(season):\(episode.id)", imdb: current.imdb,
                            season: season, episode: episode.id, episodeTitle: episode.name,
                            logo: current.logo, thumb: episode.image ?? current.item.backdropURL,
-                           sourceAddonID: addon.id, sourceSignature: stream.signature)
+                           sourceAddonID: addon.id, sourceSignature: stream.signature, p2p: target.p2p)
     }
 }

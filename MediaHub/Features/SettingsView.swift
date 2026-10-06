@@ -20,6 +20,9 @@ struct SettingsView: View {
     @AppStorage("player.autoplayNext") private var autoplayNext = true
     @AppStorage("skip.enabled") private var skipEnabled = true
     @AppStorage("skip.fallbackSeconds") private var fallbackSkip = 85
+    @AppStorage(P2PSettings.enabledKey) private var p2pEnabled = false
+    @AppStorage(P2PSettings.wifiOnlyKey) private var p2pWifiOnly = true
+    @State private var confirmP2P = false
     @AppStorage("sub.lang") private var subLang = "off"
     @State private var urlText = ""
     @State private var error: String?
@@ -124,6 +127,22 @@ struct SettingsView: View {
                 } header: { Text("Playback") } footer: {
                     Text("Skip buttons use community timestamps from TheIntroDB. When a show has none, the manual button jumps ahead by the chosen time. Set it to 0 to hide it. Turn Liquid Glass off if playback ever feels heavy on an older device.")
                 }
+
+                Section {
+                    Toggle("Peer-to-peer streams", isOn: Binding(
+                        get: { p2pEnabled },
+                        set: { on in if on { confirmP2P = true } else { p2pEnabled = false } }))
+                        .alert("Enable peer-to-peer?", isPresented: $confirmP2P) {
+                            Button("Enable") { p2pEnabled = true }
+                            Button("Cancel", role: .cancel) {}
+                        } message: {
+                            Text("Torrent streams connect directly to other peers, so your IP address is visible to them. A VPN is recommended. Nothing runs until you play a P2P stream.")
+                        }
+                    if p2pEnabled { Toggle("Wi-Fi only", isOn: $p2pWifiOnly) }
+                } header: { Text("Peer-to-peer") } footer: {
+                    Text("Off by default. When off, torrent sources are hidden and nothing P2P is started. Debrid and direct links are never affected.")
+                }
+                .onChange(of: p2pEnabled) { _, on in if !on { P2PManager.shared.stop(); P2PNetwork.shared.stop() } }
 
                 Section {
                     Toggle("Include watch history & library", isOn: $includeData)

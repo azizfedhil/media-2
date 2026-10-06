@@ -161,6 +161,7 @@ struct RootView: View {
         .sensoryFeedback(.selection, trigger: profiles.activeID)
         .task { await refreshLibrary() }
         .onChange(of: phase) { _, p in
+            P2PManager.shared.scenePhaseChanged(p)
             if p == .active { Task { await refreshLibrary() } } else { watchLog.flush() }
         }
     }

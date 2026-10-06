@@ -18,6 +18,11 @@ targets:
     sources: [MediaHub]
     dependencies:
       - package: AetherEngine
+      # Rust P2P core (built by p2p-core/scripts/build-xcframework.sh). Static: link only, never embed.
+      - framework: Vendor/P2PCore.xcframework
+        embed: false
+      - sdk: Security.framework
+      - sdk: SystemConfiguration.framework
     info:
       path: Config/Info.plist
       properties:
@@ -43,3 +48,4 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
         TARGETED_DEVICE_FAMILY: "1,2"
+        OTHER_LDFLAGS: "$(inherited) -lresolv"

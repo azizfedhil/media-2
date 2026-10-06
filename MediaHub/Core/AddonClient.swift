@@ -53,7 +53,7 @@ actor AddonClient {
                     let url = addon.baseURL.appendingPathComponent("stream/\(type)/\(id).json")
                     guard let d = try? await self.data(url),
                           let s = try? StreamItem.decodeList(d) else { return nil }
-                    return (addon, s)
+                    return (addon, await P2PGate.apply(s))
                 }
             }
             var out: [(Addon, [StreamItem])] = []

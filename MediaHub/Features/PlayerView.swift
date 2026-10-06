@@ -18,6 +18,8 @@ struct PlayRequest: Identifiable {
     /// Which add-on / release name this came from, so the next episode can prefer the same source.
     var sourceAddonID: String? = nil
     var sourceSignature: String? = nil
+    /// Set for torrent sources: the real URL is resolved by P2PManager when playback starts.
+    var p2p: P2PSource? = nil
 }
 
 /// Playback position lives in its own object: only views that read it (seek bar, skip button) redraw on the
@@ -55,6 +57,9 @@ final class PlayerModel {
     /// Playback speed, 0.5...2.0 in continuous steps. The engine clamps it again to what the active backend supports.
     private(set) var rate: Double = 1.0
     private(set) var engine: AetherEngine?
+    /// Last request handed to start(), and whether P2PManager tore the engine down behind our back (idle, background, memory, network, call).
+    @ObservationIgnored private var lastRequest: PlayRequest?
+    @ObservationIgnored private var p2pDropped = false
 
     let playhead = Playhead()
 
@@ -88,7 +93,7 @@ final class PlayerModel {
     }
 
     /// `replacing`: the engine is already playing something else (episode switch).
-    func start(_ r: PlayRequest, resume: Double?, replacing: Bool = false) async {
+    func start(_ r: PlayRequest, resume: Double?, replacing: Bool = false, exact: Bool = false) async {
         guard !isShutDown else { return }
         if engine == nil {
             do { engine = try AetherEngine() }
@@ -99,13 +104,23 @@ final class PlayerModel {
             }
         }
         guard let engine else { return }
+        lastRequest = r; p2pDropped = false
         bind(engine)
         resetForNewItem()
         Task { await loadOnlineSubtitles(for: r, auto: true) }
-        let startAt = (resume ?? 0) > 30 ? (resume ?? 0) : 0
+        let startAt = exact ? (resume ?? 0) : ((resume ?? 0) > 30 ? (resume ?? 0) : 0)
         if startAt > 0 { playhead.position = startAt }      // seek bar shows the resume point while loading
         do {
             if replacing { engine.stop() }
+            var url = r.url
+            if let src = r.p2p {
+                // Spinner stays up while peers are found; initial buffering is the same state as for any slow source.
+                url = try await P2PManager.shared.open(src)
+                // The screen may have been closed while peers were being found.
+                if isShutDown { P2PManager.shared.stop(); engine.stop(); return }
+            } else {
+                P2PManager.shared.stop() // switched from a torrent to a direct source: tear the engine down
+            }
             var options = LoadOptions(httpHeaders: r.headers)
             // ~10 min of look-ahead (150 x ~4 s segments). That is the largest window the engine accepts without
             // opting out of its 2 GiB retention cap, so a seek or a reconnect never competes with a whole-film
@@ -114,13 +129,19 @@ final class PlayerModel {
             // Remote files: cap the open-time probe (engine defaults are 50 MB / 60 s, tuned for local disk).
             options.probesize = 16 * 1024 * 1024
             options.maxAnalyzeDuration = 10 * 1_000_000
+            if r.p2p != nil {
+                // Torrent: smaller probe and ~3 min look-ahead, so the swarm isn't pulled far ahead of playback.
+                options.probesize = 8 * 1024 * 1024
+                options.forwardBufferSegments = PowerMode.shared.saving ? 20 : 40
+            }
             // Open straight at the resume point. Loading at 0:00, playing, then seeking made the engine fetch the
             // head of the file, throw it away, and restart its producer at the target: the cut-and-reload on resume.
-            try await engine.load(url: r.url, startPosition: startAt, options: options)
+            try await engine.load(url: url, startPosition: startAt, options: options)
             // The screen may have been closed while the source was loading.
             if isShutDown { engine.stop(); return }
             engine.play()
         } catch {
+            if error is CancellationError || isShutDown { return }
             self.error = error.localizedDescription
             setBuffering(false)
         }
@@ -147,18 +168,31 @@ final class PlayerModel {
             guard let self else { return }
             switch s {
             case .playing:
+                P2PManager.shared.playbackChanged(true)
                 isPlaying = true; isPaused = false; setBuffering(false); error = nil; refreshTracks()
                 if rateStale { pushRate() }
-            case .paused: isPlaying = false; isPaused = true; setBuffering(false); rateStale = rate != 1
-            case .loading, .seeking: isPaused = false; setBuffering(true); rateStale = rate != 1
-            case .ended: isPlaying = false; isPaused = false; setBuffering(false); didEnd = true
-            case .error: isPlaying = false; isPaused = false; setBuffering(false); error = "Playback failed (\(String(describing: s)))."
+            case .paused: P2PManager.shared.playbackChanged(false); isPlaying = false; isPaused = true; setBuffering(false); rateStale = rate != 1
+            case .loading, .seeking: P2PManager.shared.playbackChanged(true); isPaused = false; setBuffering(true); rateStale = rate != 1
+            case .ended: P2PManager.shared.playbackChanged(false); isPlaying = false; isPaused = false; setBuffering(false); didEnd = true
+            case .error: P2PManager.shared.playbackChanged(false); isPlaying = false; isPaused = false; setBuffering(false); error = "Playback failed (\(String(describing: s)))."
             default: break
             }
         }.store(in: &bag)
         engine.$duration.receive(on: DispatchQueue.main).sink { [weak self] d in
             self?.playhead.duration = Double(d)
         }.store(in: &bag)
+        // P2P torn down while we weren't looking: stop the engine cleanly and wait on the play button (or a seek) to reopen.
+        NotificationCenter.default.publisher(for: P2PManager.didStop)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] n in
+                guard let self, !isShutDown, lastRequest?.p2p != nil,
+                      let raw = n.userInfo?["reason"] as? String,
+                      P2PManager.StopReason(rawValue: raw)?.isAutomatic == true else { return }
+                p2pDropped = true
+                seekTask?.cancel(); pendingTarget = nil; seekInFlight = false
+                engine.stop()
+                isPlaying = false; isPaused = true; setBuffering(false)
+            }.store(in: &bag)
         // The seek bar only needs the clock to the second: 2 Hz while the controls are up, 1 Hz while they are hidden
         // (the skip-intro button is the only reader then). Fewer publishes means fewer redraws and CPU wake-ups.
         engine.clock.$currentTime
@@ -328,7 +362,17 @@ final class PlayerModel {
 
     // MARK: Transport
 
-    func togglePlay() { engine?.togglePlayPause() }
+    func togglePlay() {
+        if p2pDropped { resumeAfterDrop() } else { engine?.togglePlayPause() }
+    }
+
+    /// Reopens the torrent at the saved position (or at t, for a seek made while it was torn down).
+    private func resumeAfterDrop(at t: Double? = nil) {
+        guard p2pDropped, let r = lastRequest else { return }
+        p2pDropped = false
+        let pos = t ?? playhead.position
+        Task { await start(r, resume: pos, replacing: true, exact: true) }
+    }
 
     // MARK: Playback speed
 
@@ -386,6 +430,7 @@ final class PlayerModel {
     private func commitSeek() async {
         guard let t = pendingTarget else { seekInFlight = false; return }
         pendingTarget = nil
+        if p2pDropped { seekInFlight = false; resumeAfterDrop(at: t); return }
         await engine?.seek(to: t)
         if pendingTarget == nil { seekInFlight = false }
     }
@@ -397,6 +442,7 @@ final class PlayerModel {
         cueClock = nil
         bag.removeAll()
         engine?.stop()
+        P2PManager.shared.stop()
     }
 }
 
@@ -1000,14 +1046,14 @@ struct PlayerScreen: View {
 
     /// Same episode, different stream: carries the position over and keeps the saved progress.
     private func selectSource(_ addon: Addon, _ s: StreamItem) {
-        guard let u = s.url.flatMap(URL.init(string:)) else { return }
+        guard let t = s.playTarget else { return }
         if addon.id == current.sourceAddonID && s.signature == current.sourceSignature { closeSources(); return }
         let resume = model.playhead.position
         save()
-        let next = PlayRequest(url: u, headers: s.requestHeaders, item: current.item, key: current.key, imdb: current.imdb,
+        let next = PlayRequest(url: t.url, headers: s.requestHeaders, item: current.item, key: current.key, imdb: current.imdb,
                                season: current.season, episode: current.episode, episodeTitle: current.episodeTitle,
                                logo: current.logo, thumb: current.thumb,
-                               sourceAddonID: addon.id, sourceSignature: s.signature)
+                               sourceAddonID: addon.id, sourceSignature: s.signature, p2p: t.p2p)
         current = next
         withAnimation(.snappy(duration: 0.3)) { showSources = false; showControls = true }
         Task {
@@ -1251,6 +1297,7 @@ struct PlayerScreen: View {
     }
 
     private func open(_ prefix: String) {
+        guard current.p2p == nil else { return } // a loopback torrent URL means nothing to another app
         let enc = current.url.absoluteString.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? ""
         if let u = URL(string: prefix + enc) { openURL(u) }
     }

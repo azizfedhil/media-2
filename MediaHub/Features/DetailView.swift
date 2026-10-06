@@ -570,14 +570,14 @@ struct DetailView: View {
     }
 
     private func play(_ addon: Addon, _ s: StreamItem) {
-        guard let u = s.url.flatMap(URL.init(string:)), let imdb = imdbID else { return }
+        guard let t = s.playTarget, let imdb = imdbID else { return }
         let ep = isSeries ? episodes.first(where: { $0.id == episode }) : nil
-        pendingPlay = PlayRequest(url: u, headers: s.requestHeaders, item: item,
+        pendingPlay = PlayRequest(url: t.url, headers: s.requestHeaders, item: item,
                                   key: isSeries ? "\(season):\(episode)" : "movie", imdb: imdb,
                                   season: isSeries ? season : nil, episode: isSeries ? episode : nil,
                                   episodeTitle: ep?.name, logo: logoURL,
                                   thumb: ep?.image ?? item.backdropURL,
-                                  sourceAddonID: addon.id, sourceSignature: s.signature)
+                                  sourceAddonID: addon.id, sourceSignature: s.signature, p2p: t.p2p)
         showSources = false
     }
 
@@ -619,6 +619,9 @@ struct DetailView: View {
                     if let t = s.description ?? s.title { Text(t).font(.caption).foregroundStyle(.secondary) }
                 }
                 Spacer()
+                if s.isTorrent {
+                    Image(systemName: s.p2pLocked ? "lock.fill" : "antenna.radiowaves.left.and.right").foregroundStyle(.secondary)
+                }
                 if isPinned { Image(systemName: "pin.fill").foregroundStyle(.tint) }
             }
         }
