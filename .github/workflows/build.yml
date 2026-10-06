@@ -8,6 +8,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: xcodebuild -version
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            p2p-core/target
+          key: cargo-${{ hashFiles('p2p-core/Cargo.toml', 'p2p-core/Cargo.lock') }}
+      - name: Build P2PCore.xcframework
+        run: ./p2p-core/scripts/build-xcframework.sh
       - run: brew install xcodegen && xcodegen
       - name: Build (unsigned)
         run: |
