@@ -55,6 +55,9 @@ struct DetailView: View {
 
     private var isSeries: Bool { item.type == "series" }
 
+    /// Height of the collapsing hero (artwork + title block), roughly 60% of a phone screen like the Apple TV app.
+    private static let heroHeight: CGFloat = 500
+
     // MARK: Derived data
 
     private var metaLine: String {
@@ -96,12 +99,11 @@ struct DetailView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                RotatingArtwork(item: item, kind: .detail, size: 800)
-                    .frame(height: 420)
-                    .overlay(alignment: .bottom) {
-                        LinearGradient(colors: [.clear, Color(.systemBackground)], startPoint: .top, endPoint: .bottom)
-                            .frame(height: 140)
-                    }
+                ParallaxHero(height: Self.heroHeight) {
+                    RotatingArtwork(item: item, kind: .detail, size: 800)
+                } info: {
+                    heroInfo.padding(.horizontal, 20)
+                }
                 header.padding(.horizontal, 20)
                 if isSeries { seasonSection }
                 if !trailers.isEmpty { trailersSection }
@@ -160,16 +162,19 @@ struct DetailView: View {
 
     // MARK: Header
 
-    /// Three calm groups with room between them: who it is (title, facts, ratings), what to do (buttons),
-    /// then what it's about (tagline + synopsis). The synopsis sits below the buttons so the page opens on the
-    /// title and the Play button rather than a wall of text.
+    /// Title, facts and ratings: anchored to the bottom of the parallax hero, over the fade into the page.
+    private var heroInfo: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            TitleArt(item: item, maxWidth: 280, maxHeight: 100, font: .largeTitle.bold())
+            if !metaLine.isEmpty || networkText != nil { metaRow }
+            if !allRatings.isEmpty { ratingsRow }
+        }
+    }
+
+    /// Below the hero, two calm groups with room between them: what to do (buttons), then what it's about
+    /// (tagline + synopsis), so the Play button sits right under the title block.
     private var header: some View {
         VStack(alignment: .leading, spacing: 20) {
-            VStack(alignment: .leading, spacing: 10) {
-                TitleArt(item: item, maxWidth: 280, maxHeight: 100, font: .largeTitle.bold())
-                if !metaLine.isEmpty || networkText != nil { metaRow }
-                if !allRatings.isEmpty { ratingsRow }
-            }
             VStack(alignment: .leading, spacing: 12) {
                 actionBar
                 if !isSeries, let imdb = imdbID, let rec = downloads.record(imdb: imdb, season: nil, episode: nil) {
