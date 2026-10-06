@@ -8,6 +8,7 @@ actor TMDBClient {
     private let session: URLSession = {
         let cfg = URLSessionConfiguration.default
         cfg.urlCache = URLCache(memoryCapacity: 10 << 20, diskCapacity: 50 << 20)
+        cfg.timeoutIntervalForRequest = 10
         return URLSession(configuration: cfg)
     }()
     /// IMDb id -> TMDB id, and show -> network icon. Both are permanent facts, so they are kept on disk: posters
@@ -19,6 +20,10 @@ actor TMDBClient {
             v.first.map { NetworkBadge(name: $0, logo: v.count > 1 ? URL(string: v[1]) : nil) }
         }
     }()
+    /// TMDB id -> IMDb id ("movie:603" -> "tt0133093"). Permanent facts, kept on disk, so opening a TMDB title never
+    /// waits on this lookup twice. Lookups already in flight are shared.
+    private var imdbCache: [String: String] = (UserDefaults.standard.dictionary(forKey: "tmdb.imdbIDs") as? [String: String]) ?? [:]
+    private var imdbInFlight: [String: Task<String?, Never>] = [:]
     private var cachePersistPending = false
     private var networkMisses: Set<String> = []
     private var seasonCache: [String: [EpisodeInfo]] = [:]
@@ -310,8 +315,19 @@ actor TMDBClient {
     }
 
     func imdbID(tmdb id: Int, type: String) async -> String? {
-        let e: External? = try? await get("/\(kind(type))/\(id)/external_ids")
-        return e?.imdbId
+        let key = "\(kind(type)):\(id)"
+        if let hit = imdbCache[key] { return hit }
+        if let running = imdbInFlight[key] { return await running.value }
+        let task = Task<String?, Never> {
+            let e: External? = try? await self.get("/\(self.kind(type))/\(id)/external_ids")
+            guard let imdb = e?.imdbId, !imdb.isEmpty else { return nil } // misses are not cached
+            return imdb
+        }
+        imdbInFlight[key] = task
+        let result = await task.value
+        imdbInFlight[key] = nil
+        if let result { imdbCache[key] = result; scheduleCachePersist() }
+        return result
     }
 
     private func tmdbID(for id: String, type: String) async throws -> Int {
@@ -338,7 +354,9 @@ actor TMDBClient {
         cachePersistPending = false
         if idCache.count > 3000 { idCache = Dictionary(uniqueKeysWithValues: Array(idCache.prefix(2000))) }
         if networkCache.count > 1500 { networkCache = Dictionary(uniqueKeysWithValues: Array(networkCache.prefix(1000))) }
+        if imdbCache.count > 3000 { imdbCache = Dictionary(uniqueKeysWithValues: Array(imdbCache.prefix(2000))) }
         UserDefaults.standard.set(idCache, forKey: "tmdb.idCache")
+        UserDefaults.standard.set(imdbCache, forKey: "tmdb.imdbIDs")
         UserDefaults.standard.set(networkCache.mapValues { [$0.name, $0.logo?.absoluteString ?? ""] }, forKey: "tmdb.networkCache")
     }
 }

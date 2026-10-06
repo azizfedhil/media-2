@@ -1,6 +1,6 @@
 //! Loopback-only HTTP server: GET/HEAD + Range (206) over a librqbit FileStream.
 //! Unguessable per-session token in the path stops other local apps from reading the stream.
-use std::{convert::Infallible, io, io::SeekFrom, sync::{atomic::Ordering::Relaxed, Arc}, time::Duration};
+use std::{convert::Infallible, io, io::SeekFrom, sync::Arc, time::Duration};
 
 use bytes::Bytes;
 use futures_util::stream;
@@ -50,6 +50,7 @@ where
             return None;
         }
         if !seeked {
+            pace.note_request(pos);
             if let Err(e) = s.seek(SeekFrom::Start(pos)).await {
                 return Some((Err(e), (s, pos, 0, true, pace)));
             }
@@ -63,7 +64,7 @@ where
             Ok(n) => {
                 buf.truncate(n);
                 let next = pos + n as u64;
-                pace.served.store(next, Relaxed);
+                pace.advance(next);
                 Some((Ok(Frame::data(Bytes::from(buf))), (s, next, remaining - n as u64, true, pace)))
             }
             Err(e) => Some((Err(e), (s, pos, 0, true, pace))),

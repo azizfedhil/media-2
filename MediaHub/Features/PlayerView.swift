@@ -60,6 +60,11 @@ final class PlayerModel {
     /// Last request handed to start(), and whether P2PManager tore the engine down behind our back (idle, background, memory, network, call).
     @ObservationIgnored private var lastRequest: PlayRequest?
     @ObservationIgnored private var p2pDropped = false
+    /// Position recorded the moment P2PManager dropped the engine. AetherEngine.stop() zeroes its clock and duration,
+    /// so by the time the viewer presses play the live values are gone.
+    @ObservationIgnored private var dropResume: Double?
+    /// Set while a restart is loading: the clock reads 0 until the first frame, and must not move the seek bar.
+    @ObservationIgnored private var holdPosition: Double?
 
     let playhead = Playhead()
 
@@ -104,12 +109,15 @@ final class PlayerModel {
             }
         }
         guard let engine else { return }
-        lastRequest = r; p2pDropped = false
+        let wasDropped = p2pDropped || dropResume != nil
+        let keptDuration = playhead.duration
+        lastRequest = r; p2pDropped = false; dropResume = nil
         bind(engine)
         resetForNewItem()
         Task { await loadOnlineSubtitles(for: r, auto: true) }
         let startAt = exact ? (resume ?? 0) : ((resume ?? 0) > 30 ? (resume ?? 0) : 0)
-        if startAt > 0 { playhead.position = startAt }      // seek bar shows the resume point while loading
+        if wasDropped, keptDuration > 0 { playhead.duration = keptDuration }
+        if startAt > 0 { playhead.position = startAt; holdPosition = startAt }      // seek bar holds the resume point while loading
         do {
             if replacing { engine.stop() }
             var url = r.url
@@ -141,6 +149,7 @@ final class PlayerModel {
             if isShutDown { engine.stop(); return }
             engine.play()
         } catch {
+            holdPosition = nil
             if error is CancellationError || isShutDown { return }
             self.error = error.localizedDescription
             setBuffering(false)
@@ -168,18 +177,22 @@ final class PlayerModel {
             guard let self else { return }
             switch s {
             case .playing:
+                holdPosition = nil
                 P2PManager.shared.playbackChanged(true)
                 isPlaying = true; isPaused = false; setBuffering(false); error = nil; refreshTracks()
                 if rateStale { pushRate() }
-            case .paused: P2PManager.shared.playbackChanged(false); isPlaying = false; isPaused = true; setBuffering(false); rateStale = rate != 1
+            case .paused: holdPosition = nil; P2PManager.shared.playbackChanged(false); isPlaying = false; isPaused = true; setBuffering(false); rateStale = rate != 1
             case .loading, .seeking: P2PManager.shared.playbackChanged(true); isPaused = false; setBuffering(true); rateStale = rate != 1
-            case .ended: P2PManager.shared.playbackChanged(false); isPlaying = false; isPaused = false; setBuffering(false); didEnd = true
-            case .error: P2PManager.shared.playbackChanged(false); isPlaying = false; isPaused = false; setBuffering(false); error = "Playback failed (\(String(describing: s)))."
+            case .ended: holdPosition = nil; P2PManager.shared.playbackChanged(false); isPlaying = false; isPaused = false; setBuffering(false); didEnd = true
+            case .error: holdPosition = nil; P2PManager.shared.playbackChanged(false); isPlaying = false; isPaused = false; setBuffering(false); error = "Playback failed (\(String(describing: s)))."
             default: break
             }
         }.store(in: &bag)
         engine.$duration.receive(on: DispatchQueue.main).sink { [weak self] d in
-            self?.playhead.duration = Double(d)
+            guard let self else { return }
+            // engine.stop() publishes 0: not a real duration while we are dropped or reloading.
+            if (p2pDropped || holdPosition != nil) && Double(d) <= 0 { return }
+            playhead.duration = Double(d)
         }.store(in: &bag)
         // P2P torn down while we weren't looking: stop the engine cleanly and wait on the play button (or a seek) to reopen.
         NotificationCenter.default.publisher(for: P2PManager.didStop)
@@ -188,6 +201,10 @@ final class PlayerModel {
                 guard let self, !isShutDown, lastRequest?.p2p != nil,
                       let raw = n.userInfo?["reason"] as? String,
                       P2PManager.StopReason(rawValue: raw)?.isAutomatic == true else { return }
+                // Record the live position BEFORE stop(): it resets the clock and duration to 0.
+                let live = Double(engine.clock.currentTime)
+                dropResume = pendingTarget ?? (live > 0 ? live : playhead.position)
+                if let r = dropResume { playhead.position = r }
                 p2pDropped = true
                 seekTask?.cancel(); pendingTarget = nil; seekInFlight = false
                 engine.stop()
@@ -198,7 +215,7 @@ final class PlayerModel {
         engine.clock.$currentTime
             .throttle(for: .milliseconds(500), scheduler: DispatchQueue.main, latest: true)
             .sink { [weak self] t in
-                guard let self, !playhead.scrubbing, !seekInFlight else { return }
+                guard let self, !p2pDropped, holdPosition == nil, !playhead.scrubbing, !seekInFlight else { return }
                 let now = ProcessInfo.processInfo.systemUptime
                 if !controlsVisible, now - lastPublish < 1 { return }
                 lastPublish = now
@@ -370,7 +387,8 @@ final class PlayerModel {
     private func resumeAfterDrop(at t: Double? = nil) {
         guard p2pDropped, let r = lastRequest else { return }
         p2pDropped = false
-        let pos = t ?? playhead.position
+        let pos = t ?? dropResume ?? playhead.position
+        playhead.position = pos; holdPosition = pos // the clock reads 0 until the reopened stream renders
         Task { await start(r, resume: pos, replacing: true, exact: true) }
     }
 
@@ -977,6 +995,13 @@ struct PlayerScreen: View {
                         if loadingSources && sourceGroups.isEmpty {
                             ProgressView().tint(.white).frame(maxWidth: .infinity).padding(.top, 30)
                         }
+                        if loadingSources && !sourceGroups.isEmpty {
+                            HStack(spacing: 8) {
+                                ProgressView().controlSize(.small).tint(.white)
+                                Text("Checking more add-ons…").font(.footnote).foregroundStyle(.white.opacity(0.6))
+                            }
+                            .frame(maxWidth: .infinity)
+                        }
                         ForEach(SourceFilter.apply(sourceGroups, sourceFilter), id: \.0.id) { addon, items in
                             VStack(alignment: .leading, spacing: 6) {
                                 Text(addon.manifest.name.uppercased()).font(.caption.weight(.bold)).tracking(1)
@@ -1043,25 +1068,28 @@ struct PlayerScreen: View {
     }
 
     /// Same query the detail page runs: every add-on that serves this title / episode, playable streams only.
+    /// Groups appear as each add-on answers, in the user's add-on order.
     private func loadSources() async {
         loadingSources = true; defer { loadingSources = false }
         let r = current
         let sid = (r.season != nil && r.episode != nil) ? "\(r.imdb):\(r.season ?? 0):\(r.episode ?? 0)" : r.imdb
-        let groups = await AddonClient.shared.streams(for: sid, type: r.item.type, addons: store.addons)
-        // Task-group results arrive in completion order; keep the user's add-on order.
-        var ordered: [(Addon, [StreamItem])] = []
-        var off: [String: Int] = [:]
-        for a in store.addons {
-            guard let g = groups.first(where: { $0.0.id == a.id }) else { continue }
-            let playable = g.1.filter(\.isPlayable)
-            let hidden = g.1.filter(\.p2pOff).count
-            if hidden > 0 { off[a.id] = hidden }
-            // An add-on whose torrents are all hidden still gets a group, so the panel can say why.
-            if !playable.isEmpty || hidden > 0 { ordered.append((a, playable)) }
+        let addons = store.addons
+        var raw: [(Addon, [StreamItem])] = []
+        for await group in AddonClient.shared.streamUpdates(for: sid, type: r.item.type, addons: addons) {
+            guard !Task.isCancelled, showSources else { return }
+            raw = AddonClient.ordered(raw + [group], by: addons)
+            var ordered: [(Addon, [StreamItem])] = []
+            var off: [String: Int] = [:]
+            for (a, items) in raw {
+                let playable = items.filter(\.isPlayable)
+                let hidden = items.filter(\.p2pOff).count
+                if hidden > 0 { off[a.id] = hidden }
+                // An add-on whose torrents are all hidden still gets a group, so the panel can say why.
+                if !playable.isEmpty || hidden > 0 { ordered.append((a, playable)) }
+            }
+            p2pOffCounts = off
+            sourceGroups = ordered
         }
-        guard !Task.isCancelled, showSources else { return }
-        p2pOffCounts = off
-        sourceGroups = ordered
     }
 
     /// Same episode, different stream: carries the position over and keeps the saved progress.

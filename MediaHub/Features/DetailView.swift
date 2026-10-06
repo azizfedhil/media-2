@@ -143,10 +143,15 @@ struct DetailView: View {
             streams = []
             sourceFilter = nil
             loadingStreams = true; defer { loadingStreams = false }
-            guard let imdb = await stremioID() else { return }
-            imdbID = imdb
+            // Reuses the id the page already resolved (or is resolving: lookups in flight are shared).
+            guard let imdb = await ensureIMDB() else { return }
             let sid = isSeries ? "\(imdb):\(season):\(episode)" : imdb
-            streams = await AddonClient.shared.streams(for: sid, type: item.type, addons: store.addons)
+            // Each add-on's answer is shown as it arrives, kept in the user's add-on order.
+            let addons = store.addons
+            for await group in AddonClient.shared.streamUpdates(for: sid, type: item.type, addons: addons) {
+                guard showSources else { return }
+                streams = AddonClient.ordered(streams + [group], by: addons)
+            }
         }
     }
 
@@ -739,10 +744,18 @@ struct DetailView: View {
                         }
                     }
                 }
+                if loadingStreams && !streams.isEmpty {
+                    HStack(spacing: 8) {
+                        ProgressView().controlSize(.small)
+                        Text("Checking more add-ons…").font(.footnote).foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .listRowBackground(Color.clear)
+                }
             }
             .overlay {
-                if loadingStreams { ProgressView() }
-                else if streams.isEmpty {
+                if loadingStreams && streams.isEmpty { ProgressView() }
+                else if !loadingStreams && streams.isEmpty {
                     ContentUnavailableView("No sources", systemImage: "play.slash",
                         description: Text("Add a stream add-on in Settings."))
                 }

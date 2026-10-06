@@ -14,7 +14,7 @@ use librqbit::{
 use tokio::{net::TcpListener, runtime::Builder, time::timeout};
 use tokio_util::sync::CancellationToken;
 
-use crate::{http, pacer, util::pick_file, EngineConfig, EngineStats, P2pError, StreamInfo};
+use crate::{http, pacer, pacer_logic::{clamp_limit, MIN_LIMIT_BPS}, util::pick_file, EngineConfig, EngineStats, P2pError, StreamInfo};
 
 pub struct Current {
     pub handle: Arc<ManagedTorrent>,
@@ -90,7 +90,7 @@ impl Inner {
                 listen_port_range: None,       // no inbound listener: one less socket, no NAT keepalives
                 enable_upnp_port_forwarding: false,
                 ratelimits: LimitsConfig {
-                    upload_bps: NonZeroU32::new(cfg.upload_limit_bps.max(1024)),
+                    upload_bps: NonZeroU32::new(clamp_limit(cfg.upload_limit_bps)),
                     download_bps: None,
                 },
                 ..Default::default()
@@ -109,7 +109,7 @@ impl Inner {
                 base: format!("http://127.0.0.1:{port}"),
                 token,
                 meta_timeout: Duration::from_secs(cfg.metadata_timeout_secs.max(5) as u64),
-                upload_bps: cfg.upload_limit_bps.max(1024),
+                upload_bps: clamp_limit(cfg.upload_limit_bps),
             };
             Ok((rt, ctx, cancel))
         })();
@@ -208,8 +208,7 @@ impl Ctx {
             let url = format!("{}/{}/stream/{}", self.base, self.token, safe);
             *self.shared.current.write().map_err(|_| io_err("lock poisoned"))? =
                 Some(Current { handle: handle.clone(), id, file_idx: idx, len, name: name.clone() });
-            self.shared.pace.served.store(0, Ordering::Relaxed);
-            self.shared.pace.wait_since_ms.store(0, Ordering::Relaxed);
+            self.shared.pace.reset();
             tokio::spawn(pacer::run(self.session.clone(), self.shared.clone(), id));
             Ok(StreamInfo { url, file_name: name, length: len, file_index: idx as u32 })
         }
@@ -293,11 +292,11 @@ impl P2pEngine {
         })
     }
 
-    /// Low Power Mode / thermal pressure: upload to ~1 KiB/s and a smaller read-ahead window. Cheap, non-blocking.
+    /// Low Power Mode / thermal pressure: upload to the 16 KiB/s floor and a smaller read-ahead window. Cheap, non-blocking.
     pub fn set_power_saving(&self, on: bool) {
         let Ok((_, ctx)) = self.grab() else { return };
         ctx.shared.pace.low_power.store(on, Ordering::Relaxed);
-        ctx.session.ratelimits.set_upload_bps(NonZeroU32::new(if on { 1024 } else { ctx.upload_bps }));
+        ctx.session.ratelimits.set_upload_bps(NonZeroU32::new(if on { MIN_LIMIT_BPS } else { ctx.upload_bps }));
     }
 
     pub fn is_running(&self) -> bool {
