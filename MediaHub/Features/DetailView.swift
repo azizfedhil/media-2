@@ -35,6 +35,8 @@ struct DetailView: View {
     @State private var streams: [(Addon, [StreamItem])] = []
     @State private var loadingStreams = false
     @State private var showSources = false
+    /// Add-on id the sources sheet is narrowed to; nil = all add-ons.
+    @State private var sourceFilter: String?
     @State private var playRequest: PlayRequest?
     @State private var upNext: UpNextItem?
     @State private var userPicked = false
@@ -136,6 +138,7 @@ struct DetailView: View {
             // Query stream add-ons only when the picker opens.
             guard showSources else { return }
             streams = []
+            sourceFilter = nil
             loadingStreams = true; defer { loadingStreams = false }
             guard let imdb = await stremioID() else { return }
             imdbID = imdb
@@ -619,7 +622,10 @@ struct DetailView: View {
                     if let t = s.description ?? s.title { Text(t).font(.caption).foregroundStyle(.secondary) }
                 }
                 Spacer()
-                if s.isTorrent {
+                if s.p2pOff {
+                    Label("P2P off", systemImage: "antenna.radiowaves.left.and.right.slash")
+                        .font(.caption).foregroundStyle(.secondary)
+                } else if s.isTorrent {
                     Image(systemName: s.p2pLocked ? "lock.fill" : "antenna.radiowaves.left.and.right").foregroundStyle(.secondary)
                 }
                 if isPinned { Image(systemName: "pin.fill").foregroundStyle(.tint) }
@@ -639,14 +645,20 @@ struct DetailView: View {
     private var sourceSheet: some View {
         NavigationStack {
             List {
-                if let p = pinned {
+                if let p = pinned, sourceFilter == nil || sourceFilter == p.addon.id {
                     Section("Pinned · \(p.addon.manifest.name)") { row(p.addon, p.stream, isPinned: true) }
                 }
-                ForEach(streams, id: \.0.id) { addon, items in
+                let visible = SourceFilter.apply(streams, sourceFilter)
+                ForEach(visible, id: \.0.id) { addon, items in
                     Section {
                         ForEach(items.filter { $0.id != pinned?.stream.id }) { row(addon, $0, isPinned: false) }
                     } header: { Text(addon.manifest.name) } footer: {
-                        if addon.id == streams.first?.0.id { Text("Swipe a source to pin it to the top for this show.") }
+                        VStack(alignment: .leading, spacing: 4) {
+                            if addon.id == visible.first?.0.id { Text("Swipe a source to pin it to the top for this show.") }
+                            if items.contains(where: \.p2pOff) {
+                                Text("P2P is off, so torrent sources can't be played. Turn it on in Settings → Peer-to-peer.")
+                            }
+                        }
                     }
                 }
             }
@@ -659,6 +671,11 @@ struct DetailView: View {
             }
             .navigationTitle("Sources")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                if streams.count > 1 {
+                    ToolbarItem(placement: .topBarTrailing) { AddonFilterMenu(groups: streams, selection: $sourceFilter) }
+                }
+            }
         }
         .presentationDetents([.medium, .large])
     }
