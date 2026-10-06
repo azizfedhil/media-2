@@ -51,6 +51,27 @@ final class LocalLibrary {
         persist()
     }
 
+    /// Applies many changes with a single save and a single change notification (library sync), instead of one
+    /// encode-and-write per title. New titles go to the front in the order given; an existing title only moves
+    /// when its status changes.
+    func apply(_ changes: [(MetaPreview, Status)]) {
+        guard !changes.isEmpty else { return }
+        var list = entries
+        var fresh: [Entry] = []
+        let base = Date()
+        for (n, change) in changes.enumerated() {
+            let (item, status) = change
+            let stamp = base.addingTimeInterval(-Double(n))        // keeps the order the changes arrived in
+            if let i = list.firstIndex(where: { $0.item.id == item.id || $0.alias == item.id }) {
+                if list[i].status != status { list[i].status = status; list[i].added = stamp }
+            } else {
+                fresh.append(Entry(item: item, status: status, added: stamp))
+            }
+        }
+        entries = fresh + list
+        persist()
+    }
+
     func setAlias(_ alias: String, for id: String) {
         guard let i = entries.firstIndex(where: { $0.item.id == id }), entries[i].alias == nil else { return }
         entries[i].alias = alias

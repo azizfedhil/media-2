@@ -88,6 +88,7 @@ struct MediaHubApp: App {
     @State private var theme = ThemeStore()
     @State private var profiles = ProfileStore()
     @State private var library = LocalLibrary()
+    @State private var libraryPrefs = LibraryPrefs()
 
     init() {
         // Builds the "pear." animation outlines in the background so the intro starts on its first frame.
@@ -98,7 +99,7 @@ struct MediaHubApp: App {
         WindowGroup {
             RootView()
                 .environment(store).environment(history).environment(simkl).environment(pins).environment(theme)
-                .environment(profiles).environment(library).environment(watchLog)
+                .environment(profiles).environment(library).environment(watchLog).environment(libraryPrefs)
                 .preferredColorScheme(Theme.forceDark ? .dark : nil)
                 .pearLaunchScreen()
         }
@@ -113,6 +114,7 @@ struct RootView: View {
     @Environment(WatchHistory.self) private var history
     @Environment(LocalLibrary.self) private var library
     @Environment(WatchLog.self) private var watchLog
+    @Environment(LibraryPrefs.self) private var libraryPrefs
 
     var body: some View {
         // System TabView gives Liquid Glass tab bar for free.
@@ -130,11 +132,23 @@ struct RootView: View {
             history.load(profile: id)
             library.load(profile: id)
             watchLog.load(profile: id)
+            libraryPrefs.load(profile: id)
         }
         .sensoryFeedback(.selection, trigger: profiles.activeID)
-        .task { await simkl.sync() }
+        .task { await refreshLibrary() }
         .onChange(of: phase) { _, p in
-            if p == .active { Task { await simkl.sync() } } else { watchLog.flush() }
+            if p == .active { Task { await refreshLibrary() } } else { watchLog.flush() }
+        }
+    }
+
+    /// Foreground refresh, and only what this profile actually uses: automatic sync when it is on, Simkl's lists when
+    /// Simkl is the library, nothing at all for a purely local library. Both paths are throttled to once per 15 minutes.
+    private func refreshLibrary() async {
+        guard simkl.isConnected else { return }
+        if libraryPrefs.autoSync {
+            await libraryPrefs.sync(simkl: simkl, library: library, history: history, force: false)
+        } else if libraryPrefs.usesSimkl(simkl) {
+            await simkl.sync()
         }
     }
 }

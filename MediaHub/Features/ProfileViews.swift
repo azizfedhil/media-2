@@ -142,6 +142,7 @@ struct ProfileSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(ProfileStore.self) private var profiles
     @Environment(SimklStore.self) private var simkl
+    @Environment(LibraryPrefs.self) private var libraryPrefs
     @Environment(ThemeStore.self) private var theme
     @State private var managing = false
     @State private var target: ProfileTarget?
@@ -200,8 +201,8 @@ struct ProfileSheet: View {
     }
 
     private var footnote: String {
-        simkl.isConnected
-            ? "Watch history and Continue Watching are kept separately for each profile. Your library comes from Simkl, so every profile shares it."
+        libraryPrefs.usesSimkl(simkl)
+            ? "Watch history and Continue Watching are kept separately for each profile. This profile's library comes from Simkl, so profiles set to Simkl share it. Switch a profile to its own library in Settings."
             : "Each profile keeps its own watch history and library on this device. Connect Simkl in Settings to sync a library across devices."
     }
 

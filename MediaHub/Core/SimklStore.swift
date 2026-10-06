@@ -381,6 +381,26 @@ final class SimklStore {
         await sync(force: true)
     }
 
+    /// Adds many titles to Simkl lists in one request (library sync). Returns whether Simkl accepted it.
+    func add(_ items: [SimklListAdd]) async -> Bool {
+        guard isConnected else { return false }
+        guard !items.isEmpty else { return true }
+        func entry(_ i: SimklListAdd) -> [String: Any] {
+            var ids: [String: Any] = [:]
+            if let imdb = i.imdb { ids["imdb"] = imdb }
+            if let tmdb = i.tmdb { ids["tmdb"] = tmdb }
+            return ["to": i.list, "ids": ids]
+        }
+        var body: [String: Any] = [:]
+        let movies = items.filter { $0.isMovie }.map(entry)
+        let shows = items.filter { !$0.isMovie }.map(entry)
+        if !movies.isEmpty { body["movies"] = movies }
+        if !shows.isEmpty { body["shows"] = shows }
+        await refreshIfNeeded()
+        guard let (_, resp) = try? await URLSession.shared.data(for: request("/sync/add-to-list", method: "POST", body: body)) else { return false }
+        return (200..<300).contains(Self.status(resp))
+    }
+
     // MARK: Scrobble (start on play, stop on close; Simkl marks watched at >= 80%)
     func scrobble(_ action: String, _ r: PlayRequest, progress: Double) {
         guard isConnected else { return }

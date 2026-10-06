@@ -21,6 +21,7 @@ struct DetailView: View {
     }
     @Environment(AddonStore.self) private var store
     @Environment(SimklStore.self) private var simkl
+    @Environment(LibraryPrefs.self) private var prefs
     @Environment(PinnedSources.self) private var pins
     @Environment(WatchHistory.self) private var history
     @Environment(LocalLibrary.self) private var library
@@ -188,7 +189,7 @@ struct DetailView: View {
     /// Round bookmark button: adds/removes the title from the watchlist (Simkl when connected).
     private var listButton: some View {
         Button {
-            if simkl.isConnected {
+            if viaSimkl {
                 guard !onWatchlist else { return }
                 Task {
                     if let imdb = await stremioID() { await simkl.addToWatchlist(imdb, type: item.type); onWatchlist = true }
@@ -205,7 +206,7 @@ struct DetailView: View {
         }
         .buttonStyle(.bordered)
         .buttonBorderShape(.circle)
-        .disabled(simkl.isConnected && onWatchlist)
+        .disabled(viaSimkl && onWatchlist)
         .accessibilityLabel(listSaved ? "Remove from watchlist" : "Add to watchlist")
     }
 
@@ -233,7 +234,9 @@ struct DetailView: View {
 
     private var isWatched: Bool { history.entry(for: item.id)?.isFinished ?? false }
     private var inList: Bool { library.entry(for: item.id) != nil }
-    private var listSaved: Bool { simkl.isConnected ? onWatchlist : inList }
+    /// Simkl is this profile's library (connected and chosen); otherwise the list button works on the local library.
+    private var viaSimkl: Bool { prefs.usesSimkl(simkl) }
+    private var listSaved: Bool { viaSimkl ? onWatchlist : inList }
 
     /// Saves instantly, then looks up the title's other id in the background so it is recognised from any source.
     private func saveLocal(_ status: LocalLibrary.Status) {

@@ -442,6 +442,7 @@ struct PlayerScreen: View {
     @Environment(LocalLibrary.self) private var library
     @Environment(WatchLog.self) private var watchLog
     @Environment(SimklStore.self) private var simkl
+    @Environment(LibraryPrefs.self) private var libraryPrefs
     @Environment(ThemeStore.self) private var theme
     @Environment(AddonStore.self) private var store
     @Environment(\.openURL) private var openURL
@@ -526,7 +527,7 @@ struct PlayerScreen: View {
             }
         }
         .onChange(of: model.isPlaying) { _, playing in
-            if playing && !scrobbled { scrobbled = true; simkl.scrobble("start", current, progress: 0) }
+            if playing && !scrobbled { scrobbled = true; if libraryPrefs.usesSimkl(simkl) { simkl.scrobble("start", current, progress: 0) } }
             if playing && launching { withAnimation(.easeOut(duration: 0.25)) { launching = false } }
             if playing { scheduleHide() } else { hideTask?.cancel() }
         }
@@ -1233,7 +1234,7 @@ struct PlayerScreen: View {
         watchLog.flush()
         save()
         let d = model.playhead.duration
-        if d > 0 { simkl.scrobble("stop", current, progress: model.playhead.position / d * 100) }
+        if d > 0, libraryPrefs.usesSimkl(simkl) { simkl.scrobble("stop", current, progress: model.playhead.position / d * 100) }
     }
 
     /// X button. Dismisses first so it always responds instantly, then tears the engine down a moment later.

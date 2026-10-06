@@ -23,7 +23,7 @@ enum ProfileKeys {
     static let list = "profiles.list"
     static let active = "profiles.active"
     /// Per-profile data that must be wiped when a profile is deleted.
-    static let scopedBases = ["watch.history", "watch.archive", "watch.log", "library.local"]
+    static let scopedBases = ["watch.history", "watch.archive", "watch.log", "library.local", "library.prefs"]
 
     static var activeID: String { UserDefaults.standard.string(forKey: active) ?? Profile.defaultID }
 

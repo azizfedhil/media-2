@@ -8,6 +8,7 @@ import SwiftUI
 /// The nav bar uses the system's soft scroll edge, so posters melt under it instead of being cut off.
 struct LibraryView: View {
     @Environment(SimklStore.self) private var simkl
+    @Environment(LibraryPrefs.self) private var prefs
     @Environment(LocalLibrary.self) private var local
     @Environment(WatchHistory.self) private var history
     @Environment(ProfileStore.self) private var profiles
@@ -33,7 +34,7 @@ struct LibraryView: View {
     // MARK: Data
 
     private var sections: [LibSection] {
-        simkl.isConnected ? simklSections : localSections
+        prefs.usesSimkl(simkl) ? simklSections : localSections
     }
 
     /// Simkl returns each list already newest-activity-first (see SimklStore.sync).
@@ -78,7 +79,7 @@ struct LibraryView: View {
     }
 
     private var subtitle: String {
-        simkl.isConnected ? "Synced with Simkl" : "\(profiles.active.name) · On this device"
+        prefs.usesSimkl(simkl) ? "Synced with Simkl" : "\(profiles.active.name) · On this device"
     }
 
     // MARK: View
@@ -112,7 +113,7 @@ struct LibraryView: View {
             .scrollIndicators(.hidden)
             .overlay {
                 if secs.isEmpty {
-                    if simkl.isConnected {
+                    if prefs.usesSimkl(simkl) {
                         if simkl.isSyncing { ProgressView() }
                         else { ContentUnavailableView("Nothing here yet", systemImage: "books.vertical",
                             description: Text("Titles you add on Simkl show up here.")) }
@@ -122,7 +123,13 @@ struct LibraryView: View {
                     }
                 }
             }
-            .refreshable { await simkl.sync(force: true) }
+            .refreshable {
+                if prefs.autoSync && simkl.isConnected {
+                    await prefs.sync(simkl: simkl, library: local, history: history, force: true)
+                } else if prefs.usesSimkl(simkl) {
+                    await simkl.sync(force: true)
+                }
+            }
             .navigationDestination(for: MetaPreview.self) { DetailView(item: $0) }
             .navigationTitle("Library")
             .navigationSubtitle(subtitle)

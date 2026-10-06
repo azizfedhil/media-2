@@ -16,7 +16,7 @@ enum SettingsBackup {
         "profiles.list", "profiles.active", "pinned.sources",
     ]
     /// Per-profile data: "watch.history" and "library.local", plus their ".<profile id>" variants.
-    static let dataPrefixes = ["watch.history", "watch.archive", "watch.log", "library.local"]
+    static let dataPrefixes = ["watch.history", "watch.archive", "watch.log", "library.local", "library.prefs"]
 
     enum Failure: LocalizedError {
         case unreadable, notBackup, newer

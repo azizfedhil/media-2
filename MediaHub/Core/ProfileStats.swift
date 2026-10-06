@@ -179,11 +179,11 @@ final class ProfileStatsModel {
     private(set) var total = 0
     private(set) var loaded = false
 
-    func refresh(history: WatchHistory, library: LocalLibrary, simkl: SimklStore, log: WatchLog) async {
+    func refresh(history: WatchHistory, library: LocalLibrary, simkl: SimklStore, log: WatchLog, includeSimkl: Bool = true) async {
         loading = true
         defer { loading = false; loaded = true; total = 0; done = 0 }
         let entries = history.allEntries
-        let drafts = Self.drafts(history: entries, library: library.entries, simkl: simkl)
+        let drafts = Self.drafts(history: entries, library: library.entries, simkl: simkl, includeSimkl: includeSimkl)
         var facts = await TitleFactsStore.shared.snapshot()
         stats = Self.makeStats(drafts: drafts, facts: facts, entries: entries, log: log)
 
@@ -219,7 +219,8 @@ final class ProfileStatsModel {
     }
 
     /// One draft per title, however many sources know it (and whichever id they use: IMDb, TMDB or the saved alias).
-    private static func drafts(history: [WatchHistory.Entry], library: [LocalLibrary.Entry], simkl: SimklStore) -> [Draft] {
+    private static func drafts(history: [WatchHistory.Entry], library: [LocalLibrary.Entry], simkl: SimklStore,
+                               includeSimkl: Bool) -> [Draft] {
         var out: [Draft] = []
         func slot(_ item: MetaPreview, extra: [String] = []) -> Int {
             let ids = Set([item.id] + extra)
@@ -244,7 +245,8 @@ final class ProfileStatsModel {
             if out[i].local != .watched { out[i].local = e.status }
             out[i].added = e.added
         }
-        for row in simkl.library where row.id.hasPrefix("simkl-") {
+        // A profile that uses its own library doesn't mix Simkl's lists into its statistics.
+        for row in (includeSimkl ? simkl.library : []) where row.id.hasPrefix("simkl-") {
             let status = String(row.id.dropFirst("simkl-".count))
             for item in row.items {
                 let i = slot(item)

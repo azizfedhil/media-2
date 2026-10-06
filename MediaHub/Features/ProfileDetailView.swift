@@ -7,6 +7,7 @@ struct ProfileDetailView: View {
     @Environment(WatchHistory.self) private var history
     @Environment(LocalLibrary.self) private var library
     @Environment(SimklStore.self) private var simkl
+    @Environment(LibraryPrefs.self) private var libraryPrefs
     @Environment(WatchLog.self) private var log
     @Environment(ThemeStore.self) private var theme
     @Environment(AddonStore.self) private var addons
@@ -24,7 +25,7 @@ struct ProfileDetailView: View {
     private var signature: String {
         let last = history.entries.first?.updated.timeIntervalSince1970 ?? 0
         let sk = simkl.library.map { "\($0.id)\($0.items.count)" }.joined()
-        return "\(profiles.activeID)|\(last)|\(history.entries.count)|\(history.archive.count)|\(library.entries.count)|\(sk)|\(tmdbKey.isEmpty)"
+        return "\(libraryPrefs.source(simkl).rawValue)|\(profiles.activeID)|\(last)|\(history.entries.count)|\(history.archive.count)|\(library.entries.count)|\(sk)|\(tmdbKey.isEmpty)"
     }
 
     var body: some View {
@@ -33,6 +34,7 @@ struct ProfileDetailView: View {
                 header
                 if model.loading && model.total > 0 { analysing }
                 integrationsCard
+                libraryCard
                 tiles
                 watchTimeCard
                 if tmdbKey.isEmpty { tmdbNote }
@@ -44,7 +46,10 @@ struct ProfileDetailView: View {
         .scrollIndicators(.hidden)
         .navigationTitle("Profile")
         .navigationBarTitleDisplayMode(.inline)
-        .task(id: signature) { await model.refresh(history: history, library: library, simkl: simkl, log: log) }
+        .task(id: signature) {
+            await model.refresh(history: history, library: library, simkl: simkl, log: log,
+                                includeSimkl: libraryPrefs.usesSimkl(simkl))
+        }
     }
 
     // MARK: Header
@@ -100,6 +105,10 @@ struct ProfileDetailView: View {
          Integration(name: "Simkl", symbol: "arrow.triangle.2.circlepath", on: simkl.isConnected),
          Integration(name: "TheIntroDB", symbol: "forward.end.fill", on: skipEnabled),
          Integration(name: "OpenSubtitles", symbol: "captions.bubble", on: subsOnline)]
+    }
+
+    private var libraryCard: some View {
+        card("Library", symbol: "books.vertical.fill") { LibrarySourceControls() }
     }
 
     private var integrationsCard: some View {

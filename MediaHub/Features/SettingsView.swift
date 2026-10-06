@@ -8,6 +8,7 @@ struct SettingsView: View {
     @Environment(ProfileStore.self) private var profiles
     @Environment(WatchHistory.self) private var history
     @Environment(LocalLibrary.self) private var library
+    @Environment(LibraryPrefs.self) private var libraryPrefs
     @Environment(WatchLog.self) private var watchLog
     @Environment(PinnedSources.self) private var pins
     @AppStorage("tmdb.key") private var tmdbKey = ""
@@ -48,6 +49,12 @@ struct SettingsView: View {
                     }
                 } footer: {
                     Text("TMDB, TheTVDB, MDBList and Simkl: API keys, logins and metadata sources.")
+                }
+
+                Section {
+                    LibrarySourceControls()
+                } header: { Text("Library · \(profiles.active.name)") } footer: {
+                    Text("Chosen per profile. A library on this device keeps its own watch history and watch time and never contacts Simkl. Syncing merges both libraries without deleting anything on either side.")
                 }
 
                 Section {
@@ -198,7 +205,7 @@ struct SettingsView: View {
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
         do {
             let n = try SettingsBackup.restore(try Data(contentsOf: url))
-            theme.reload(); profiles.reload(); history.reload(); library.reload(); watchLog.reload(); pins.reload()
+            theme.reload(); profiles.reload(); history.reload(); library.reload(); watchLog.reload(); pins.reload(); libraryPrefs.reload()
             Task { await store.reloadFromDefaults() }
             backupNote = "Imported \(n) settings."
         } catch {
