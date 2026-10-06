@@ -34,6 +34,7 @@ struct ProfileDetailView: View {
                 header
                 if model.loading && model.total > 0 { analysing }
                 integrationsCard
+                simklCard
                 libraryCard
                 tiles
                 watchTimeCard
@@ -105,6 +106,10 @@ struct ProfileDetailView: View {
          Integration(name: "Simkl", symbol: "arrow.triangle.2.circlepath", on: simkl.isConnected),
          Integration(name: "TheIntroDB", symbol: "forward.end.fill", on: skipEnabled),
          Integration(name: "OpenSubtitles", symbol: "captions.bubble", on: subsOnline)]
+    }
+
+    private var simklCard: some View {
+        card("Simkl", symbol: "arrow.triangle.2.circlepath") { SimklConnectControls(compact: true) }
     }
 
     private var libraryCard: some View {

@@ -10,7 +10,7 @@ enum SettingsBackup {
     static let version = 1
 
     static let keys = [
-        "addon.manifestURLs", "tmdb.key", "tvdb.key", "tvdb.pin", "mdblist.key", "mdblist.lists", "simkl.clientID",
+        "addon.manifestURLs", "tmdb.key", "tvdb.key", "tvdb.pin", "mdblist.key", "mdblist.lists",
         "ui.accent", "ui.networkBadges", "ui.titleLogos", "player.glass", "player.autoplayNext",
         "skip.enabled", "skip.fallbackSeconds", "sub.lang", "sub.style", "subs.online", "subs.baseURL", "library.collapsed",
         "profiles.list", "profiles.active", "pinned.sources",

@@ -3,7 +3,6 @@ import SwiftUI
 /// Every external service in one place: API keys, the Simkl login, and what each one is used for.
 struct IntegrationsView: View {
     @Environment(SimklStore.self) private var simkl
-    @AppStorage("simkl.clientID") private var simklID = ""
     @AppStorage("mdblist.key") private var mdbKey = ""
     @AppStorage("tvdb.key") private var tvdbKey = ""
     @AppStorage("tvdb.pin") private var tvdbPin = ""
@@ -64,48 +63,13 @@ struct IntegrationsView: View {
         if let text { Label(text, systemImage: "checkmark.circle.fill").font(.footnote).foregroundStyle(.green) }
     }
 
-    // MARK: Simkl (PIN / device-code login: no browser redirect, works inside LiveContainer)
+    // MARK: Simkl (PIN login with MediaHub's own app: nothing to register, works inside LiveContainer)
 
     private var simklSection: some View {
         Section {
-            if simkl.isConnected {
-                Label("Connected", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
-                if let e = simkl.syncError {
-                    Label(e, systemImage: "exclamationmark.triangle.fill").font(.footnote).foregroundStyle(.orange)
-                }
-                Button("Sync now") { Task { await simkl.sync(force: true) } }
-                Button("Disconnect", role: .destructive) { simkl.disconnect() }
-            } else {
-                TextField("Simkl client ID", text: $simklID)
-                    .textInputAutocapitalization(.never).autocorrectionDisabled()
-                if let pin = simkl.pin {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("1. Open this page on any device").font(.footnote).foregroundStyle(.secondary)
-                        if let u = URL(string: pin.verificationUrl) {
-                            Link(pin.verificationUrl, destination: u).font(.subheadline.weight(.semibold))
-                        } else { Text(pin.verificationUrl).font(.subheadline.weight(.semibold)) }
-                        Text("2. Enter this code").font(.footnote).foregroundStyle(.secondary)
-                        HStack {
-                            Text(pin.userCode).font(.system(size: 34, weight: .bold, design: .monospaced)).textSelection(.enabled)
-                            Spacer()
-                            Button { UIPasteboard.general.string = pin.userCode } label: { Image(systemName: "doc.on.doc") }
-                                .buttonStyle(.borderless)
-                        }
-                        HStack(spacing: 8) {
-                            ProgressView()
-                            Text(simkl.loginStatus ?? "Waiting for authorisation…").font(.footnote).foregroundStyle(.secondary)
-                        }
-                        Button("Cancel", role: .cancel) { simkl.cancelLogin() }.font(.footnote)
-                    }
-                    .padding(.vertical, 4)
-                } else {
-                    Button("Connect Simkl") { simkl.connect() }
-                    if let s = simkl.loginStatus { Text(s).font(.footnote).foregroundStyle(.secondary) }
-                }
-                if let e = simkl.loginError { Label(e, systemImage: "xmark.octagon.fill").font(.footnote).foregroundStyle(.red) }
-            }
+            SimklConnectControls()
         } header: { Text("Simkl") } footer: {
-            Text("Sign-in uses a one-time code, so it works inside LiveContainer. Create a free app at simkl.com/settings/developer, paste its Client ID, tap Connect, then enter the code on the Simkl page. No redirect URL or secret is needed.")
+            Text("Tap Connect to Simkl, then enter the code at simkl.com/pin. No account setup, keys or redirects needed. Your library syncs when the app opens and only downloads what changed.")
         }
     }
 }

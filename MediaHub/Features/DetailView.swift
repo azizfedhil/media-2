@@ -179,6 +179,7 @@ struct DetailView: View {
             Button { showSources = true } label: {
                 Label(isSeries ? "Play S\(season):E\(episode)" : "Play", systemImage: "play.fill")
                     .font(.headline).frame(maxWidth: .infinity)
+                    .foregroundStyle(theme.onAccent)
             }
             .buttonStyle(.glassProminent).controlSize(.large)
             listButton

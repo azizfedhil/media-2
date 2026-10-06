@@ -40,31 +40,55 @@ private struct AllItems: Decodable {
         movies = list(.movies); shows = list(.shows); anime = list(.anime)
     }
 }
-private struct Entry: Decodable {
+private struct Entry: Codable {
     let status: String?; let movie: Media?; let show: Media?
     // ISO-8601 strings sort correctly as plain text, so no date parsing is needed to order by recency.
     let lastWatchedAt: String?; let addedToWatchlistAt: String?
     let watchedEpisodesCount: Int?; let totalEpisodesCount: Int?
     var activity: String { lastWatchedAt ?? addedToWatchlistAt ?? "" }
+    /// Stable identity, used to merge a "changed since" response into the cached library.
+    var key: String? {
+        guard let m = movie ?? show else { return nil }
+        let id = m.ids.simkl.map(String.init) ?? m.ids.imdb ?? m.ids.tmdb ?? m.title
+        return (movie != nil ? "m" : "s") + id
+    }
 }
-private struct Media: Decodable {
+private struct Media: Codable {
     let title: String; let year: Int?; let poster: String?; let ids: IDs
-    struct IDs: Decodable {
-        let imdb: String?; let tmdb: String?
-        enum K: String, CodingKey { case imdb, tmdb }
+    struct IDs: Codable {
+        let imdb: String?; let tmdb: String?; let simkl: Int?
+        enum CodingKeys: String, CodingKey { case imdb, tmdb, simkl }
         init(from d: Decoder) throws {
-            let c = try d.container(keyedBy: K.self)
+            let c = try d.container(keyedBy: CodingKeys.self)
             imdb = try? c.decode(String.self, forKey: .imdb)
             tmdb = (try? c.decode(String.self, forKey: .tmdb)) ?? (try? c.decode(Int.self, forKey: .tmdb)).map(String.init)
+            simkl = try? c.decode(Int.self, forKey: .simkl)
         }
     }
+}
+
+/// `GET /sync/activities`: one tiny call that says whether anything changed, so the full library is only
+/// downloaded when it did, and then only the part that changed (`date_from`).
+private struct Activities: Decodable {
+    let all: String?
+    let tvShows: Part?; let anime: Part?; let movies: Part?
+    struct Part: Decodable { let all: String?; let removedFromList: String? }
+    var removedSignature: String { [tvShows, anime, movies].map { $0?.removedFromList ?? "" }.joined(separator: "|") }
+}
+
+private struct LibraryCache: Codable {
+    var activity: String      // the `all` stamp the cached entries are current as of
+    var removed: String       // removals aren't reported by date_from, so a change here forces a full download
+    var entries: [Entry]
 }
 
 private enum SimklError: LocalizedError {
     case http(Int, String)
     case message(String)
+    case v2Unavailable                      // the device flow isn't offered for this app: fall back to the classic PIN
     var errorDescription: String? {
         switch self {
+        case .v2Unavailable: return "Simkl's device sign-in isn't available."
         case .http(let code, let body): return "Simkl answered HTTP \(code)" + (body.isEmpty ? "." : ": \(body)")
         case .message(let m): return m
         }
@@ -96,6 +120,8 @@ final class SimklStore {
     private(set) var loginStatus: String?
     private(set) var syncError: String?
     @ObservationIgnored private var lastSync: Date?
+    @ObservationIgnored private var rateLimitedUntil: Date?
+    @ObservationIgnored private var cache: LibraryCache?
     @ObservationIgnored private var loginTask: Task<Void, Never>?
     @ObservationIgnored private var refreshToken: String? = Keychain.get("simkl.refresh")
     @ObservationIgnored private var tokenExpiry: Date? = UserDefaults.standard.object(forKey: "simkl.tokenExpiry") as? Date
@@ -104,10 +130,23 @@ final class SimklStore {
     @ObservationIgnored private var refreshTask: Task<Bool, Never>?
     private static let expiryKey = "simkl.tokenExpiry"
 
+    init() {
+        if token != nil, let c = Self.loadCache() { cache = c; apply(c.entries) }   // Library shows instantly at launch
+    }
+
     var isConnected: Bool { token != nil }
-    /// Trimmed: a pasted ID with a trailing space or newline is the most common reason a login "does nothing".
+
+    /// MediaHub's own Simkl app. Users never create an app of their own: they just enter a PIN.
+    /// A client ID is public (it is sent with every request), so shipping it in the app is fine.
+    static let builtInClientID = "653eaa33050575583f36100891b3e999ed0b6334a1fe5329fc91013142c36b4e"
+    private static let tokenClientKey = "simkl.tokenClientID"
+
+    /// The client ID the current login belongs to. Someone who connected before this change used their own app,
+    /// and refreshing that token needs the same ID, so it is remembered; everyone else uses the built-in one.
     private var clientID: String {
-        (UserDefaults.standard.string(forKey: "simkl.clientID") ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard isConnected else { return Self.builtInClientID }
+        let own = (UserDefaults.standard.string(forKey: Self.tokenClientKey) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return own.isEmpty ? Self.builtInClientID : own
     }
 
     // MARK: HTTP
@@ -131,6 +170,7 @@ final class SimklStore {
         r.setValue("application/json", forHTTPHeaderField: "Content-Type")
         r.setValue("application/json", forHTTPHeaderField: "Accept")
         r.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
+        r.setValue(clientID, forHTTPHeaderField: "simkl-api-key")
         if auth, let t = token { r.setValue("Bearer \(t)", forHTTPHeaderField: "Authorization") }
         if let body { r.httpBody = try? JSONSerialization.data(withJSONObject: body) }
         return r
@@ -143,6 +183,11 @@ final class SimklStore {
     private func send<T: Decodable>(_ r: URLRequest) async throws -> T {
         let (d, resp) = try await URLSession.shared.data(for: r)
         let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+        if code == 429 {
+            // Respect Simkl's rate limit: stop calling until Retry-After (default one minute) has passed.
+            let wait = Double((resp as? HTTPURLResponse)?.value(forHTTPHeaderField: "Retry-After") ?? "") ?? 60
+            rateLimitedUntil = Date().addingTimeInterval(min(max(wait, 30), 600))
+        }
         guard code == 200 else { throw SimklError.http(code, Self.snippet(d)) }
         let dec = JSONDecoder(); dec.keyDecodingStrategy = .convertFromSnakeCase
         return try dec.decode(T.self, from: d)
@@ -181,16 +226,15 @@ final class SimklStore {
     func connect() {
         loginTask?.cancel()
         loginError = nil; loginStatus = nil; pin = nil
-        let cid = clientID
-        guard !cid.isEmpty else { loginError = "Enter your Simkl client ID first."; return }
-        loginTask = Task { await runDeviceFlow(clientID: cid) }
+        loginTask = Task { await runDeviceFlow() }
     }
 
     func cancelLogin() {
         loginTask?.cancel(); pin = nil; loginStatus = nil
     }
 
-    private func requestDeviceCode(clientID cid: String) async throws -> DeviceAuthorization {
+    private func requestDeviceCode() async throws -> DeviceAuthorization {
+        let cid = Self.builtInClientID
         // media:write is needed for scrobbling and Add to Watchlist; omitting scope would give a read-only token.
         let r = oauthRequest("/oauth2/device", form: ["client_id": cid, "scope": "media:read media:write"])
         let (d, resp) = try await URLSession.shared.data(for: r)
@@ -198,16 +242,42 @@ final class SimklStore {
         let dec = JSONDecoder(); dec.keyDecodingStrategy = .convertFromSnakeCase
         if code == 200 { return try dec.decode(DeviceAuthorization.self, from: d) }
         let e = try? dec.decode(OAuthError.self, from: d)
-        if e?.error == "invalid_client" {
-            throw SimklError.message("Simkl doesn't accept this client ID for the device flow. It must belong to an AUTH V2 app (simkl.com/settings/developer).")
-        }
+        if e?.error == "invalid_client" || [400, 403, 404, 405].contains(code) { throw SimklError.v2Unavailable }
         throw SimklError.http(code, e?.errorDescription ?? Self.snippet(d))
     }
 
-    private func runDeviceFlow(clientID cid: String) async {
+    /// Classic PIN flow (`GET /oauth/pin`): used when the app isn't enabled for the device flow. Needs only the client ID.
+    private func requestClassicPin() async throws -> DeviceAuthorization {
+        struct Classic: Decodable { let userCode: String; let verificationUrl: String?; let expiresIn: Int?; let interval: Int? }
+        let c: Classic = try await send(request("/oauth/pin", auth: false))
+        let page = c.verificationUrl ?? "https://simkl.com/pin"
+        let base = page.hasSuffix("/") ? page : page + "/"
+        return DeviceAuthorization(deviceCode: c.userCode, userCode: c.userCode, verificationUri: page,
+                                   verificationUriComplete: base + c.userCode, expiresIn: c.expiresIn ?? 900, interval: c.interval ?? 5)
+    }
+
+    private func pollClassic(userCode: String) async -> PollResult {
+        struct Poll: Decodable { let result: String?; let accessToken: String? }
+        guard let (d, resp) = try? await URLSession.shared.data(for: request("/oauth/pin/\(userCode)", auth: false)) else { return .transient }
+        let status = Self.status(resp)
+        if status == 429 { return .slowDown }
+        if status >= 500 { return .transient }
+        let dec = JSONDecoder(); dec.keyDecodingStrategy = .convertFromSnakeCase
+        if status == 200, let p = try? dec.decode(Poll.self, from: d) {
+            if let t = p.accessToken, !t.isEmpty { return .tokens(TokenResponse(accessToken: t, refreshToken: nil, expiresIn: nil, scope: nil)) }
+            return .pending                                 // {"result":"KO"} until the user approves
+        }
+        return .failed("The code expired. Tap Connect to get a new one.")
+    }
+
+    private func runDeviceFlow() async {
+        let cid = Self.builtInClientID
         do {
             loginStatus = "Requesting a code…"
-            let p = try await requestDeviceCode(clientID: cid)
+            var classic = false
+            let p: DeviceAuthorization
+            do { p = try await requestDeviceCode() }
+            catch SimklError.v2Unavailable { p = try await requestClassicPin(); classic = true }
             pin = p
             loginStatus = "Open the page below and enter the code."
             let deadline = Date().addingTimeInterval(Double(p.expiresIn))
@@ -216,8 +286,10 @@ final class SimklStore {
             while Date() < deadline {
                 try await Task.sleep(for: .seconds(wait))
                 try Task.checkCancellation()
-                switch await poll(deviceCode: p.deviceCode, clientID: cid) {
+                let result = classic ? await pollClassic(userCode: p.userCode) : await poll(deviceCode: p.deviceCode, clientID: cid)
+                switch result {
                 case .tokens(let t):
+                    UserDefaults.standard.set(cid, forKey: Self.tokenClientKey)
                     storeTokens(t)
                     pin = nil; loginStatus = nil; loginError = nil
                     await sync(force: true)
@@ -282,6 +354,9 @@ final class SimklStore {
         token = t.accessToken
         Keychain.set(t.accessToken, "simkl.token")
         if let r = t.refreshToken, !r.isEmpty { refreshToken = r; Keychain.set(r, "simkl.refresh") }
+        guard t.expiresIn != nil || t.refreshToken != nil else {
+            tokenExpiry = nil; UserDefaults.standard.removeObject(forKey: Self.expiryKey); return
+        }
         let exp = Date().addingTimeInterval(Double(t.expiresIn ?? 604_800))
         tokenExpiry = exp
         UserDefaults.standard.set(exp, forKey: Self.expiryKey)
@@ -331,25 +406,68 @@ final class SimklStore {
         token = nil; refreshToken = nil; tokenExpiry = nil
         Keychain.remove("simkl.token"); Keychain.remove("simkl.refresh")
         UserDefaults.standard.removeObject(forKey: Self.expiryKey)
+        UserDefaults.standard.removeObject(forKey: Self.tokenClientKey)
+        cache = nil; lastSync = nil
+        try? FileManager.default.removeItem(at: Self.cacheURL)
     }
 
     // MARK: Library
 
+    private static var cacheURL: URL {
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("simkl-library.json")
+    }
+    private static func loadCache() -> LibraryCache? {
+        guard let d = try? Data(contentsOf: cacheURL) else { return nil }
+        return try? JSONDecoder().decode(LibraryCache.self, from: d)
+    }
+    private func saveCache() {
+        guard let c = cache, let d = try? JSONEncoder().encode(c) else { return }
+        try? d.write(to: Self.cacheURL, options: .atomic)
+    }
+
+    /// Simkl's guidelines: ask `/sync/activities` first, download only what changed, never poll, back off on 429.
+    /// Nothing changed = one small request. Something changed = only the changed titles. A removal = one full download.
+    /// Callers throttle this to once per 15 minutes (foreground / pull-to-refresh); "Sync now" bypasses the throttle.
     func sync(force: Bool = false) async {
         guard isConnected, !isSyncing else { return }
+        if let until = rateLimitedUntil, until > .now { return }
         if !force, let l = lastSync, Date().timeIntervalSince(l) < 900 { return }
         isSyncing = true; defer { isSyncing = false }
-        let all: AllItems
-        do { all = try await sendAuthed { request("/sync/all-items/") } }
-        catch {
+        do {
+            let act: Activities = try await sendAuthed { request("/sync/activities") }
+            let stamp = act.all ?? "", removed = act.removedSignature
+            if !stamp.isEmpty, let c = cache, c.activity == stamp {
+                if library.isEmpty && !c.entries.isEmpty { apply(c.entries) }
+                syncError = nil; lastSync = .now
+                return
+            }
+            var merged: [Entry]?
+            if !stamp.isEmpty, let c = cache, c.removed == removed,
+               let delta: AllItems = try? await sendAuthed({ request("/sync/all-items/", query: ["date_from": c.activity]) }) {
+                var byKey = Dictionary(c.entries.compactMap { e in e.key.map { ($0, e) } }, uniquingKeysWith: { _, n in n })
+                for e in delta.movies + delta.shows + delta.anime { if let k = e.key { byKey[k] = e } }
+                merged = Array(byKey.values)
+            }
+            if merged == nil {
+                if let until = rateLimitedUntil, until > .now { throw SimklError.http(429, "") }
+                let all: AllItems = try await sendAuthed { request("/sync/all-items/") }
+                merged = all.movies + all.shows + all.anime
+            }
+            let entries = merged ?? []
+            if !stamp.isEmpty { cache = LibraryCache(activity: stamp, removed: removed, entries: entries); saveCache() }
+            syncError = nil
+            lastSync = .now
+            apply(entries)
+        } catch {
             if case SimklError.http(let c, _) = error, c == 401 || c == 403 {
                 syncError = "Simkl rejected the saved login. Disconnect and connect again."
+            } else if case SimklError.http(let c, _) = error, c == 429 {
+                syncError = "Simkl asked the app to slow down. It will try again shortly."
             } else { syncError = error.localizedDescription }
-            return
         }
-        syncError = nil
-        lastSync = .now
-        let entries = all.movies + all.shows + all.anime
+    }
+
+    private func apply(_ entries: [Entry]) {
         func items(_ status: String) -> [MetaPreview] {
             entries.filter { $0.status == status }.sorted { $0.activity > $1.activity }.compactMap { e in
                 guard let m = e.movie ?? e.show,
