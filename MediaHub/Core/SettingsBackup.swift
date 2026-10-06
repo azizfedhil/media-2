@@ -10,7 +10,7 @@ enum SettingsBackup {
     static let version = 1
 
     static let keys = [
-        "addon.manifestURLs", "tmdb.key", "tvdb.key", "tvdb.pin", "mdblist.key", "mdblist.lists",
+        "addon.manifestURLs", "addon.disabled", "tmdb.key", "tvdb.key", "tvdb.pin", "mdblist.key", "mdblist.lists",
         "ui.accent", "ui.networkBadges", "ui.titleLogos", "player.glass", "player.autoplayNext",
         "skip.enabled", "skip.fallbackSeconds", "sub.lang", "sub.style", "subs.online", "subs.baseURL", "library.collapsed",
         "profiles.list", "profiles.active", "pinned.sources",
@@ -45,6 +45,11 @@ enum SettingsBackup {
         var n = 0
         for (k, val) in dict where isAllowed(k, includeData: true) {
             UserDefaults.standard.set(val, forKey: k); n += 1
+        }
+        // The add-on list comes from the backup, so its on/off state must too. Backups made before add-ons
+        // could be switched off have no such key: everything in them is on.
+        if dict["addon.manifestURLs"] != nil && dict["addon.disabled"] == nil {
+            UserDefaults.standard.removeObject(forKey: "addon.disabled")
         }
         return n
     }

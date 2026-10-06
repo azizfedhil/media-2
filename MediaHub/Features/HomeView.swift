@@ -127,6 +127,10 @@ final class HomeModel {
                 rows = done.keys.sorted().compactMap { done[$0] }
             }
         }
+        // Settle on exactly this run's result, so rows from an add-on that was just switched off (or whose
+        // catalogs all failed) don't linger. Skipped when superseded by a newer load.
+        guard !Task.isCancelled else { return }
+        rows = done.keys.sorted().compactMap { done[$0] }
     }
 }
 

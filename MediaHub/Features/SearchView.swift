@@ -104,7 +104,7 @@ struct SearchView: View {
             // Debounce: only the last keystroke in a 350 ms window hits the network.
             try? await Task.sleep(for: .milliseconds(350))
             guard !Task.isCancelled else { return }
-            await model.run(query, addons: store.addons)
+            await model.run(query, addons: store.enabledAddons)
         }
     }
 

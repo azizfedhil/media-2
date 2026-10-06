@@ -265,7 +265,7 @@ final class DownloadManager {
                 imdb: r.imdb, type: r.item.type, season: r.season, episode: r.episode,
                 preferAddonID: r.sourceAddonID ?? sibling?.sourceAddonID,
                 preferSignature: r.sourceSignature ?? sibling?.sourceSignature,
-                addons: store?.addons ?? [], pins: pins) else {
+                addons: store?.enabledAddons ?? [], pins: pins) else {
                 fail(id, "No HTTPS source found"); return
             }
             r.remoteURL = found.url

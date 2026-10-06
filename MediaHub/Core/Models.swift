@@ -12,6 +12,24 @@ struct AddonManifest: Decodable, Sendable, Hashable {
     let catalogs: [CatalogDef]?
     let resources: [Resource]?
     let idPrefixes: [String]?
+    let behaviorHints: BehaviorHints?
+
+    /// Only the hints the app uses. Decoding never throws: add-ons are inconsistent, and a malformed
+    /// `behaviorHints` must not make an otherwise working add-on fail to load.
+    struct BehaviorHints: Decodable, Sendable, Hashable {
+        let configurable: Bool?
+        let configurationRequired: Bool?
+        private enum CodingKeys: String, CodingKey { case configurable, configurationRequired }
+        init(from decoder: Decoder) throws {
+            let c = try? decoder.container(keyedBy: CodingKeys.self)
+            configurable = Self.flag(c, .configurable)
+            configurationRequired = Self.flag(c, .configurationRequired)
+        }
+        private static func flag(_ c: KeyedDecodingContainer<CodingKeys>?, _ key: CodingKeys) -> Bool? {
+            guard let c else { return nil }
+            return try? c.decodeIfPresent(Bool.self, forKey: key)
+        }
+    }
 
     struct CatalogDef: Decodable, Sendable, Hashable {
         let type: String
@@ -62,6 +80,15 @@ struct Addon: Identifiable, Sendable, Hashable {
     var id: String { manifestURL.absoluteString }
     var baseURL: URL { manifestURL.deletingLastPathComponent() }
     var homeCatalogs: [AddonManifest.CatalogDef] { (manifest.catalogs ?? []).filter(\.isBrowsable) }
+
+    /// The add-on says it has a setup page (`behaviorHints.configurable`), or can't work without one.
+    var isConfigurable: Bool {
+        manifest.behaviorHints?.configurable == true || manifest.behaviorHints?.configurationRequired == true
+    }
+    var needsConfiguration: Bool { manifest.behaviorHints?.configurationRequired == true }
+    /// Stremio convention: the setup page sits next to the manifest (`…/manifest.json` -> `…/configure`).
+    /// For add-ons that embed their settings in the URL path, this opens the page pre-filled.
+    var configureURL: URL { baseURL.appendingPathComponent("configure") }
 
     func provides(_ resource: String, type: String, id: String) -> Bool {
         guard let r = manifest.resources?.first(where: { $0.name == resource }) else { return false }
