@@ -26,6 +26,7 @@ struct DetailView: View {
     @Environment(WatchHistory.self) private var history
     @Environment(LocalLibrary.self) private var library
     @Environment(ThemeStore.self) private var theme
+    @Environment(DownloadManager.self) private var downloads
     @State private var imdbID: String?
     @State private var onWatchlist = false
     @State private var ratings: [MDBListClient.Rating] = []
@@ -130,6 +131,8 @@ struct DetailView: View {
             ratings = await MDBListClient.shared.ratings(imdb: imdb, type: item.type)
         }
         .task { logoURL = await LogoResolver.shared.logo(for: item) }
+        // The IMDb id keys downloads, so it is resolved up front for the badges.
+        .task { _ = await ensureIMDB() }
         .task { trailers = await TMDBClient.shared.videos(for: item.id, type: item.type) }
 
         .task { await configureFromHistory() }
@@ -157,6 +160,9 @@ struct DetailView: View {
             if !metaLine.isEmpty || networkText != nil { metaRow }
             if !allRatings.isEmpty { ratingsRow }
             actionBar
+            if !isSeries, let imdb = imdbID, let rec = downloads.record(imdb: imdb, season: nil, episode: nil) {
+                downloadStatus(rec)
+            }
         }
     }
 
@@ -185,6 +191,7 @@ struct DetailView: View {
                     .foregroundStyle(theme.onAccent)
             }
             .buttonStyle(.glassProminent).controlSize(.large)
+            .contextMenu { downloadMenu(season: isSeries ? season : nil, episode: isSeries ? episode : nil) }
             listButton
             watchedButton
         }
@@ -318,13 +325,7 @@ struct DetailView: View {
                     }
                     .buttonStyle(.plain)
                     // Long tap: mark the whole season as watched (or unmark it).
-                    .contextMenu {
-                        if isSeasonWatched(c.id) {
-                            Button("Unmark Season as Watched", systemImage: "circle") { setSeasonWatched(c.id, false) }
-                        } else {
-                            Button("Mark Season as Watched", systemImage: "checkmark.circle") { setSeasonWatched(c.id, true) }
-                        }
-                    }
+                    .contextMenu { seasonMenu(c.id) }
                 }
             }
             .padding(.horizontal, 20)
@@ -391,13 +392,7 @@ struct DetailView: View {
                     }
                     .buttonStyle(.plain)
                     // Long tap: mark the whole season as watched (or unmark it).
-                    .contextMenu {
-                        if isSeasonWatched(c.id) {
-                            Button("Unmark Season as Watched", systemImage: "circle") { setSeasonWatched(c.id, false) }
-                        } else {
-                            Button("Mark Season as Watched", systemImage: "checkmark.circle") { setSeasonWatched(c.id, true) }
-                        }
-                    }
+                    .contextMenu { seasonMenu(c.id) }
                 }
             }
             .padding(.horizontal, 20)
@@ -436,8 +431,10 @@ struct DetailView: View {
         return EpisodeCard(ep: ep, selected: ep.id == episode,
                     watched: watched,
                     upNext: !watched && upNext?.season == season && upNext?.episode == ep.id,
+                    download: imdbID.flatMap { downloads.record(imdb: $0, season: season, episode: ep.id) },
                     onTap: { userPicked = true; episode = ep.id; showSources = true }) {
             // Same actions in the long-press menu and the card's "..." button.
+            downloadMenu(season: season, episode: ep.id, ep: ep)
             Button("Mark as Watched", systemImage: "checkmark.circle") {
                 withAnimation {
                     history.markWatched(item, key: "\(season):\(ep.id)", season: season, episode: ep.id,
@@ -467,6 +464,80 @@ struct DetailView: View {
         guard !Task.isCancelled else { return }
         episodes = list
         loadingEpisodes = false
+    }
+
+    // MARK: Downloads
+
+    /// Long-press menu entry: Download, or (depending on its state) Cancel / Delete / Retry.
+    /// With `stream` set (sources sheet) it saves that exact source; otherwise the source is picked automatically.
+    @ViewBuilder
+    private func downloadMenu(season s: Int?, episode e: Int?, ep: EpisodeItem? = nil,
+                              addon: Addon? = nil, stream: StreamItem? = nil) -> some View {
+        if let r = imdbID.flatMap({ downloads.record(imdb: $0, season: s, episode: e) }) {
+            switch r.state {
+            case .done:
+                Button("Delete Download", systemImage: "trash", role: .destructive) { downloads.delete(r.id) }
+            case .queued, .downloading:
+                Button("Cancel Download", systemImage: "xmark.circle", role: .destructive) { downloads.delete(r.id) }
+            case .failed:
+                Button("Retry Download", systemImage: "arrow.clockwise") { downloads.retry(r.id) }
+            }
+        } else {
+            Button("Download", systemImage: "arrow.down.circle") { queueDownload(season: s, episode: e, ep: ep, addon: addon, stream: stream) }
+        }
+    }
+
+    private func queueDownload(season s: Int?, episode e: Int?, ep: EpisodeItem? = nil,
+                               addon: Addon? = nil, stream: StreamItem? = nil) {
+        Task {
+            guard let imdb = await ensureIMDB() else { return }
+            let info = ep ?? (e != nil ? episodes.first(where: { $0.id == e }) : nil)
+            downloads.enqueue(item: item, imdb: imdb, season: s, episode: e, episodeTitle: info?.name,
+                              thumb: info?.image ?? item.backdropURL, logo: logoURL,
+                              runtime: info?.runtime ?? details?.minutes, addonID: addon?.id, stream: stream)
+        }
+    }
+
+    /// Long-press on a season name: download it episode by episode, or delete everything saved for it at once.
+    @ViewBuilder
+    private func seasonMenu(_ s: Int) -> some View {
+        let recs = imdbID.map { downloads.records(imdb: $0, season: s) } ?? []
+        let total = details?.seasons?.first(where: { $0.seasonNumber == s })?.episodeCount
+            ?? (s == season && !episodes.isEmpty ? episodes.count : nil)
+        if total == nil || recs.filter({ $0.state != .failed }).count < total! {
+            Button("Download Season", systemImage: "arrow.down.circle") { downloadSeason(s) }
+        }
+        if !recs.isEmpty, let imdb = imdbID {
+            Button("Delete Season Downloads", systemImage: "trash", role: .destructive) { downloads.delete(imdb: imdb, season: s) }
+        }
+        if isSeasonWatched(s) {
+            Button("Unmark Season as Watched", systemImage: "circle") { setSeasonWatched(s, false) }
+        } else {
+            Button("Mark Season as Watched", systemImage: "checkmark.circle") { setSeasonWatched(s, true) }
+        }
+    }
+
+    private func downloadSeason(_ s: Int) {
+        Task {
+            guard let imdb = await ensureIMDB() else { return }
+            let list = (s == season && !episodes.isEmpty) ? episodes
+                : await EpisodeLoader.load(itemID: item.id, type: item.type, season: s) { await ensureIMDB() }
+            downloads.enqueueSeason(item: item, imdb: imdb, season: s, episodes: list, logo: logoURL)
+        }
+    }
+
+    /// Movie only (episodes carry a badge instead).
+    private func downloadStatus(_ r: DownloadRecord) -> some View {
+        let size = ByteCountFormatter.string(fromByteCount: r.bytes, countStyle: .file)
+        let text: String, symbol: String
+        switch r.state {
+        case .done: text = "Downloaded · \(size)"; symbol = "arrow.down.circle.fill"
+        case .downloading: text = "Downloading \(Int(r.progress * 100))%"; symbol = "arrow.down.circle"
+        case .queued: text = "Waiting to download"; symbol = "clock"
+        case .failed: text = r.error ?? "Download failed"; symbol = "exclamationmark.triangle.fill"
+        }
+        return Label(text, systemImage: symbol).font(.footnote.weight(.medium))
+            .foregroundStyle(r.state == .done ? theme.accent : Color.secondary)
     }
 
     // MARK: Trailers
@@ -632,6 +703,13 @@ struct DetailView: View {
             }
         }
         .disabled(!s.isPlayable)
+        .contextMenu {
+            if s.isDownloadable {
+                downloadMenu(season: isSeries ? season : nil, episode: isSeries ? episode : nil, addon: addon, stream: s)
+            } else if s.isTorrent {
+                Button("Torrents can't be downloaded", systemImage: "nosign") {}.disabled(true)
+            }
+        }
         .swipeActions {
             if let imdb = imdbID {
                 if isPinned { Button("Unpin", systemImage: "pin.slash") { pins.remove(for: imdb) }.tint(.gray) }
