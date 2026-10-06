@@ -265,16 +265,16 @@ private struct HeroPage: View {
     var body: some View {
         NavigationLink(value: item) {
             ZStack(alignment: .bottomLeading) {
-                // Slow Ken Burns zoom while this page is showing; the bottom dissolves into the ambient glow.
-                KenBurns(active: active) {
-                    RemoteImage(url: item.heroURL(wide: wide), size: wide ? 1200 : 800)
-                }
-                    .mask {
-                        LinearGradient(stops: [.init(color: .black, location: 0), .init(color: .black, location: 0.6),
-                                               .init(color: .clear, location: 1)],
-                                       startPoint: .top, endPoint: .bottom)
+                // Slow Ken Burns zoom while this page is showing. The darkening scrim sits on the artwork and both
+                // are faded out together along one eased curve, so the art melts into the page background with no
+                // visible start line and no hard edge where the hero ends. One static mask, nothing animated.
+                ZStack {
+                    KenBurns(active: active) {
+                        RemoteImage(url: item.heroURL(wide: wide), size: wide ? 1200 : 800)
                     }
-                LinearGradient(colors: [.clear, .black.opacity(0.6)], startPoint: .init(x: 0.5, y: 0.45), endPoint: .bottom)
+                    LinearGradient.easedFade(start: 0.4, from: 0, to: 0.6)
+                }
+                .mask { LinearGradient.easedFade(start: 0.42, from: 1, to: 0) }
                 info
             }
             .frame(height: height)
@@ -312,6 +312,21 @@ private struct HeroPage: View {
         .scrollTransition(axis: .horizontal) { content, phase in
             content.opacity(1 - min(abs(phase.value) * 1.6, 1)).offset(x: phase.value * 70)
         }
+    }
+}
+
+private extension LinearGradient {
+    /// Top-to-bottom gradient that holds `from` opacity down to `start` (0...1 of the height), then eases to `to`
+    /// at the bottom along a smoothstep curve. A plain two-stop ramp has a visible kink where it begins; the
+    /// eased curve starts and ends with zero slope, which is what makes a fade read as seamless.
+    static func easedFade(_ color: Color = .black, start: CGFloat, from a: Double, to b: Double, steps: Int = 10) -> LinearGradient {
+        var stops: [Gradient.Stop] = [.init(color: color.opacity(a), location: 0)]
+        for i in 0...steps {
+            let u = Double(i) / Double(steps)
+            let eased = u * u * (3 - 2 * u)
+            stops.append(.init(color: color.opacity(a + (b - a) * eased), location: start + (1 - start) * CGFloat(u)))
+        }
+        return LinearGradient(stops: stops, startPoint: .top, endPoint: .bottom)
     }
 }
 
