@@ -20,14 +20,15 @@ for t in "$DEVICE" "$SIM"; do
   cargo build --release --lib --target "$t"
 done
 
-rm -rf "$STAGE" && mkdir -p "$STAGE/bindings" "$STAGE/headers" "$GEN"
+# Put headers inside a namespaced 'p2p_coreFFI' subfolder to prevent collision with LibDovi/Dovi.xcframework
+rm -rf "$STAGE" && mkdir -p "$STAGE/bindings" "$STAGE/headers/p2p_coreFFI" "$GEN"
 
 # Library mode: bindings are read from the compiled artifact's metadata, so Swift can never drift from the Rust API.
 cargo run --release --manifest-path uniffi-bindgen/Cargo.toml -- generate \
   --library "target/$DEVICE/release/$LIB" --language swift --out-dir "$STAGE/bindings"
 
-cp "$STAGE/bindings/p2p_coreFFI.h" "$STAGE/headers/"
-cp "$STAGE/bindings/p2p_coreFFI.modulemap" "$STAGE/headers/module.modulemap"
+cp "$STAGE/bindings/p2p_coreFFI.h" "$STAGE/headers/p2p_coreFFI/"
+cp "$STAGE/bindings/p2p_coreFFI.modulemap" "$STAGE/headers/p2p_coreFFI/module.modulemap"
 cp "$STAGE/bindings/p2p_core.swift" "$GEN/p2p_core.swift"
 
 rm -rf "$OUT" && mkdir -p "$(dirname "$OUT")"
