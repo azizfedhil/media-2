@@ -289,8 +289,9 @@ final class ProfileStatsModel {
             let simklWatched = d.count?.watched ?? 0
 
             var through = 0
-            if isSeries, let h, let se = h.seasonEpisode {
-                through = Self.through(season: se.season, episode: h.isFinished ? se.episode : se.episode - 1, facts: f)
+            if isSeries, let h {
+                if let w = h.watchedThrough { through = Self.through(season: w.season, episode: w.episode, facts: f) }
+                else if let se = h.seasonEpisode { through = Self.through(season: se.season, episode: se.episode - 1, facts: f) }
             }
             through = max(through, simklWatched)
 
@@ -301,7 +302,7 @@ final class ProfileStatsModel {
                 if let t = f?.totalEpisodes, t > 0, through >= t { status = .completed }
                 else if through > 0 || (h?.position ?? 0) > 30 || d.simkl == "watching" { status = .watching }
             } else {
-                if h?.isFinished == true { status = .completed }
+                if h?.isTitleWatched == true { status = .completed }
                 else if (h?.position ?? 0) > 30 || d.simkl == "watching" { status = .watching }
             }
             if status == nil, d.local == .planToWatch || d.simkl == "plantowatch" { status = .planned }

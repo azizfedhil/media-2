@@ -36,6 +36,9 @@ struct DetailView: View {
     @State private var streams: [(Addon, [StreamItem])] = []
     @State private var loadingStreams = false
     @State private var showSources = false
+    /// Set while the sources sheet is open to choose a download source: tapping a row enqueues it instead of playing.
+    @State private var downloadTarget: DownloadTarget?
+    private struct DownloadTarget { let season: Int?; let episode: Int?; let ep: EpisodeItem? }
     /// Add-on id the sources sheet is narrowed to; nil = all add-ons.
     @State private var sourceFilter: String?
     @State private var playRequest: PlayRequest?
@@ -112,7 +115,7 @@ struct DetailView: View {
         }
         .ignoresSafeArea(edges: .top)
         .toolbarTitleDisplayMode(.inline)
-        .sheet(isPresented: $showSources, onDismiss: startPendingPlayback) { sourceSheet }
+        .sheet(isPresented: $showSources, onDismiss: { downloadTarget = nil; startPendingPlayback() }) { sourceSheet }
         // Presented from the page itself (not from inside the sources sheet): the sheet closes first,
         // then the player opens. This keeps dismissing the player reliable.
         .fullScreenCover(item: $playRequest) { r in
@@ -248,7 +251,7 @@ struct DetailView: View {
         .accessibilityLabel(isWatched ? "Unmark as watched" : "Mark as watched")
     }
 
-    private var isWatched: Bool { history.entry(for: item.id)?.isFinished ?? false }
+    private var isWatched: Bool { history.entry(for: item.id)?.isTitleWatched ?? false }
     private var inList: Bool { library.entry(for: item.id) != nil }
     /// Simkl is this profile's library (connected and chosen); otherwise the list button works on the local library.
     private var viaSimkl: Bool { prefs.usesSimkl(simkl) }
@@ -260,7 +263,7 @@ struct DetailView: View {
         library.set(item, status: status)
         guard isNew else { return }
         Task {
-            if let other = await stremioID(), other != item.id { library.setAlias(other, for: item.id) }
+            if let other = await stremioID(), other != item.id { library.setAlias(other, for: item.id); history.link(item.id, other) }
         }
     }
 
@@ -277,13 +280,13 @@ struct DetailView: View {
 
     /// Opens on the episode you should watch: where you stopped, or the one after a finished episode.
     private func configureFromHistory() async {
-        guard isSeries, let e = history.entry(for: item.id), let se = e.seasonEpisode else { return }
-        if e.isFinished {
+        guard isSeries, let e = history.entry(for: item.id) else { return }
+        if e.isInProgress, let se = e.seasonEpisode {
+            if !explicitStart, !userPicked { season = se.season; episode = se.episode }
+        } else if e.watchedThrough != nil {
             guard let n = await UpNext.resolve(e) else { return }
             upNext = n
             if !explicitStart && !userPicked { season = n.season; episode = n.episode }
-        } else if e.position > 30, !explicitStart, !userPicked {
-            season = se.season; episode = se.episode
         }
     }
 
@@ -340,12 +343,12 @@ struct DetailView: View {
 
     /// The show's watched marker sits on its last-watched episode; a season counts when that episode is inside it.
     private func seasonProgress(_ s: Int) -> (watchedEpisodes: Int, total: Int)? {
-        guard let en = history.entry(for: item.id), en.isFinished, let se = en.seasonEpisode else { return nil }
+        guard let se = history.entry(for: item.id)?.watchedThrough else { return nil }
         let total: Int?
         if se.season == s { total = episodes.isEmpty ? details?.seasons?.first(where: { $0.seasonNumber == s })?.episodeCount : episodes.count }
         else { total = details?.seasons?.first(where: { $0.seasonNumber == s })?.episodeCount }
         guard let total, total > 0 else { return nil }
-        if se.season < s { return (total, total) }
+        if se.season > s { return (total, total) }
         guard se.season == s else { return nil }
         return (min(se.episode, total), total)
     }
@@ -362,12 +365,8 @@ struct DetailView: View {
                     ?? (s == season && !episodes.isEmpty ? episodes.count : nil)
                     ?? 10
                 TitleActions.markWatched(item, history: history, season: s, episode: count)
-            } else if isSeasonWatched(s), let en = history.entry(for: item.id), let se = en.seasonEpisode {
-                // Pull the marker back to the last episode of the previous season.
-                let prevSeason = max(se.season - 1, 1)
-                let prevCount = details?.seasons?.first(where: { $0.seasonNumber == prevSeason })?.episodeCount ?? 10
-                history.markWatched(item, key: "\(prevSeason):\(prevCount)", season: prevSeason, episode: prevCount,
-                                    duration: en.duration)
+            } else if isSeasonWatched(s) {
+                history.unmarkThrough(episode: 1, season: s, item: item)
             } else {
                 history.unmarkWatched(item.id)
             }
@@ -488,8 +487,18 @@ struct DetailView: View {
                 Button("Retry Download", systemImage: "arrow.clockwise") { downloads.retry(r.id) }
             }
         } else {
-            Button("Download", systemImage: "arrow.down.circle") { queueDownload(season: s, episode: e, ep: ep, addon: addon, stream: stream) }
+            Button("Download", systemImage: "arrow.down.circle") {
+                if stream != nil { queueDownload(season: s, episode: e, ep: ep, addon: addon, stream: stream) }
+                else { chooseDownloadSource(season: s, episode: e, ep: ep) }
+            }
         }
+    }
+
+    /// Opens the sources sheet for that episode (or movie) so the download uses the source you pick.
+    private func chooseDownloadSource(season s: Int?, episode e: Int?, ep: EpisodeItem?) {
+        if isSeries, let s, let e { userPicked = true; season = s; episode = e }
+        downloadTarget = DownloadTarget(season: s, episode: e, ep: ep)
+        showSources = true
     }
 
     private func queueDownload(season s: Int?, episode e: Int?, ep: EpisodeItem? = nil,
@@ -513,7 +522,8 @@ struct DetailView: View {
             Button("Download Season", systemImage: "arrow.down.circle") { downloadSeason(s) }
         }
         if !recs.isEmpty, let imdb = imdbID {
-            Button("Delete Season Downloads", systemImage: "trash", role: .destructive) { downloads.delete(imdb: imdb, season: s) }
+            Button(recs.count == 1 ? "Delete 1 Downloaded Episode" : "Delete \(recs.count) Downloaded Episodes",
+                   systemImage: "trash", role: .destructive) { downloads.delete(imdb: imdb, season: s) }
         }
         if isSeasonWatched(s) {
             Button("Unmark Season as Watched", systemImage: "circle") { setSeasonWatched(s, false) }
@@ -632,6 +642,7 @@ struct DetailView: View {
 
     private func ensureIMDB() async -> String? {
         if imdbID == nil { imdbID = await stremioID() }
+        if let other = imdbID, other != item.id { history.link(item.id, other) }
         return imdbID
     }
 
@@ -691,7 +702,12 @@ struct DetailView: View {
     }
 
     private func row(_ addon: Addon, _ s: StreamItem, isPinned: Bool) -> some View {
-        Button { play(addon, s) } label: {
+        Button {
+            if let t = downloadTarget {
+                queueDownload(season: t.season, episode: t.episode, ep: t.ep, addon: addon, stream: s)
+                showSources = false
+            } else { play(addon, s) }
+        } label: {
             HStack {
                 VStack(alignment: .leading) {
                     Text(s.name ?? s.title ?? "Stream").font(.headline)
@@ -707,9 +723,11 @@ struct DetailView: View {
                 if isPinned { Image(systemName: "pin.fill").foregroundStyle(.tint) }
             }
         }
-        .disabled(!s.isPlayable)
+        .disabled(downloadTarget != nil ? !s.isDownloadable : !s.isPlayable)
         .contextMenu {
-            if s.isDownloadable {
+            if downloadTarget != nil {
+                EmptyView()
+            } else if s.isDownloadable {
                 downloadMenu(season: isSeries ? season : nil, episode: isSeries ? episode : nil, addon: addon, stream: s)
             } else if s.isTorrent {
                 Button("Torrents can't be downloaded", systemImage: "nosign") {}.disabled(true)
@@ -760,7 +778,7 @@ struct DetailView: View {
                         description: Text("Add a stream add-on in Settings."))
                 }
             }
-            .navigationTitle("Sources")
+            .navigationTitle(downloadTarget != nil ? "Download from…" : "Sources")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 if streams.count > 1 {

@@ -25,7 +25,7 @@ enum UpNext {
             // No metadata source answered: assume the following episode exists.
             return (season, EpisodeItem(id: episode + 1, name: "Episode \(episode + 1)"))
         }
-        if let n = current.first(where: { $0.id == episode + 1 }) { return aired(n) ? (season, n) : nil }
+        if let n = current.filter({ $0.id > episode }).min(by: { $0.id < $1.id }) { return aired(n) ? (season, n) : nil }
         guard season >= 1 else { return nil }
         let following = await load(season + 1)
         if let first = following.filter({ $0.id >= 1 }).min(by: { $0.id < $1.id }), aired(first) { return (season + 1, first) }
@@ -33,7 +33,7 @@ enum UpNext {
     }
 
     static func resolve(_ entry: WatchHistory.Entry) async -> UpNextItem? {
-        guard let se = entry.seasonEpisode, let n = await next(for: entry.item, after: se.season, se.episode) else { return nil }
+        guard let se = entry.watchedThrough ?? entry.seasonEpisode, let n = await next(for: entry.item, after: se.season, se.episode) else { return nil }
         return UpNextItem(item: entry.item, season: n.season, episode: n.episode.id, title: n.episode.name,
                           thumb: n.episode.image ?? entry.item.backdropURL, runtime: n.episode.runtime,
                           updated: entry.updated)

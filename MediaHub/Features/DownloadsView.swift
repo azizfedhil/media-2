@@ -56,7 +56,7 @@ struct DownloadsView: View {
                 Section {
                     if show.isSeries {
                         ForEach(show.seasons) { sn in
-                            seasonRow(show, sn)
+                            if sn.records.count > 1 { seasonRow(show, sn) }
                             ForEach(sn.records) { row($0) }
                         }
                     } else {
@@ -146,16 +146,16 @@ struct DownloadsView: View {
             }
             Spacer()
             Menu {
-                Button("Delete Season", systemImage: "trash", role: .destructive) { confirm(show, sn) }
+                Button("Delete \(n) Episodes", systemImage: "trash", role: .destructive) { confirm(show, sn) }
             } label: {
                 Image(systemName: "ellipsis.circle").font(.title3).foregroundStyle(.secondary).frame(width: 36, height: 36)
             }
         }
         .swipeActions(edge: .trailing) {
-            Button("Delete Season", systemImage: "trash", role: .destructive) { confirm(show, sn) }
+            Button("Delete \(n) Episodes", systemImage: "trash", role: .destructive) { confirm(show, sn) }
         }
         .contextMenu {
-            Button("Delete Season", systemImage: "trash", role: .destructive) { confirm(show, sn) }
+            Button("Delete \(n) Episodes", systemImage: "trash", role: .destructive) { confirm(show, sn) }
         }
     }
 
@@ -236,7 +236,7 @@ struct DownloadsView: View {
     private func confirm(_ show: Show, _ sn: SeasonGroup) {
         let n = sn.records.count
         let name = sn.number == 0 ? "Specials" : "Season \(sn.number)"
-        pending = Pending(title: "Delete \(name)?", button: "Delete \(n) episode\(n == 1 ? "" : "s")",
+        pending = Pending(title: n == 1 ? "Delete episode?" : "Delete \(name)?", button: "Delete \(n) episode\(n == 1 ? "" : "s")",
                           message: "Frees \(DownloadFiles.sizeString(sn.bytes)).",
                           run: { downloads.delete(imdb: show.id, season: sn.number) })
     }

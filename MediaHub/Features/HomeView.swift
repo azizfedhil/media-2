@@ -17,7 +17,7 @@ final class HomeModel {
 
     /// Next episode for each show whose last episode you finished. Resolved concurrently, order kept.
     func loadUpNext(_ entries: [WatchHistory.Entry]) async {
-        let batch = Array(entries.prefix(8))
+        let batch = entries
         guard !batch.isEmpty else { upNext = []; return }
         var done: [Int: UpNextItem] = [:]
         await withTaskGroup(of: (Int, UpNextItem?).self) { group in
@@ -669,7 +669,7 @@ struct PosterCard: View {
 
     /// Checkmark shown over posters of titles marked as watched.
     @ViewBuilder private var watchedBadge: some View {
-        if history.entry(for: item.id)?.isFinished == true {
+        if history.entry(for: item.id)?.isTitleWatched == true {
             Image(systemName: "checkmark.circle.fill")
                 .font(.system(size: compact ? 14 : 17, weight: .bold))
                 .foregroundStyle(theme.onAccent, theme.accent)

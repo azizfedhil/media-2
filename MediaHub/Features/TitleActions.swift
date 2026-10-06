@@ -49,7 +49,7 @@ struct PosterContextMenu: View {
     @Environment(WatchHistory.self) private var history
     @Environment(LocalLibrary.self) private var library
 
-    private var isWatched: Bool { history.entry(for: item.id)?.isFinished ?? false }
+    private var isWatched: Bool { history.entry(for: item.id)?.isTitleWatched ?? false }
     private var inList: Bool { library.entry(for: item.id) != nil }
 
     var body: some View {
