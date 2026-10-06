@@ -62,7 +62,7 @@ struct DetailView: View {
         if let y = item.releaseInfo { parts.append(y) }
         if let m = details?.minutes { parts.append("\(m) min") }
         if let g = details?.genres?.prefix(2).map(\.name), !g.isEmpty { parts.append(g.joined(separator: ", ")) }
-        return parts.joined(separator: "  ")
+        return parts.joined(separator: "  ·  ")
     }
 
     /// TV: broadcaster/streamer. Movies: production studio.
@@ -160,28 +160,43 @@ struct DetailView: View {
 
     // MARK: Header
 
+    /// Three calm groups with room between them: who it is (title, facts, ratings), what to do (buttons),
+    /// then what it's about (tagline + synopsis). The synopsis sits below the buttons so the page opens on the
+    /// title and the Play button rather than a wall of text.
     private var header: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            TitleArt(item: item, maxWidth: 280, maxHeight: 100, font: .largeTitle.bold())
-            if let t = details?.tagline, !t.isEmpty { Text(t).italic().foregroundStyle(.secondary) }
-            if let d = descriptionText { ExpandableText(text: d) }
-            if !metaLine.isEmpty || networkText != nil { metaRow }
-            if !allRatings.isEmpty { ratingsRow }
-            actionBar
-            if !isSeries, let imdb = imdbID, let rec = downloads.record(imdb: imdb, season: nil, episode: nil) {
-                downloadStatus(rec)
+        VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: 10) {
+                TitleArt(item: item, maxWidth: 280, maxHeight: 100, font: .largeTitle.bold())
+                if !metaLine.isEmpty || networkText != nil { metaRow }
+                if !allRatings.isEmpty { ratingsRow }
             }
+            VStack(alignment: .leading, spacing: 12) {
+                actionBar
+                if !isSeries, let imdb = imdbID, let rec = downloads.record(imdb: imdb, season: nil, episode: nil) {
+                    downloadStatus(rec)
+                }
+            }
+            if details?.tagline?.isEmpty == false || descriptionText != nil { synopsis }
+        }
+    }
+
+    private var synopsis: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let t = details?.tagline, !t.isEmpty {
+                Text(t).font(.footnote.italic()).foregroundStyle(.tertiary)
+            }
+            if let d = descriptionText { ExpandableText(text: d, lines: 3) }
         }
     }
 
     /// Year, runtime and genres, with the network / studio right next to them.
     private var metaRow: some View {
         let icon = isSeries ? "tv" : "building.2"
-        let lead = metaLine.isEmpty ? "" : metaLine + "   "
+        let lead = metaLine.isEmpty ? "" : metaLine + "  ·  "
         return Group {
             if let n = networkText { Text("\(lead)\(Image(systemName: icon)) \(n)") } else { Text(metaLine) }
         }
-        .font(.subheadline).foregroundStyle(.secondary)
+        .font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
     }
 
     private var descriptionText: String? {
@@ -269,8 +284,8 @@ struct DetailView: View {
 
     private var ratingsRow: some View {
         ScrollView(.horizontal) {
-            HStack(spacing: 8) {
-                ForEach(allRatings) { RatingBadge(rating: $0) }
+            HStack(spacing: 16) {
+                ForEach(allRatings) { RatingBadge(rating: $0, flat: true) }
             }
         }
         .scrollIndicators(.hidden)

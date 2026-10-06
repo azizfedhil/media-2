@@ -10,6 +10,8 @@ struct SelectionRing: ViewModifier {
     let on: Bool
     let radius: CGFloat
     let width: CGFloat
+    /// 1 = full strength. Lower values scale every layer's opacity down for a fainter outline.
+    let intensity: Double
 
     func body(content: Content) -> some View {
         content.overlay {
@@ -17,13 +19,14 @@ struct SelectionRing: ViewModifier {
                 if on {
                     let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
                     let a = theme.accent
+                    let k = intensity
                     ZStack {
                         if !PowerMode.shared.saving {
-                            shape.strokeBorder(a.opacity(0.06), lineWidth: width * 6)
-                            shape.strokeBorder(a.opacity(0.09), lineWidth: width * 3.6)
-                            shape.strokeBorder(a.opacity(0.16), lineWidth: width * 2)
+                            shape.strokeBorder(a.opacity(0.06 * k), lineWidth: width * 6)
+                            shape.strokeBorder(a.opacity(0.09 * k), lineWidth: width * 3.6)
+                            shape.strokeBorder(a.opacity(0.16 * k), lineWidth: width * 2)
                         }
-                        shape.strokeBorder(LinearGradient(colors: [a.opacity(0.95), a.opacity(0.5)],
+                        shape.strokeBorder(LinearGradient(colors: [a.opacity(0.95 * k), a.opacity(0.5 * k)],
                                                           startPoint: .topLeading, endPoint: .bottomTrailing),
                                            lineWidth: width)
                     }
@@ -38,7 +41,7 @@ struct SelectionRing: ViewModifier {
 
 extension View {
     /// Elegant accent-coloured selection outline. See `SelectionRing`.
-    func selectionRing(_ on: Bool, radius: CGFloat, width: CGFloat = 1.25) -> some View {
-        modifier(SelectionRing(on: on, radius: radius, width: width))
+    func selectionRing(_ on: Bool, radius: CGFloat, width: CGFloat = 1.25, intensity: Double = 1) -> some View {
+        modifier(SelectionRing(on: on, radius: radius, width: width, intensity: intensity))
     }
 }

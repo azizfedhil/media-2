@@ -546,8 +546,9 @@ struct PlayerScreen: View {
     /// Subtitle look, decoded once per change instead of on every redraw of the player.
     @State private var subStyle = SubtitleStyle()
 
-    /// Liquid Glass over live video is re-sampled every frame, so Low Power Mode (or a hot phone) uses the flat look.
-    private var glass: Bool { glassPref && !PowerMode.shared.saving }
+    /// Liquid Glass over live video is re-sampled every frame, so Low Power Mode uses the flat look.
+    /// A hot phone does not: the glass stays on regardless of thermal state.
+    private var glass: Bool { glassPref && !PowerMode.shared.lowPower }
 
     init(request: PlayRequest, provider: EpisodeProvider? = nil, onClose: @escaping () -> Void) {
         _current = State(initialValue: request)

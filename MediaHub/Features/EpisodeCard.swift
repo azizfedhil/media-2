@@ -53,7 +53,8 @@ struct EpisodeCard<Actions: View>: View {
             RoundedRectangle(cornerRadius: radius, style: .continuous)
                 .strokeBorder(.white.opacity(0.1), lineWidth: 1)
         }
-        .selectionRing(selected, radius: radius)
+        // Deliberately faint: the card is already busy with artwork and text, so the selection should whisper.
+        .selectionRing(selected, radius: radius, width: 1, intensity: 0.35)
         // Whole card opens the sources sheet; the "..." sits on top so it takes its own taps.
         .overlay { Button(action: onTap) { Color.clear.contentShape(Rectangle()) }.buttonStyle(PressableStyle()) }
         .overlay(alignment: .bottomTrailing) {

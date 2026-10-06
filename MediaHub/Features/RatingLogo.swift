@@ -104,17 +104,18 @@ struct RatingLogo: View {
     }
 }
 
-/// Logo + score pill used on the detail page.
+/// Logo + score used on the detail page. `flat` drops the pill behind it and shrinks the logo for a quieter row.
 struct RatingBadge: View {
     let rating: MDBListClient.Rating
+    var flat = false
 
     var body: some View {
-        HStack(spacing: 7) {
-            RatingLogo(label: rating.label, score: rating.score, height: 18)
-            Text(rating.text).font(.subheadline.weight(.semibold))
+        HStack(spacing: flat ? 6 : 7) {
+            RatingLogo(label: rating.label, score: rating.score, height: flat ? 15 : 18)
+            Text(rating.text).font(flat ? .footnote.weight(.semibold) : .subheadline.weight(.semibold)).monospacedDigit()
         }
-        .padding(.horizontal, 12).padding(.vertical, 8)
-        .background(.quaternary, in: Capsule())
+        .padding(.horizontal, flat ? 0 : 12).padding(.vertical, flat ? 2 : 8)
+        .background { if !flat { Capsule().fill(.quaternary) } }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(rating.label) \(rating.text)")
     }
