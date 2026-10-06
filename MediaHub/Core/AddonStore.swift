@@ -4,6 +4,8 @@ import Observation
 @MainActor @Observable
 final class AddonStore {
     private(set) var addons: [Addon] = []
+    /// Add-ons currently in use (all installed add-ons).
+    var enabledAddons: [Addon] { addons }
     /// Bumps after a reload so Home refetches catalogs even though the add-on ids are unchanged.
     private(set) var revision = 0
     private let key = "addon.manifestURLs"
