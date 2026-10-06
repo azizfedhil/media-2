@@ -196,6 +196,10 @@ impl Ctx {
 
             // Only this file downloads. librqbit's FileStream prioritises pieces at the read cursor (sequential + seek).
             let only: HashSet<usize> = [idx].into_iter().collect();
+            // librqbit rejects update_only_files while the torrent is still Initializing ("can't update
+            // initializing torrent"). A paused magnet passes through that state right after its metadata
+            // resolves, so wait for it to settle (Paused) before touching the file selection.
+            handle.wait_until_initialized().await.map_err(t_err)?;
             self.session.update_only_files(&handle, &only).await.map_err(t_err)?;
             self.session.unpause(&handle).await.map_err(t_err)?;
             handle.wait_until_initialized().await.map_err(t_err)?;
