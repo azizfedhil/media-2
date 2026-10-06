@@ -63,6 +63,14 @@ final class PlayerModel {
     @ObservationIgnored private var mappedCount = 0
     @ObservationIgnored private var mappedFirst: Double?
     @ObservationIgnored private var sourceTime: Double = 0
+    /// Subtitle clock: subscribed only while a subtitle track is on, so a film without subtitles never wakes for it.
+    @ObservationIgnored private var cueClock: AnyCancellable?
+    /// Span of source time in which the visible cues can't change (no cue starts or ends inside it).
+    @ObservationIgnored private var cueFrom: Double = 1
+    @ObservationIgnored private var cueTo: Double = 0
+    /// True while the controls are on screen: the seek bar then follows playback twice a second, otherwise once a second.
+    @ObservationIgnored var controlsVisible = true
+    @ObservationIgnored private var lastPublish: TimeInterval = 0
     @ObservationIgnored private var spinnerTask: Task<Void, Never>?
     @ObservationIgnored private var seekTask: Task<Void, Never>?
     @ObservationIgnored private var pendingTarget: Double?
@@ -124,8 +132,9 @@ final class PlayerModel {
         setBuffering(true); showSpinner = true
         playhead.position = 0; playhead.duration = 0; playhead.buffered = 0
         seekTask?.cancel(); pendingTarget = nil; seekInFlight = false
-        allCues = []; mappedCount = 0; mappedFirst = nil; activeCues = []
+        allCues = []; mappedCount = 0; mappedFirst = nil; activeCues = []; invalidateCueWindow()
         activeSubtitleID = nil; subtitleTracks = []; audioTracks = []; activeAudioID = nil
+        cueClock = nil
         onlineSubs = []; addedOnline = [:]; onlineFor = nil; loadingOnline = false
         // Default language on first start, then whatever the viewer picked, across episodes.
         autoSelectSubtitle = preferredSubtitleLanguage != nil
@@ -150,11 +159,15 @@ final class PlayerModel {
         engine.$duration.receive(on: DispatchQueue.main).sink { [weak self] d in
             self?.playhead.duration = Double(d)
         }.store(in: &bag)
-        // 4 Hz is plenty for a progress bar.
+        // The seek bar only needs the clock to the second: 2 Hz while the controls are up, 1 Hz while they are hidden
+        // (the skip-intro button is the only reader then). Fewer publishes means fewer redraws and CPU wake-ups.
         engine.clock.$currentTime
-            .throttle(for: .milliseconds(250), scheduler: DispatchQueue.main, latest: true)
+            .throttle(for: .milliseconds(500), scheduler: DispatchQueue.main, latest: true)
             .sink { [weak self] t in
                 guard let self, !playhead.scrubbing, !seekInFlight else { return }
+                let now = ProcessInfo.processInfo.systemUptime
+                if !controlsVisible, now - lastPublish < 1 { return }
+                lastPublish = now
                 playhead.position = Double(t)
             }.store(in: &bag)
         // Buffered-ahead position drives the lighter segment of the seek bar; 2 Hz is plenty.
@@ -168,14 +181,23 @@ final class PlayerModel {
         engine.$subtitleCues.receive(on: DispatchQueue.main).sink { [weak self] cues in
             self?.ingest(cues)
         }.store(in: &bag)
-        engine.clock.$sourceTime
+    }
+
+    /// Starts or stops the subtitle clock to match the active track.
+    private func syncCueClock() {
+        guard let engine, !isShutDown, activeSubtitleID != nil else { cueClock = nil; return }
+        guard cueClock == nil else { return }
+        sourceTime = Double(engine.clock.sourceTime)
+        cueClock = engine.clock.$sourceTime
             .throttle(for: .milliseconds(100), scheduler: DispatchQueue.main, latest: true)
             .sink { [weak self] t in
                 guard let self else { return }
                 sourceTime = Double(t)
                 refreshActiveCues()
-            }.store(in: &bag)
+            }
     }
+
+    private func invalidateCueWindow() { cueFrom = 1; cueTo = 0 }
 
     // MARK: Buffering indicator
 
@@ -205,13 +227,24 @@ final class PlayerModel {
             allCues += cues[mappedCount...].compactMap { SubCue.make($0) }
             mappedCount = cues.count
         }
+        invalidateCueWindow()
         refreshActiveCues()
     }
 
     private func refreshActiveCues() {
         guard activeSubtitleID != nil else { if !activeCues.isEmpty { activeCues = [] }; return }
         let t = sourceTime
-        let now = allCues.filter { $0.start <= t && t < $0.end }
+        // Nothing starts or ends inside the current window, so most ticks cost two comparisons instead of a pass
+        // over every cue in the file.
+        if t >= cueFrom && t < cueTo { return }
+        var now: [SubCue] = []
+        var from = -Double.infinity, to = Double.infinity
+        for c in allCues {
+            if c.start <= t && t < c.end { now.append(c); from = max(from, c.start); to = min(to, c.end) }
+            else if c.start > t { to = min(to, c.start) }
+            else { from = max(from, c.end) }
+        }
+        cueFrom = from; cueTo = to
         if now != activeCues { activeCues = now }
     }
 
@@ -228,6 +261,7 @@ final class PlayerModel {
                 return
             }
         }
+        syncCueClock()
         refreshActiveCues()
     }
 
@@ -271,7 +305,7 @@ final class PlayerModel {
 
     func selectSubtitle(_ t: TrackInfo?) {
         guard let engine else { return }
-        allCues = []; mappedCount = 0; mappedFirst = nil
+        allCues = []; mappedCount = 0; mappedFirst = nil; invalidateCueWindow()
         if let t {
             engine.selectSubtitleTrack(index: t.id)
             activeSubtitleID = Reflect.int(t.id)
@@ -283,6 +317,7 @@ final class PlayerModel {
             activeCues = []
             preferredSubtitleLanguage = nil
         }
+        syncCueClock()
         refreshActiveCues()
     }
 
@@ -359,6 +394,7 @@ final class PlayerModel {
         guard !isShutDown else { return }
         isShutDown = true
         spinnerTask?.cancel(); seekTask?.cancel(); rateTask?.cancel()
+        cueClock = nil
         bag.removeAll()
         engine?.stop()
     }
@@ -411,7 +447,7 @@ struct PlayerScreen: View {
     @Environment(\.openURL) private var openURL
     @AppStorage(SubtitleStyle.storageKey) private var subJSON = ""
     @AppStorage("sub.lang") private var subLang = "off"
-    @AppStorage("player.glass") private var glass = true
+    @AppStorage("player.glass") private var glassPref = true
     @AppStorage("player.autoplayNext") private var autoplayNext = true
     @AppStorage("skip.fallbackSeconds") private var fallbackSkip = 85
     @State private var current: PlayRequest
@@ -438,6 +474,11 @@ struct PlayerScreen: View {
     /// Shown above the title while paused. Both load in the background at start, so pausing never waits on the network.
     @State private var pausedLogo: UIImage?
     @State private var pausedOverview: String?
+    /// Subtitle look, decoded once per change instead of on every redraw of the player.
+    @State private var subStyle = SubtitleStyle()
+
+    /// Liquid Glass over live video is re-sampled every frame, so Low Power Mode (or a hot phone) uses the flat look.
+    private var glass: Bool { glassPref && !PowerMode.shared.saving }
 
     init(request: PlayRequest, provider: EpisodeProvider? = nil, onClose: @escaping () -> Void) {
         _current = State(initialValue: request)
@@ -449,7 +490,7 @@ struct PlayerScreen: View {
         ZStack {
             Color.black.ignoresSafeArea()
             if let engine = model.engine { AetherPlayerSurface(engine: engine).ignoresSafeArea() }
-            SubtitleOverlay(cues: model.activeCues, lift: showControls ? 112 : 0, style: SubtitleStyle.decode(subJSON))
+            SubtitleOverlay(cues: model.activeCues, lift: showControls ? 112 : 0, style: subStyle)
                 .animation(.easeInOut(duration: 0.2), value: showControls)
             Color.clear.contentShape(Rectangle()).onTapGesture { tapBackground() }
             if pausedDim { pausedOverlay }
@@ -476,11 +517,12 @@ struct PlayerScreen: View {
         .task(id: current.item.id) { await loadPausedLogo() }
         .animation(.easeInOut(duration: 0.25), value: pausedDim)
         .task {
-            // Coarse 10 s tick: negligible wakeups, still good resume accuracy.
+            // Coarse 15 s tick: negligible wakeups, still good resume accuracy. Nothing to record while paused.
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(10))
+                try? await Task.sleep(for: .seconds(15))
+                if model.isPaused { lastTick = Date(); continue }
                 logPlayTime()
-                save()
+                save(isFinal: false)
             }
         }
         .onChange(of: model.isPlaying) { _, playing in
@@ -490,12 +532,16 @@ struct PlayerScreen: View {
         }
         .onChange(of: model.isPaused) { _, paused in
             if paused { withAnimation(.easeInOut(duration: 0.2)) { showControls = true } }
+            updateIdleTimer()
         }
+        .onChange(of: model.error) { _, _ in updateIdleTimer() }
+        .onChange(of: showControls, initial: true) { _, shown in model.controlsVisible = shown }
+        .onChange(of: subJSON, initial: true) { _, json in subStyle = SubtitleStyle.decode(json) }
         .onChange(of: model.didEnd) { _, ended in
             if ended, autoplayNext, nextEp != nil { playNext() }
         }
         .onAppear {
-            UIApplication.shared.isIdleTimerDisabled = true
+            updateIdleTimer()
             OrientationLock.set(.landscape)          // landscape only, free to flip 180°
         }
         .onDisappear {
@@ -1157,12 +1203,25 @@ struct PlayerScreen: View {
         lastTick = now
     }
 
-    private func save() {
+    /// Keeps the screen awake only while something is actually playing: a paused or failed player lets the
+    /// auto-lock timer run, instead of holding the display on indefinitely.
+    private func updateIdleTimer() {
+        UIApplication.shared.isIdleTimerDisabled = !model.isPaused && model.error == nil
+    }
+
+    /// `isFinal: false` is the periodic save during playback (storage only, no UI churn behind the player).
+    private func save(isFinal: Bool = true) {
         let p = model.playhead.position, d = model.playhead.duration
         guard d > 0, p > 0 else { return }
-        history.update(current.item, key: current.key, position: p, duration: d,
-                       season: current.season, episode: current.episode,
-                       episodeTitle: current.episodeTitle, thumb: current.thumb?.absoluteString)
+        if isFinal {
+            history.update(current.item, key: current.key, position: p, duration: d,
+                           season: current.season, episode: current.episode,
+                           episodeTitle: current.episodeTitle, thumb: current.thumb?.absoluteString)
+        } else {
+            history.checkpoint(current.item, key: current.key, position: p, duration: d,
+                               season: current.season, episode: current.episode,
+                               episodeTitle: current.episodeTitle, thumb: current.thumb?.absoluteString)
+        }
         // A saved movie that has been watched through moves to "Watched" (Simkl does this itself when connected).
         if current.item.type == "movie", p >= d * 0.92 { library.markWatchedIfSaved(current.item.id) }
     }
@@ -1240,7 +1299,7 @@ private struct SeekBar: View {
                     .frame(width: w, height: h, alignment: .leading)
                     .clipShape(Capsule())
                     Circle().fill(Color.clear).frame(width: knob, height: knob)
-                        .modifier(GlassCircle(on: glass, tint: .white))
+                        .modifier(GlassCircle(on: glass && active, tint: .white))
                         .offset(x: w * frac - knob / 2)
                         .scaleEffect(active ? 1 : 0.4)
                         .opacity(active ? 1 : 0)

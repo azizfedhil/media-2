@@ -10,8 +10,16 @@ actor TMDBClient {
         cfg.urlCache = URLCache(memoryCapacity: 10 << 20, diskCapacity: 50 << 20)
         return URLSession(configuration: cfg)
     }()
-    private var idCache: [String: Int] = [:]
-    private var networkCache: [String: NetworkBadge] = [:]
+    /// IMDb id -> TMDB id, and show -> network icon. Both are permanent facts, so they are kept on disk: posters
+    /// don't re-ask TMDB about the same titles on every launch (each ask is a radio wake-up).
+    private var idCache: [String: Int] = (UserDefaults.standard.dictionary(forKey: "tmdb.idCache") as? [String: Int]) ?? [:]
+    private var networkCache: [String: NetworkBadge] = {
+        guard let raw = UserDefaults.standard.dictionary(forKey: "tmdb.networkCache") as? [String: [String]] else { return [:] }
+        return raw.compactMapValues { v in
+            v.first.map { NetworkBadge(name: $0, logo: v.count > 1 ? URL(string: v[1]) : nil) }
+        }
+    }()
+    private var cachePersistPending = false
     private var networkMisses: Set<String> = []
     private var seasonCache: [String: [EpisodeInfo]] = [:]
     private var genreCache: [String: [Genre]] = [:]
@@ -159,6 +167,7 @@ actor TMDBClient {
         }
         let badge = NetworkBadge(name: n.name, logo: n.logoPath.flatMap { URL(string: Self.img + "w92" + $0) })
         networkCache[id] = badge
+        scheduleCachePersist()
         return badge
     }
 
@@ -250,10 +259,11 @@ actor TMDBClient {
         return p.results.map { preview($0, kind: kind) }
     }
 
-    private static var today: String {
+    private static let isoDay: DateFormatter = {
         let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.dateFormat = "yyyy-MM-dd"
-        return f.string(from: .now)
-    }
+        return f
+    }()
+    private static var today: String { isoDay.string(from: .now) }
 
     // MARK: Themed collections (Home)
 
@@ -310,7 +320,26 @@ actor TMDBClient {
         let f: Find = try await get("/find/\(id)", ["external_source": "imdb_id"])
         guard let found = (kind(type) == "tv" ? f.tvResults : f.movieResults).first?.id else { throw URLError(.resourceUnavailable) }
         idCache[id] = found
+        scheduleCachePersist()
         return found
+    }
+
+    /// Writes the id and network caches at most once every few seconds, however many titles resolve in between.
+    private func scheduleCachePersist() {
+        guard !cachePersistPending else { return }
+        cachePersistPending = true
+        Task {
+            try? await Task.sleep(for: .seconds(8))
+            flushCaches()
+        }
+    }
+
+    private func flushCaches() {
+        cachePersistPending = false
+        if idCache.count > 3000 { idCache = Dictionary(uniqueKeysWithValues: Array(idCache.prefix(2000))) }
+        if networkCache.count > 1500 { networkCache = Dictionary(uniqueKeysWithValues: Array(networkCache.prefix(1000))) }
+        UserDefaults.standard.set(idCache, forKey: "tmdb.idCache")
+        UserDefaults.standard.set(networkCache.mapValues { [$0.name, $0.logo?.absoluteString ?? ""] }, forKey: "tmdb.networkCache")
     }
 }
 

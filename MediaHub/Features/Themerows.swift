@@ -120,14 +120,14 @@ private struct ThemeCard: View {
             if let tag {
                 Text(tag).font(.subheadline.weight(.semibold))
                     .padding(.horizontal, 14).padding(.vertical, 7)
-                    .background(.ultraThinMaterial, in: Capsule())
+                    .background(.black.opacity(0.35), in: Capsule())
                     .overlay(Capsule().strokeBorder(.white.opacity(0.25), lineWidth: 1))
             }
             TitleArt(item: item, maxWidth: 260, maxHeight: 72, font: .system(size: 30, weight: .heavy, design: .rounded))
             HStack(spacing: 8) {
                 Image(systemName: item.type == "series" ? "tv" : "film")
                     .font(.system(size: 12, weight: .bold))
-                    .frame(width: 26, height: 26).background(.ultraThinMaterial, in: Circle())
+                    .frame(width: 26, height: 26).background(.black.opacity(0.35), in: Circle())
                 Text(caption).font(.subheadline.weight(.medium)).lineLimit(1)
             }
         }

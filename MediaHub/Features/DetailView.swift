@@ -518,11 +518,15 @@ struct DetailView: View {
         return rows
     }
 
-    private func prettyDate(_ s: String?) -> String? {
-        guard let s else { return nil }
+    private static let isoDay: DateFormatter = {
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX"); f.dateFormat = "yyyy-MM-dd"
-        return f.date(from: s)?.formatted(date: .long, time: .omitted)
+        return f
+    }()
+
+    private func prettyDate(_ s: String?) -> String? {
+        guard let s else { return nil }
+        return Self.isoDay.date(from: s)?.formatted(date: .long, time: .omitted)
     }
 
     @ViewBuilder private var detailsSection: some View {

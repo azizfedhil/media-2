@@ -98,6 +98,24 @@ final class WatchHistory {
         persist()
     }
 
+    /// Periodic progress save while a video plays. It goes straight to storage and leaves the observed lists alone,
+    /// so Home, Library and every poster don't redraw behind the player every few seconds. The save when the
+    /// player closes (`update`) brings the in-memory list up to date. A title that isn't in the list yet takes
+    /// the full path once, so the list cap and the archive are handled in one place.
+    func checkpoint(_ item: MetaPreview, key: String, position: Double, duration: Double,
+                    season: Int? = nil, episode: Int? = nil, episodeTitle: String? = nil, thumb: String? = nil) {
+        guard entries.contains(where: { $0.id == item.id }) else {
+            update(item, key: key, position: position, duration: duration,
+                   season: season, episode: episode, episodeTitle: episodeTitle, thumb: thumb)
+            return
+        }
+        var list = entries
+        list.removeAll { $0.id == item.id }
+        list.insert(Entry(item: item, key: key, position: position, duration: duration, updated: .now,
+                          season: season, episode: episode, episodeTitle: episodeTitle, thumb: thumb), at: 0)
+        if let d = try? JSONEncoder().encode(list) { UserDefaults.standard.set(d, forKey: storeKey) }
+    }
+
     /// Hides a title from Continue Watching. Its progress still counts in the profile statistics.
     func remove(_ id: String) {
         if let e = entries.first(where: { $0.id == id }) { stash(e) }

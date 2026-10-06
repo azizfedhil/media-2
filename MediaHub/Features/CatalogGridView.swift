@@ -117,6 +117,6 @@ struct CatalogGridView: View {
         }
         .padding(.horizontal, 16).padding(.vertical, 8)
         .frame(maxWidth: .infinity)
-        .background(.bar)
+        .background(Color(.systemBackground).opacity(0.94))
     }
 }

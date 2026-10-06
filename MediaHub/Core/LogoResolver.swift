@@ -7,6 +7,8 @@ actor LogoResolver {
     static let shared = LogoResolver()
     private var cache: [String: URL] = [:]
     private var misses = Set<String>()
+    /// Lookups already running, so a title asked for by several views at once is resolved (and fetched) only once.
+    private var inflight: [String: Task<URL?, Never>] = [:]
     private let storeKey = "logo.cache"
 
     nonisolated var enabled: Bool { UserDefaults.standard.object(forKey: "ui.titleLogos") as? Bool ?? true }
@@ -21,7 +23,12 @@ actor LogoResolver {
         guard enabled else { return nil }
         if let hit = cache[item.id] { return hit }
         if misses.contains(item.id) { return nil }
-        guard let found = await find(item) else { misses.insert(item.id); return nil }
+        if let running = inflight[item.id] { return await running.value }
+        let lookup = Task { await find(item) }
+        inflight[item.id] = lookup
+        let result = await lookup.value
+        inflight[item.id] = nil
+        guard let found = result else { misses.insert(item.id); return nil }
         cache[item.id] = found
         persist()
         return found

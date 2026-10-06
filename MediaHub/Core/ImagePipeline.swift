@@ -1,11 +1,33 @@
 import SwiftUI
 import ImageIO
 
+/// Decoded images, shared by every view. NSCache is thread-safe, so views can ask it synchronously: a poster that was
+/// already on screen comes back instantly, with no placeholder, no fade and no hop onto the pipeline actor.
+enum ImageMemory {
+    static let cache: NSCache<NSString, UIImage> = {
+        let c = NSCache<NSString, UIImage>()
+        c.totalCostLimit = 60 << 20
+        return c
+    }()
+
+    static func key(_ url: URL, _ maxPixel: CGFloat) -> NSString {
+        "\(url.absoluteString)@\(Int(maxPixel))" as NSString
+    }
+
+    static func get(_ url: URL, maxPixel: CGFloat) -> UIImage? {
+        cache.object(forKey: key(url, maxPixel))
+    }
+}
+
 /// Downsamples to display size via ImageIO (no full-size bitmaps in memory), caches in
-/// NSCache + URLCache, and cancels with the view's task when scrolled offscreen.
+/// ImageMemory + URLCache, and cancels with the view's task when scrolled offscreen.
+///
+/// - One download per URL, however many views (and sizes) want it: the hero artwork, its tint colour and an
+///   episode still all share a single request. The download is cancelled once the last interested view goes away.
+/// - Decoding runs off the actor, so a big hero JPEG never makes cached posters wait behind it.
+/// - Bitmaps are never larger than the source image, so a 780 px backdrop isn't stretched into a 2400 px one.
 actor ImagePipeline {
     static let shared = ImagePipeline()
-    private let cache = NSCache<NSString, UIImage>()
     private let session: URLSession = {
         let cfg = URLSessionConfiguration.default
         cfg.urlCache = URLCache(memoryCapacity: 30 << 20, diskCapacity: 300 << 20)
@@ -13,25 +35,83 @@ actor ImagePipeline {
         return URLSession(configuration: cfg)
     }()
     private var colorCache: [URL: UIColor] = [:]
+    private var flights: [URL: DataFlight] = [:]
+    private var nextWaiter = 0
 
-    init() { cache.totalCostLimit = 60 << 20 }
+    /// One running download and the views waiting for it.
+    private final class DataFlight: @unchecked Sendable {
+        let task: Task<Data?, Never>
+        var waiters = Set<Int>()
+        init(_ task: Task<Data?, Never>) { self.task = task }
+    }
 
     func image(for url: URL, maxPixel: CGFloat) async -> UIImage? {
-        let key = "\(url.absoluteString)@\(Int(maxPixel))" as NSString
-        if let hit = cache.object(forKey: key) { return hit }
-        guard let (data, _) = try? await session.data(from: url), !Task.isCancelled else { return nil }
+        if let hit = ImageMemory.get(url, maxPixel: maxPixel) { return hit }
+        guard let data = await download(url), !Task.isCancelled else { return nil }
+        let img = await Task.detached(priority: .userInitiated) { Self.decode(data, maxPixel: maxPixel) }.value
+        guard let img else { return nil }
+        ImageMemory.cache.setObject(img, forKey: ImageMemory.key(url, maxPixel),
+                                    cost: img.cgImage.map { $0.bytesPerRow * $0.height } ?? 0)
+        return img
+    }
+
+    // MARK: Download (shared, cancel when nobody is waiting any more)
+
+    private func download(_ url: URL) async -> Data? {
+        let flight: DataFlight
+        if let running = flights[url] {
+            flight = running
+        } else {
+            let session = session
+            let task = Task.detached(priority: .userInitiated) { () -> Data? in
+                guard let (data, response) = try? await session.data(from: url) else { return nil }
+                if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) { return nil }
+                return data
+            }
+            flight = DataFlight(task)
+            flights[url] = flight
+        }
+        nextWaiter += 1
+        let id = nextWaiter
+        flight.waiters.insert(id)
+        let data = await withTaskCancellationHandler {
+            await flight.task.value
+        } onCancel: {
+            Task { await self.leave(url, flight, id) }
+        }
+        flight.waiters.remove(id)
+        if flight.waiters.isEmpty, flights[url] === flight { flights[url] = nil }
+        return data
+    }
+
+    private func leave(_ url: URL, _ flight: DataFlight, _ id: Int) {
+        flight.waiters.remove(id)
+        guard flight.waiters.isEmpty else { return }
+        flight.task.cancel()
+        if flights[url] === flight { flights[url] = nil }
+    }
+
+    // MARK: Decode
+
+    private static func decode(_ data: Data, maxPixel: CGFloat) -> UIImage? {
+        guard let src = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+        var target = maxPixel
+        if let props = CGImageSourceCopyPropertiesAtIndex(src, 0, nil) as? [CFString: Any],
+           let w = (props[kCGImagePropertyPixelWidth] as? NSNumber)?.doubleValue,
+           let h = (props[kCGImagePropertyPixelHeight] as? NSNumber)?.doubleValue {
+            target = min(maxPixel, CGFloat(max(w, h)))
+        }
         let opts: [CFString: Any] = [
             kCGImageSourceCreateThumbnailFromImageAlways: true,
             kCGImageSourceCreateThumbnailWithTransform: true,
             kCGImageSourceShouldCacheImmediately: true,
-            kCGImageSourceThumbnailMaxPixelSize: maxPixel,
+            kCGImageSourceThumbnailMaxPixelSize: max(target, 1),
         ]
-        guard let src = CGImageSourceCreateWithData(data as CFData, nil),
-              let cg = CGImageSourceCreateThumbnailAtIndex(src, 0, opts as CFDictionary) else { return nil }
-        let img = UIImage(cgImage: cg)
-        cache.setObject(img, forKey: key, cost: cg.bytesPerRow * cg.height)
-        return img
+        guard let cg = CGImageSourceCreateThumbnailAtIndex(src, 0, opts as CFDictionary) else { return nil }
+        return UIImage(cgImage: cg)
     }
+
+    // MARK: Average colour
 
     /// Average colour of an image, nudged to be vivid but dark enough to sit behind white text.
     /// Used for the ambient glow behind the Home hero.
@@ -65,11 +145,16 @@ struct RemoteImage: View {
     @State private var image: UIImage?
     @State private var failed = false
 
+    private var pixels: CGFloat { size * scale }
+
     var body: some View {
+        // A memory hit needs no placeholder, no fade and no task round trip. Lazy stacks recreate their cells
+        // constantly while you scroll, so this is what keeps scrolling back over posters flicker-free and cheap.
+        let shown = url.flatMap { ImageMemory.get($0, maxPixel: pixels) } ?? image
         Color(.secondarySystemFill)
             .overlay {
-                if let image {
-                    Image(uiImage: image).resizable().scaledToFill().transition(.opacity)
+                if let shown {
+                    Image(uiImage: shown).resizable().scaledToFill().transition(.opacity)
                 } else if failed {
                     Image(systemName: "film").font(.title2).foregroundStyle(.tertiary)
                 } else {
@@ -80,7 +165,8 @@ struct RemoteImage: View {
             .task(id: url) {
                 failed = false
                 guard let url else { failed = true; return }
-                let img = await ImagePipeline.shared.image(for: url, maxPixel: size * scale)
+                if let hit = ImageMemory.get(url, maxPixel: pixels) { image = hit; return }
+                let img = await ImagePipeline.shared.image(for: url, maxPixel: pixels)
                 guard !Task.isCancelled else { return }
                 withAnimation(.easeOut(duration: 0.25)) { image = img }
                 if img == nil { failed = true }
@@ -89,17 +175,27 @@ struct RemoteImage: View {
 }
 
 /// Soft highlight sweeping across a placeholder while its image loads.
+/// Driven by the wall clock, so every placeholder on screen sweeps in step, at 30 fps (a slow highlight doesn't need
+/// more). Static under Reduce Motion and in Low Power Mode.
 struct Shimmer: View {
-    @State private var phase: CGFloat = 0
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        GeometryReader { g in
-            LinearGradient(colors: [.clear, .white.opacity(0.14), .clear], startPoint: .leading, endPoint: .trailing)
-                .frame(width: g.size.width * 0.6)
-                .offset(x: -g.size.width * 0.6 + phase * g.size.width * 1.6)
+        Group {
+            if reduceMotion || PowerMode.shared.saving {
+                Color.white.opacity(0.04)
+            } else {
+                TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { tl in
+                    GeometryReader { g in
+                        let phase = (tl.date.timeIntervalSinceReferenceDate / 1.4).truncatingRemainder(dividingBy: 1)
+                        LinearGradient(colors: [.clear, .white.opacity(0.14), .clear], startPoint: .leading, endPoint: .trailing)
+                            .frame(width: g.size.width * 0.6)
+                            .offset(x: -g.size.width * 0.6 + CGFloat(phase) * g.size.width * 1.6)
+                    }
+                }
+            }
         }
         .allowsHitTesting(false)
-        .onAppear { withAnimation(.linear(duration: 1.4).repeatForever(autoreverses: false)) { phase = 1 } }
     }
 }
 
@@ -109,9 +205,13 @@ struct LogoImage: View {
     @State private var image: UIImage?
 
     var body: some View {
+        let shown = ImageMemory.get(url, maxPixel: 600) ?? image
         Group {
-            if let image { Image(uiImage: image).resizable().scaledToFit() }
+            if let shown { Image(uiImage: shown).resizable().scaledToFit() }
         }
-        .task(id: url) { image = await ImagePipeline.shared.image(for: url, maxPixel: 600) }
+        .task(id: url) {
+            if ImageMemory.get(url, maxPixel: 600) != nil { return }
+            image = await ImagePipeline.shared.image(for: url, maxPixel: 600)
+        }
     }
 }

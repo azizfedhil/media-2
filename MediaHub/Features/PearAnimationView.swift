@@ -18,7 +18,7 @@ struct PearAnimationView: View {
                 Canvas { ctx, size in Self.draw(PearGeometry.shared.restFrame(mode: mode), &ctx, size) }
             } else {
                 let t0 = start, mode = mode, speed = speed
-                TimelineView(.animation) { tl in
+                TimelineView(.animation(minimumInterval: 1.0 / 60.0)) { tl in
                     Canvas(rendersAsynchronously: true) { ctx, size in
                         let ms = tl.date.timeIntervalSince(t0) * 1000 * speed
                         Self.draw(PearGeometry.shared.frame(at: ms, mode: mode), &ctx, size)

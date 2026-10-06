@@ -138,10 +138,11 @@ struct HomeView: View {
     private var selectedLists: Set<Int> { Set(mdbLists.split(separator: ",").compactMap { Int($0) }) }
 
     var body: some View {
+        let hero = model.hero
         NavigationStack {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 30) {
-                    if !model.hero.isEmpty { HeroCarousel(items: model.hero, tint: $tint) }
+                    if !hero.isEmpty { HeroCarousel(items: hero, tint: $tint) }
                     if !history.continueEntries.isEmpty || !model.upNext.isEmpty {
                         ContinueRow(entries: history.continueEntries, upNext: model.upNext)
                     }
@@ -212,7 +213,7 @@ struct HeroCarousel: View {
         ScrollView(.horizontal) {
             LazyHStack(spacing: 0) {
                 ForEach(items) { item in
-                    HeroPage(item: item, active: item.id == currentID, wide: wide, height: height)
+                    HeroPage(item: item, active: item.id == currentID && visible, wide: wide, height: height)
                         .containerRelativeFrame(.horizontal)
                 }
             }
@@ -265,9 +266,9 @@ private struct HeroPage: View {
         NavigationLink(value: item) {
             ZStack(alignment: .bottomLeading) {
                 // Slow Ken Burns zoom while this page is showing; the bottom dissolves into the ambient glow.
-                RemoteImage(url: item.heroURL(wide: wide), size: wide ? 1200 : 800)
-                    .scaleEffect(active ? 1.08 : 1.0)
-                    .animation(active ? .linear(duration: 9) : nil, value: active)
+                KenBurns(active: active) {
+                    RemoteImage(url: item.heroURL(wide: wide), size: wide ? 1200 : 800)
+                }
                     .mask {
                         LinearGradient(stops: [.init(color: .black, location: 0), .init(color: .black, location: 0.6),
                                                .init(color: .clear, location: 1)],
@@ -297,9 +298,11 @@ private struct HeroPage: View {
             if let d = item.description, !d.isEmpty {
                 Text(d).font(.subheadline).lineLimit(2).opacity(0.85)
             }
+            // Flat on purpose: live glass over artwork that is moving would be re-sampled every frame.
             Label("Details", systemImage: "info.circle")
                 .font(.subheadline.weight(.semibold)).padding(.horizontal, 18).padding(.vertical, 10)
-                .glassEffect(.regular.interactive(), in: .capsule)
+                .background(.white.opacity(0.2), in: Capsule())
+                .overlay(Capsule().strokeBorder(.white.opacity(0.28), lineWidth: 0.5))
                 .padding(.top, 2)
         }
         .foregroundStyle(.white)
@@ -309,6 +312,36 @@ private struct HeroPage: View {
         .scrollTransition(axis: .horizontal) { content, phase in
             content.opacity(1 - min(abs(phase.value) * 1.6, 1)).offset(x: phase.value * 70)
         }
+    }
+}
+
+/// Slow zoom on the hero artwork. Motion this small doesn't need the display's full refresh rate: it steps at 24 Hz
+/// (a fraction of a point per step, so it still reads as continuous) instead of 120 Hz, and it stops completely
+/// off screen, under Reduce Motion, and in Low Power Mode.
+private struct KenBurns<Content: View>: View {
+    let active: Bool
+    let content: Content
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var began = Date()
+
+    init(active: Bool, @ViewBuilder content: () -> Content) {
+        self.active = active
+        self.content = content()
+    }
+
+    private var moving: Bool { active && !reduceMotion && !PowerMode.shared.saving }
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 24.0, paused: !moving)) { tl in
+            content.scaleEffect(scale(at: tl.date))
+        }
+        .onChange(of: moving) { _, on in if on { began = Date() } }
+    }
+
+    private func scale(at date: Date) -> CGFloat {
+        guard moving else { return 1 }
+        let t = min(max(date.timeIntervalSince(began), 0) / 9, 1)
+        return 1 + 0.08 * CGFloat(t)
     }
 }
 
@@ -457,7 +490,8 @@ private struct ContinueCard: View {
                     .overlay { LinearGradient(colors: [.clear, .black.opacity(0.5)], startPoint: .center, endPoint: .bottom) }
                     .overlay {
                         Image(systemName: "play.fill").font(.system(size: 16, weight: .bold)).foregroundStyle(.white)
-                            .frame(width: 42, height: 42).background(.ultraThinMaterial, in: Circle())
+                            .frame(width: 42, height: 42).background(.black.opacity(0.38), in: Circle())
+                            .overlay(Circle().strokeBorder(.white.opacity(0.25), lineWidth: 0.5))
                     }
                     .overlay(alignment: .topTrailing) {
                         Text(Fmt.clock(entry.position)).font(.system(size: 11, weight: .bold)).monospacedDigit()
@@ -511,7 +545,8 @@ private struct UpNextCard: View {
                     .overlay { LinearGradient(colors: [.clear, .black.opacity(0.5)], startPoint: .center, endPoint: .bottom) }
                     .overlay {
                         Image(systemName: "play.fill").font(.system(size: 16, weight: .bold)).foregroundStyle(.white)
-                            .frame(width: 42, height: 42).background(.ultraThinMaterial, in: Circle())
+                            .frame(width: 42, height: 42).background(.black.opacity(0.38), in: Circle())
+                            .overlay(Circle().strokeBorder(.white.opacity(0.25), lineWidth: 0.5))
                     }
                     .overlay(alignment: .topLeading) {
                         Text("UP NEXT").font(.system(size: 10, weight: .heavy)).tracking(0.8).foregroundStyle(.white)

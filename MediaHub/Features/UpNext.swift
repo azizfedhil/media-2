@@ -39,9 +39,13 @@ enum UpNext {
                           updated: entry.updated)
     }
 
+    private static let isoDay: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.dateFormat = "yyyy-MM-dd"
+        return f
+    }()
+
     private static func aired(_ e: EpisodeItem) -> Bool {
         guard let d = e.airDate, !d.isEmpty else { return true }
-        let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.dateFormat = "yyyy-MM-dd"
-        return d <= f.string(from: .now)
+        return d <= isoDay.string(from: .now)
     }
 }

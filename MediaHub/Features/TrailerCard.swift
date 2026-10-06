@@ -24,7 +24,8 @@ struct TrailerCard: View {
                 }
                 .overlay {
                     Image(systemName: "play.fill").font(.system(size: 16, weight: .bold)).foregroundStyle(.white)
-                        .frame(width: 44, height: 44).background(.ultraThinMaterial, in: Circle())
+                        .frame(width: 44, height: 44).background(.black.opacity(0.38), in: Circle())
+                        .overlay(Circle().strokeBorder(.white.opacity(0.25), lineWidth: 0.5))
                         .offset(y: -12)
                 }
         }
