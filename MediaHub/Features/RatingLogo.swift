@@ -138,21 +138,3 @@ struct RatingPill: View {
         .accessibilityLabel("\(rating.label) \(rating.text)")
     }
 }
-
-/// Small star + score pinned to a poster corner.
-struct RatingChip: View {
-    let item: MetaPreview
-
-    var body: some View {
-        if let r = item.rating {
-            HStack(spacing: 3) {
-                Image(systemName: "star.fill").font(.system(size: 9, weight: .bold)).foregroundStyle(.yellow)
-                Text(String(format: "%.1f", r)).font(.system(size: 11, weight: .bold)).monospacedDigit()
-            }
-            .foregroundStyle(.white)
-            .padding(.horizontal, 6).padding(.vertical, 3)
-            .background(.black.opacity(0.62), in: Capsule())
-            .accessibilityLabel("Rating \(String(format: "%.1f", r))")
-        }
-    }
-}

@@ -722,7 +722,6 @@ struct PosterCard: View {
                                 .accessibilityLabel(network?.name ?? "")
                         }
                     }
-                    .overlay(alignment: .bottomLeading) { RatingChip(item: item).padding(compact ? 4 : 6) }
                 if showsTitle {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(item.name).font(.footnote.weight(.semibold))

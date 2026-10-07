@@ -522,6 +522,11 @@ struct PlayerScreen: View {
     @State private var showSubtitles = false
     @State private var showSources = false
     @State private var showSpeed = false
+    /// The controls pill is showing the volume slider instead of its icons.
+    @State private var showVolume = false
+    @State private var volume = SystemVolume()
+    @State private var volumeTask: Task<Void, Never>?
+    @State private var volumeDragging = false
     @State private var sourceGroups: [(Addon, [StreamItem])] = []
     /// Add-on id the sources panel is narrowed to; nil = all add-ons.
     @State private var sourceFilter: String?
@@ -540,9 +545,11 @@ struct PlayerScreen: View {
     @State private var nextEp: NextEpisode?
     @State private var segments: [SkipSegment] = []
     @State private var segmentsLoaded = false
-    /// Shown above the title while paused. Both load in the background at start, so pausing never waits on the network.
+    /// Shown above the title while paused. Loads in the background at start, so pausing never waits on the network.
     @State private var pausedLogo: UIImage?
-    @State private var pausedOverview: String?
+    /// The info card opened by tapping the title (episode or movie details).
+    @State private var showInfo = false
+    @State private var info: PlayerInfo?
     /// Subtitle look, decoded once per change instead of on every redraw of the player.
     @State private var subStyle = SubtitleStyle()
 
@@ -563,17 +570,20 @@ struct PlayerScreen: View {
             SubtitleOverlay(cues: model.activeCues, lift: showControls ? 112 : 0, style: subStyle)
                 .animation(.easeInOut(duration: 0.2), value: showControls)
             Color.clear.contentShape(Rectangle()).onTapGesture { tapBackground() }
+            // Only while the volume pill is open: gives us the system slider and lets the pill replace iOS's own volume HUD.
+            if showVolume { SystemVolumeHost(volume: volume).frame(width: 1, height: 1).opacity(0.011).allowsHitTesting(false) }
             if pausedDim { pausedOverlay }
             if model.showSpinner && model.error == nil && !showControls && !showEpisodes && !launching {
                 ProgressView().controlSize(.large).tint(.white)
             }
             if launching && model.error == nil { launchOverlay.transition(.opacity) }
             if model.error != nil || (showControls && !launching) { controls.transition(.opacity) }
-            if !showEpisodes && !showSubtitles && !showSources && !showSpeed && model.error == nil { skipLayer }
+            if !showEpisodes && !showSubtitles && !showSources && !showSpeed && !showInfo && model.error == nil { skipLayer }
             if showEpisodes, let provider { episodePanel(provider).transition(.move(edge: .bottom).combined(with: .opacity)) }
             if showSubtitles { subtitlePanel.transition(.move(edge: .trailing).combined(with: .opacity)) }
             if showSources { sourcesPanel.transition(.move(edge: .trailing).combined(with: .opacity)) }
             if showSpeed { speedLayer.transition(.move(edge: .bottom).combined(with: .opacity)) }
+            if showInfo, let info { infoPanel(info).transition(.move(edge: .bottom).combined(with: .opacity)) }
             if let e = model.error { errorCard(e) }
             if let n = notice { toast(n) }
         }
@@ -583,7 +593,8 @@ struct PlayerScreen: View {
         .animation(.snappy(duration: 0.25), value: notice)
         .task { await begin() }
         .task(id: current.id) { await loadAux() }
-        .task(id: current.id) { await loadPausedOverview() }
+        // Fills the info card in while it is open (and again if the episode changes underneath it).
+        .task(id: showInfo ? current.id : nil) { if showInfo { await loadInfo() } }
         .task(id: current.item.id) { await loadPausedLogo() }
         .animation(.easeInOut(duration: 0.25), value: pausedDim)
         .task {
@@ -601,21 +612,33 @@ struct PlayerScreen: View {
             if playing { scheduleHide() } else { hideTask?.cancel() }
         }
         .onChange(of: model.isPaused) { _, paused in
-            if paused { withAnimation(.easeInOut(duration: 0.2)) { showControls = true } }
+            if paused && !showInfo { withAnimation(.easeInOut(duration: 0.2)) { showControls = true } }
             updateIdleTimer()
         }
         .onChange(of: model.error) { _, _ in updateIdleTimer() }
-        .onChange(of: showControls, initial: true) { _, shown in model.controlsVisible = shown }
+        .onChange(of: showControls, initial: true) { _, shown in
+            model.controlsVisible = shown
+            if !shown { volumeTask?.cancel(); showVolume = false }
+        }
+        // Another panel takes over: the pill goes back to its icons.
+        .onChange(of: showEpisodes || showSubtitles || showSources || showSpeed || showInfo) { _, open in
+            if open { volumeTask?.cancel(); showVolume = false }
+        }
+        // Hardware buttons (or the mute tap) while the pill is open count as adjusting: the 3 s countdown restarts.
+        .onChange(of: volume.level) { _, _ in bumpVolume() }
         .onChange(of: subJSON, initial: true) { _, json in subStyle = SubtitleStyle.decode(json) }
         .onChange(of: model.didEnd) { _, ended in
             if ended, autoplayNext, nextEp != nil { playNext() }
         }
         .onAppear {
             updateIdleTimer()
+            volume.startObserving()
             OrientationLock.set(.landscape)          // landscape only, free to flip 180°
         }
         .onDisappear {
             UIApplication.shared.isIdleTimerDisabled = false
+            volumeTask?.cancel()
+            volume.stopObserving()
             OrientationLock.set(.portrait)           // back to portrait for the rest of the app
             // Normal exit goes through close(); this covers any other way the screen can go away.
             if !closing { finalizeCurrent(); model.shutdown() }
@@ -690,13 +713,13 @@ struct PlayerScreen: View {
         }
     }
 
-    /// Series name + episode line (tap for the episode list).
+    /// Series name + episode line (tap for the episode / movie info card).
     private var titleBlock: some View {
-        Button { openEpisodes() } label: {
+        Button { openInfo() } label: {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 8) {
                     Text(current.item.name).font(.system(size: 24, weight: .bold)).lineLimit(1)
-                    if provider != nil { Image(systemName: "chevron.up").font(.system(size: 14, weight: .bold)).opacity(0.85) }
+                    Image(systemName: "chevron.up").font(.system(size: 14, weight: .bold)).opacity(0.85)
                 }
                 if let l = subtitleLine {
                     Text(l).font(.system(size: 17, weight: .medium)).foregroundStyle(.white.opacity(0.75)).lineLimit(1)
@@ -706,22 +729,39 @@ struct PlayerScreen: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .disabled(provider == nil)
     }
 
-    /// Speed, episodes, sources, subtitles, audio, next: all inside one Liquid Glass pill.
+    /// Speed, episodes, sources, volume, subtitles, audio track, next: all inside one Liquid Glass pill.
+    /// Tapping the speaker turns the whole pill into a volume slider; the icons stay in the layout (invisible), so the
+    /// pill keeps its size, and they fade back in 3 s after the last adjustment.
     private var iconRow: some View {
-        HStack(spacing: 2) {
-            pillButton("speedometer", active: showSpeed || model.rate != 1) { toggleSpeed() }
-            if provider != nil { pillButton("list.bullet") { openEpisodes() } }
-            pillButton("rectangle.stack") { openSources() }
-            if !model.subtitleTracks.isEmpty || OpenSubtitlesClient.shared.enabled {
-                pillButton(model.activeSubtitleID == nil ? "captions.bubble" : "captions.bubble.fill",
-                           active: showSubtitles) { toggleSubtitles() }
+        ZStack {
+            HStack(spacing: 2) {
+                pillButton("speedometer", active: showSpeed || model.rate != 1) { toggleSpeed() }
+                if provider != nil { pillButton("list.bullet") { openEpisodes() } }
+                pillButton("rectangle.stack") { openSources() }
+                pillButton(volume.level < 0.001 ? "speaker.slash" : "speaker.wave.2") { toggleVolume() }
+                if !model.subtitleTracks.isEmpty || OpenSubtitlesClient.shared.enabled {
+                    pillButton(model.activeSubtitleID == nil ? "captions.bubble" : "captions.bubble.fill",
+                               active: showSubtitles) { toggleSubtitles() }
+                }
+                if model.audioTracks.count > 1 { audioMenu }
+                if nextEp != nil { nextButton }
             }
-            if model.audioTracks.count > 1 { audioMenu }
-            if nextEp != nil { nextButton }
+            .opacity(showVolume ? 0 : 1)
+            .allowsHitTesting(!showVolume)
+            .accessibilityHidden(showVolume)
+
+            if showVolume {
+                VolumeSliderRow(level: volume.level,
+                                onChange: { volume.set($0) },
+                                onToggleMute: { volume.toggleMute() },
+                                onEditing: { volumeEditing($0) })
+                    .transition(.opacity)
+            }
         }
+        // A pill with only a few icons is narrower than a usable slider.
+        .frame(minWidth: showVolume ? 240 : nil)
         .padding(4)
         .modifier(GlassCapsule(on: glass))
     }
@@ -785,7 +825,8 @@ struct PlayerScreen: View {
                 }
             }
         } label: {
-            Image(systemName: "speaker.wave.2").font(.system(size: 19, weight: .semibold)).foregroundStyle(.white)
+            // Audio track / dub language. The speaker icon belongs to the volume button.
+            Image(systemName: "waveform").font(.system(size: 19, weight: .semibold)).foregroundStyle(.white)
                 .frame(width: 46, height: 46).contentShape(Circle())
         }
         .menuIndicator(.hidden)
@@ -904,7 +945,7 @@ struct PlayerScreen: View {
         hideTask?.cancel()
         if showSubtitles { closeSubtitles(); return }
         // Controls get out of the way so the subtitles can be judged where they will really appear.
-        withAnimation(.snappy(duration: 0.3)) { showSubtitles = true; showEpisodes = false; showSources = false; showSpeed = false; showControls = false }
+        withAnimation(.snappy(duration: 0.3)) { showSubtitles = true; showEpisodes = false; showSources = false; showSpeed = false; showInfo = false; showControls = false }
     }
 
     private func closeSubtitles() {
@@ -969,12 +1010,143 @@ struct PlayerScreen: View {
     private func toggleSpeed() {
         hideTask?.cancel()
         if showSpeed { closeSpeed(); return }
-        withAnimation(.snappy(duration: 0.3)) { showSpeed = true; showSubtitles = false; showSources = false; showEpisodes = false }
+        withAnimation(.snappy(duration: 0.3)) { showSpeed = true; showSubtitles = false; showSources = false; showEpisodes = false; showInfo = false }
     }
 
     private func closeSpeed() {
         withAnimation(.snappy(duration: 0.3)) { showSpeed = false }
         scheduleHide()
+    }
+
+    // MARK: Info card
+
+    /// Bottom card over the video (which keeps playing): thumbnail, title, date, runtime, ratings and synopsis of
+    /// the episode being watched, or of the movie.
+    private func infoPanel(_ info: PlayerInfo) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Spacer(minLength: 0)
+            PlayerInfoCard(info: info, onClose: { closeInfo() })
+                .foregroundStyle(.white)
+                .padding(18)
+                .frame(maxWidth: 720)
+                .modifier(GlassCard(on: glass))
+                .padding(.horizontal, 20).padding(.bottom, 10)
+        }
+    }
+
+    private func openInfo() {
+        hideTask?.cancel()
+        // Filled in before the card animates in, so it slides up with content instead of popping in afterwards.
+        info = basicInfo()
+        withAnimation(.snappy(duration: 0.3)) {
+            showInfo = true; showEpisodes = false; showSubtitles = false; showSources = false; showSpeed = false; showControls = false
+        }
+    }
+
+    private func closeInfo() {
+        withAnimation(.snappy(duration: 0.3)) { showInfo = false; showControls = true }
+        scheduleHide()
+    }
+
+    /// What is known without a network call: the request itself plus the catalog entry.
+    private func basicInfo() -> PlayerInfo {
+        let req = current, item = current.item
+        if let s = req.season, let e = req.episode {
+            return PlayerInfo(kicker: "\(item.name) · S\(s) · E\(e)", title: req.episodeTitle ?? "Episode \(e)",
+                              image: req.thumb ?? item.backdropURL, overview: nil)
+        }
+        return PlayerInfo(kicker: nil, title: item.name, image: req.thumb ?? item.backdropURL,
+                          overview: item.description, date: item.releaseInfo)
+    }
+
+    /// IMDb, Rotten Tomatoes, Metacritic... for a title. Empty without an MDBList key.
+    private func mdbRatings(for req: PlayRequest) async -> [MDBListClient.Rating] {
+        guard MDBListClient.shared.hasKey, !req.imdb.isEmpty else { return [] }
+        return await MDBListClient.shared.ratings(imdb: req.imdb, type: req.item.type)
+    }
+
+    /// Completes the card from TMDB / MDBList. Runs while the card is open, again if the episode changes under it.
+    private func loadInfo() async {
+        let req = current, item = current.item
+        var out = basicInfo()
+        info = out
+
+        if let s = req.season, let e = req.episode {
+            // Episode: its own still, synopsis, air date, runtime and TMDB rating.
+            if let ep = await provider?.episodes(s).first(where: { $0.id == e }) {
+                out.title = ep.name
+                out.image = ep.image ?? out.image
+                out.overview = ep.overview
+                out.date = PlayerInfo.pretty(ep.airDate)
+                out.runtime = ep.runtime
+                if let r = ep.rating, r > 0 {
+                    out.ratings = [MDBListClient.Rating(label: "TMDB", text: String(format: "%.1f", r), score: r)]
+                }
+            }
+            // A brand-new episode often has no synopsis yet: say so rather than showing nothing.
+            if (out.overview ?? "").isEmpty, let d = item.description, !d.isEmpty {
+                out.overview = d
+                out.overviewNote = "About the series"
+            }
+        } else {
+            // Movie: the whole film. Details (release date, runtime, TMDB vote) and MDBList ratings load side by side.
+            async let details = TMDBClient.shared.cachedDetails(for: item.id, type: item.type)
+            async let mdb = mdbRatings(for: req)
+            let d = await details
+            var ratings = await mdb
+            func add(_ label: String, _ v: Double?) {
+                if let v, v > 0, !ratings.contains(where: { $0.label == label }) {
+                    ratings.append(MDBListClient.Rating(label: label, text: String(format: "%.1f", v), score: v))
+                }
+            }
+            add("TMDB", d?.voteAverage)
+            add(item.ratingLabel, item.rating)      // the catalog's own score when nothing else has one
+            if let o = d?.overview, !o.isEmpty { out.overview = o }
+            out.date = PlayerInfo.pretty(d?.releaseDate) ?? out.date
+            out.runtime = d?.minutes
+            out.ratings = ratings
+        }
+        guard !Task.isCancelled else { return }
+        info = out
+    }
+
+    // MARK: Volume pill
+
+    /// Seconds after the last adjustment before the pill returns to its icons.
+    private static let volumeLife: Double = 3
+
+    private func toggleVolume() {
+        if showVolume { closeVolume(); return }
+        hideTask?.cancel()                      // controls stay up while the slider is open
+        volume.refresh()
+        withAnimation(.snappy(duration: 0.3)) { showVolume = true; showSpeed = false }
+        bumpVolume()
+    }
+
+    private func closeVolume() {
+        volumeTask?.cancel()
+        volumeDragging = false
+        volume.isAdjusting = false
+        guard showVolume else { return }
+        withAnimation(.snappy(duration: 0.3)) { showVolume = false }
+        scheduleHide()
+    }
+
+    /// (Re)starts the countdown. It does not run while a finger is on the slider; lifting it starts it again.
+    private func bumpVolume() {
+        volumeTask?.cancel()
+        guard showVolume, !volumeDragging else { return }
+        volumeTask = Task {
+            try? await Task.sleep(for: .seconds(Self.volumeLife))
+            guard !Task.isCancelled else { return }
+            closeVolume()
+        }
+    }
+
+    private func volumeEditing(_ on: Bool) {
+        volumeDragging = on
+        volume.isAdjusting = on
+        if on { volumeTask?.cancel() } else { bumpVolume() }
     }
 
     // MARK: Sources panel
@@ -1059,7 +1231,7 @@ struct PlayerScreen: View {
         sourceGroups = []
         sourceFilter = nil
         p2pOffCounts = [:]
-        withAnimation(.snappy(duration: 0.3)) { showSources = true; showSubtitles = false; showEpisodes = false; showSpeed = false; showControls = false }
+        withAnimation(.snappy(duration: 0.3)) { showSources = true; showSubtitles = false; showEpisodes = false; showSpeed = false; showInfo = false; showControls = false }
         Task { await loadSources() }
     }
 
@@ -1127,7 +1299,7 @@ struct PlayerScreen: View {
     private func openEpisodes() {
         guard provider != nil else { return }
         hideTask?.cancel()
-        withAnimation(.snappy(duration: 0.3)) { showEpisodes = true; showSubtitles = false; showSources = false; showSpeed = false; showControls = false }
+        withAnimation(.snappy(duration: 0.3)) { showEpisodes = true; showSubtitles = false; showSources = false; showSpeed = false; showInfo = false; showControls = false }
     }
 
     private func closeEpisodes() {
@@ -1179,7 +1351,7 @@ struct PlayerScreen: View {
 
     /// Paused with the controls up and nothing else open.
     private var pausedDim: Bool {
-        model.isPaused && model.error == nil && showControls && !showEpisodes && !showSubtitles && !showSources && !showSpeed
+        model.isPaused && model.error == nil && showControls && !showEpisodes && !showSubtitles && !showSources && !showSpeed && !showInfo
     }
 
     /// Dims the frozen frame with one flat gradient. A real blur would have to snapshot the video surface and
@@ -1191,42 +1363,18 @@ struct PlayerScreen: View {
             .transition(.opacity)
     }
 
-    /// Stacked above the show title: episode description on top, the show logo right above the title.
-    /// Nothing is drawn for a part that has no data (no logo found, no description).
+    /// The show logo, right above the title. Nothing is drawn when no logo was found.
+    /// (The synopsis lives in the info card now: tap the title.)
     @ViewBuilder private var pausedInfo: some View {
-        if pausedLogo != nil || !(pausedOverview ?? "").isEmpty {
-            VStack(alignment: .leading, spacing: 10) {
-                if let o = pausedOverview, !o.isEmpty {
-                    Text(o)
-                        .font(.system(size: 15, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.85))
-                        .lineLimit(3)
-                        .frame(maxWidth: 520, alignment: .leading)
-                        .shadow(color: .black.opacity(0.6), radius: 3)
-                }
-                if let logo = pausedLogo {
-                    Image(uiImage: logo).resizable().scaledToFit()
-                        .frame(maxWidth: 220, maxHeight: 48, alignment: .leading)
-                        .shadow(color: .black.opacity(0.45), radius: 6)
-                        .accessibilityHidden(true)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .allowsHitTesting(false)
-            .transition(.opacity)
+        if let logo = pausedLogo {
+            Image(uiImage: logo).resizable().scaledToFit()
+                .frame(maxWidth: 220, maxHeight: 48, alignment: .leading)
+                .shadow(color: .black.opacity(0.45), radius: 6)
+                .accessibilityHidden(true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .allowsHitTesting(false)
+                .transition(.opacity)
         }
-    }
-
-    /// Episode description (or the movie's / show's own when there is none). Looked up once per episode.
-    private func loadPausedOverview() async {
-        let req = current
-        var text: String?
-        if let s = req.season, let e = req.episode, let provider {
-            text = await provider.episodes(s).first(where: { $0.id == e })?.overview
-        }
-        if (text ?? "").isEmpty { text = req.item.description }
-        guard !Task.isCancelled else { return }
-        pausedOverview = text?.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// Logo is per show, so it is fetched once and kept across episode changes. Downsampled and cached by ImagePipeline.
@@ -1276,6 +1424,8 @@ struct PlayerScreen: View {
         if showSubtitles { closeSubtitles(); return }
         if showSources { closeSources(); return }
         if showSpeed { closeSpeed(); return }
+        if showInfo { closeInfo(); return }
+        if showVolume { closeVolume(); return }
         withAnimation(.easeInOut(duration: 0.2)) { showControls.toggle() }
         if showControls { scheduleHide() }
     }
@@ -1285,7 +1435,7 @@ struct PlayerScreen: View {
         guard model.isPlaying else { return }
         hideTask = Task {
             try? await Task.sleep(for: .seconds(3.5))
-            guard !Task.isCancelled, !model.playhead.scrubbing, !showEpisodes, !showSubtitles, !showSources, !showSpeed else { return }
+            guard !Task.isCancelled, !model.playhead.scrubbing, !showEpisodes, !showSubtitles, !showSources, !showSpeed, !showVolume, !showInfo else { return }
             withAnimation(.easeInOut(duration: 0.25)) { showControls = false }
         }
     }
