@@ -498,6 +498,13 @@ private struct GlassCard: ViewModifier {
     }
 }
 
+// MARK: - Controls pill items
+
+/// Everything that can sit in the controls pill. Declaration order is the on-screen order.
+private enum PillItem: CaseIterable {
+    case speed, episodes, sources, volume, pip, subtitles, audio, next
+}
+
 // MARK: - Player screen
 
 struct PlayerScreen: View {
@@ -528,6 +535,9 @@ struct PlayerScreen: View {
     @State private var volume = SystemVolume()
     @State private var volumeTask: Task<Void, Never>?
     @State private var volumeDragging = false
+    /// The pill has more than `pillFolded` items and the user unfolded it with the chevron.
+    @State private var pillExpanded = false
+    @State private var pillTask: Task<Void, Never>?
     /// Picture in Picture window (native AVPlayer path only; the pill hides the button otherwise).
     @State private var pip = PiPController()
     @State private var sourceGroups: [(Addon, [StreamItem])] = []
@@ -634,11 +644,11 @@ struct PlayerScreen: View {
         .onChange(of: model.error) { _, _ in updateIdleTimer() }
         .onChange(of: showControls, initial: true) { _, shown in
             model.controlsVisible = shown
-            if !shown { volumeTask?.cancel(); showVolume = false }
+            if !shown { volumeTask?.cancel(); pillTask?.cancel(); showVolume = false; pillExpanded = false }
         }
         // Another panel takes over: the pill goes back to its icons.
         .onChange(of: showEpisodes || showSubtitles || showSources || showSpeed || showInfo) { _, open in
-            if open { volumeTask?.cancel(); showVolume = false }
+            if open { volumeTask?.cancel(); pillTask?.cancel(); showVolume = false; pillExpanded = false }
         }
         // Hardware buttons (or the mute tap) while the pill is open count as adjusting: the 3 s countdown restarts.
         .onChange(of: volume.level) { _, _ in bumpVolume() }
@@ -655,6 +665,7 @@ struct PlayerScreen: View {
         .onDisappear {
             UIApplication.shared.isIdleTimerDisabled = false
             volumeTask?.cancel()
+            pillTask?.cancel()
             volume.stopObserving()
             pip.teardown()
             OrientationLock.set(.portrait)           // back to portrait for the rest of the app
@@ -749,42 +760,155 @@ struct PlayerScreen: View {
         .buttonStyle(.plain)
     }
 
+    // MARK: Controls pill
+
+    private static let pillSlot: CGFloat = 46          // one icon
+    private static let pillGap: CGFloat = 2            // between icons
+    private static let pillPad: CGFloat = 4            // glass padding around the icons
+    /// A pill with more items than this folds: it shows this many plus a chevron, the rest unfold to the left.
+    private static let pillFolded = 4
+    /// Seconds an unfolded pill stays open after the last tap.
+    private static let pillLife: Double = 5
+    /// Narrowest the volume slider may get (inner width, without the glass padding).
+    private static let volumeMinWidth: CGFloat = 260
+    /// Which items stay visible while the pill is folded, most important first.
+    private static let pillPriority: [PillItem] = [.volume, .subtitles, .speed, .next, .audio, .pip, .episodes, .sources]
+
+    /// Width of `n` icons side by side.
+    private static func pillSpan(_ n: Int) -> CGFloat {
+        n <= 0 ? 0 : CGFloat(n) * pillSlot + CGFloat(n - 1) * pillGap
+    }
+
+    /// The items that exist right now, in on-screen order. When there are more than `pillFolded`, the ones that
+    /// fold away come first (left), so unfolding grows the pill to the left, and `extras` says how many they are.
+    private var pillLayout: (items: [PillItem], extras: Int) {
+        let all = PillItem.allCases.filter { pillHas($0) }
+        guard all.count > Self.pillFolded else { return (all, 0) }
+        let keep = Set(Self.pillPriority.filter { all.contains($0) }.prefix(Self.pillFolded))
+        let extras = all.filter { !keep.contains($0) }
+        let kept = all.filter { keep.contains($0) }
+        return (extras + kept, extras.count)
+    }
+
+    /// Whether an item applies to what is playing right now (no episodes without a provider, no audio menu with one track...).
+    private func pillHas(_ item: PillItem) -> Bool {
+        switch item {
+        case .speed, .sources, .volume: return true
+        case .episodes: return provider != nil
+        case .pip: return pip.isAvailable || pip.isActive
+        case .subtitles: return !model.subtitleTracks.isEmpty || OpenSubtitlesClient.shared.enabled
+        case .audio: return model.audioTracks.count > 1
+        case .next: return nextEp != nil
+        }
+    }
+
     /// Speed, episodes, sources, volume, Picture in Picture, subtitles, audio track, next: all inside one Liquid Glass pill.
-    /// Tapping the speaker turns the whole pill into a volume slider; the icons stay in the layout (invisible), so the
-    /// pill keeps its size, and they fade back in 3 s after the last adjustment.
+    ///
+    /// Every width here is computed, never measured, so the glass, the icons and the volume slider can't disagree:
+    /// - Up to 4 items: they all show.
+    /// - More than 4: the pill stays 4 items wide plus a chevron. The chevron unfolds it to the left; it folds
+    ///   itself again `pillLife` seconds after the last tap.
+    /// - Tapping the speaker turns the pill into a volume slider of a fixed width (never narrower than
+    ///   `volumeMinWidth`); the icons fade out and come back 3 s after the last adjustment.
+    /// The pill's layout footprint is always its folded size. Anything wider (unfolded, or the slider) grows to the
+    /// left over the video, so the title / icon arrangement around it never re-flows.
     private var iconRow: some View {
-        ZStack {
-            HStack(spacing: 2) {
-                pillButton("speedometer", active: showSpeed || model.rate != 1) { toggleSpeed() }
-                if provider != nil { pillButton("list.bullet") { openEpisodes() } }
-                pillButton("rectangle.stack") { openSources() }
-                pillButton(volume.level < 0.001 ? "speaker.slash" : "speaker.wave.2") { toggleVolume() }
-                if pip.isAvailable || pip.isActive {
-                    pillButton(pip.isActive ? "pip.exit" : "pip.enter", active: pip.isActive) { togglePiP() }
+        let layout = pillLayout
+        let n = layout.items.count
+        let overflow = layout.extras > 0
+        let rest = Self.pillSpan(overflow ? Self.pillFolded + 1 : n)        // folded: chevron + 4 items
+        let open = overflow && pillExpanded && !showVolume
+        let width = showVolume ? max(rest, Self.volumeMinWidth) : (open ? Self.pillSpan(n + 1) : rest)
+
+        return ZStack(alignment: .trailing) {
+            HStack(spacing: Self.pillGap) {
+                ForEach(Array(layout.items.enumerated()), id: \.element) { i, item in
+                    let hidden = i < layout.extras && !open        // folded away: clipped, invisible, untouchable
+                    pillItemView(item)
+                        .opacity(hidden ? 0 : 1)
+                        .allowsHitTesting(!hidden)
+                        .accessibilityHidden(hidden || showVolume)
                 }
-                if !model.subtitleTracks.isEmpty || OpenSubtitlesClient.shared.enabled {
-                    pillButton(model.activeSubtitleID == nil ? "captions.bubble" : "captions.bubble.fill",
-                               active: showSubtitles) { toggleSubtitles() }
-                }
-                if model.audioTracks.count > 1 { audioMenu }
-                if nextEp != nil { nextButton }
             }
+            .fixedSize()
             .opacity(showVolume ? 0 : 1)
             .allowsHitTesting(!showVolume)
-            .accessibilityHidden(showVolume)
 
             if showVolume {
                 VolumeSliderRow(level: volume.level,
                                 onChange: { volume.set($0) },
                                 onToggleMute: { volume.toggleMute() },
                                 onEditing: { volumeEditing($0) })
+                    .frame(width: width)
                     .transition(.opacity)
             }
         }
-        // A pill with only a few icons is narrower than a usable slider.
-        .frame(minWidth: showVolume ? 240 : nil)
-        .padding(4)
+        // The visible window: icons beyond it (folded ones) overflow to the left and are clipped below.
+        .frame(width: width, alignment: .trailing)
+        .overlay(alignment: .leading) {
+            if overflow && !showVolume { pillMoreButton(open: open).transition(.opacity) }
+        }
+        .padding(Self.pillPad)
+        .clipShape(Capsule())
         .modifier(GlassCapsule(on: glass))
+        .animation(.snappy(duration: 0.25), value: layout.items)
+        .frame(width: rest + Self.pillPad * 2, alignment: .trailing)
+    }
+
+    @ViewBuilder private func pillItemView(_ item: PillItem) -> some View {
+        switch item {
+        case .speed: pillButton("speedometer", active: showSpeed || model.rate != 1) { toggleSpeed() }
+        case .episodes: pillButton("list.bullet") { openEpisodes() }
+        case .sources: pillButton("rectangle.stack") { openSources() }
+        case .volume: pillButton(volume.level < 0.001 ? "speaker.slash" : "speaker.wave.2") { toggleVolume() }
+        case .pip: pillButton(pip.isActive ? "pip.exit" : "pip.enter", active: pip.isActive) { togglePiP() }
+        case .subtitles:
+            pillButton(model.activeSubtitleID == nil ? "captions.bubble" : "captions.bubble.fill",
+                       active: showSubtitles) { toggleSubtitles() }
+        case .audio: audioMenu
+        case .next: nextButton
+        }
+    }
+
+    /// Left edge of the pill: unfolds the hidden icons (chevron points left), or folds them back (points right).
+    private func pillMoreButton(open: Bool) -> some View {
+        Button { togglePill() } label: {
+            Image(systemName: open ? "chevron.right" : "chevron.left")
+                .font(.system(size: 17, weight: .bold))
+                .foregroundStyle(.white)
+                .contentTransition(.symbolEffect(.replace))
+                .frame(width: Self.pillSlot, height: Self.pillSlot)
+                .contentShape(Circle())
+        }
+        .buttonStyle(PressableStyle())
+        .accessibilityLabel(open ? "Fewer controls" : "More controls")
+    }
+
+    private func togglePill() {
+        if pillExpanded { foldPill(); scheduleHide(); return }
+        hideTask?.cancel()                      // controls stay up while the pill is unfolded
+        withAnimation(.snappy(duration: 0.3)) { pillExpanded = true }
+        bumpPill()
+    }
+
+    /// Folds the pill back to four items right away.
+    private func foldPill() {
+        pillTask?.cancel()
+        guard pillExpanded else { return }
+        withAnimation(.snappy(duration: 0.3)) { pillExpanded = false }
+    }
+
+    /// (Re)starts the 5 s countdown while the pill is unfolded. Any tap inside the pill calls this.
+    private func bumpPill() {
+        pillTask?.cancel()
+        guard pillExpanded else { return }
+        hideTask?.cancel()
+        pillTask = Task {
+            try? await Task.sleep(for: .seconds(Self.pillLife))
+            guard !Task.isCancelled else { return }
+            foldPill()
+            scheduleHide()
+        }
     }
 
     /// Icon inside the pill: no glass of its own, an accent disc when active.
@@ -805,7 +929,7 @@ struct PlayerScreen: View {
     private func togglePiP() {
         hideTask?.cancel()
         pip.toggle()
-        scheduleHide()
+        if pillExpanded { bumpPill() } else { scheduleHide() }
     }
 
     /// Shown in place of the video while it plays in the PiP window.
@@ -821,7 +945,7 @@ struct PlayerScreen: View {
 
     private var nextButton: some View {
         ZStack {
-            pillButton("forward.end.fill") { playNext() }
+            pillButton("forward.end.fill") { bumpPill(); playNext() }
                 .opacity(switching != nil ? 0.35 : 1)
                 .disabled(switching != nil)
             if switching != nil { ProgressView().tint(.white).allowsHitTesting(false) }
@@ -858,7 +982,7 @@ struct PlayerScreen: View {
     private var audioMenu: some View {
         Menu {
             ForEach(model.audioTracks, id: \.id) { t in
-                Button { model.selectAudio(t) } label: {
+                Button { model.selectAudio(t); bumpPill() } label: {
                     checkLabel(Reflect.trackTitle(t), Reflect.int(t.id) == model.activeAudioID)
                 }
             }
@@ -1157,7 +1281,8 @@ struct PlayerScreen: View {
         if showVolume { closeVolume(); return }
         hideTask?.cancel()                      // controls stay up while the slider is open
         volume.refresh()
-        withAnimation(.snappy(duration: 0.3)) { showVolume = true; showSpeed = false }
+        pillTask?.cancel()
+        withAnimation(.snappy(duration: 0.3)) { showVolume = true; showSpeed = false; pillExpanded = false }
         bumpVolume()
     }
 
@@ -1464,6 +1589,7 @@ struct PlayerScreen: View {
         if showSpeed { closeSpeed(); return }
         if showInfo { closeInfo(); return }
         if showVolume { closeVolume(); return }
+        if pillExpanded { foldPill(); scheduleHide(); return }
         withAnimation(.easeInOut(duration: 0.2)) { showControls.toggle() }
         if showControls { scheduleHide() }
     }
@@ -1473,7 +1599,7 @@ struct PlayerScreen: View {
         guard model.isPlaying, !pip.isActive else { return }
         hideTask = Task {
             try? await Task.sleep(for: .seconds(3.5))
-            guard !Task.isCancelled, !model.playhead.scrubbing, !showEpisodes, !showSubtitles, !showSources, !showSpeed, !showVolume, !showInfo else { return }
+            guard !Task.isCancelled, !model.playhead.scrubbing, !showEpisodes, !showSubtitles, !showSources, !showSpeed, !showVolume, !pillExpanded, !showInfo else { return }
             withAnimation(.easeInOut(duration: 0.25)) { showControls = false }
         }
     }
