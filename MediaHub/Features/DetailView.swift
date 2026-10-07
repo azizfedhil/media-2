@@ -28,6 +28,7 @@ struct DetailView: View {
     @Environment(ThemeStore.self) private var theme
     @Environment(DownloadManager.self) private var downloads
     @Environment(ContentPrefs.self) private var contentPrefs
+    @Environment(\.wideLayout) private var wide
     @State private var imdbID: String?
     @State private var onWatchlist = false
     @State private var ratings: [MDBListClient.Rating] = []
@@ -98,23 +99,10 @@ struct DetailView: View {
     // MARK: Body
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                ParallaxHero(height: Self.heroHeight) {
-                    RotatingArtwork(item: item, kind: .detail, size: 800)
-                } info: {
-                    heroInfo.padding(.horizontal, 20)
-                }
-                header.padding(.horizontal, 20)
-                if isSeries { seasonSection }
-                if !trailers.isEmpty { trailersSection }
-                if !similar.isEmpty {
-                    CatalogRowView(row: CatalogRow(id: "similar-\(item.id)", title: "More like this", items: similar))
-                        .padding(.top, 8)
-                }
-                detailsSection
-            }
-            .padding(.bottom, 40)
+        // A ZStack (not a bare if/else) so the loading tasks below belong to one stable view and don't restart
+        // when the layout flips between phone and sidebar.
+        ZStack {
+            if wide { wideBody } else { phoneBody }
         }
         .ignoresSafeArea(edges: .top)
         .toolbarTitleDisplayMode(.inline)
@@ -159,6 +147,77 @@ struct DetailView: View {
                 guard showSources else { return }
                 streams = AddonClient.ordered(streams + [group], by: addons)
             }
+        }
+    }
+
+    // MARK: Page layouts
+
+    private var phoneBody: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                ParallaxHero(height: Self.heroHeight) {
+                    RotatingArtwork(item: item, kind: .detail, size: 800)
+                } info: {
+                    heroInfo.padding(.horizontal, 20)
+                }
+                header.padding(.horizontal, 20)
+                if isSeries { seasonSection }
+                if !trailers.isEmpty { trailersSection }
+                if !similar.isEmpty {
+                    CatalogRowView(row: CatalogRow(id: "similar-\(item.id)", title: "More like this", items: similar))
+                        .padding(.top, 8)
+                }
+                detailsSection
+            }
+            .padding(.bottom, 40)
+        }
+    }
+
+    /// Sidebar layout: poster, title, facts, buttons and synopsis big on the left; seasons, episodes, trailers,
+    /// similar titles and the details list on the right. Drag the right side left to cover the poster.
+    private var wideBody: some View {
+        CollapsingSplit {
+            widePoster
+        } pane: { ctx in
+            PaneScroll(ctx: ctx) {
+                VStack(alignment: .leading, spacing: 16) {
+                    if isSeries { seasonSection }
+                    if !trailers.isEmpty { trailersSection }
+                    if !similar.isEmpty {
+                        CatalogRowView(row: CatalogRow(id: "similar-\(item.id)", title: "More like this", items: similar))
+                            .padding(.top, 8)
+                    }
+                    detailsSection
+                }
+                .padding(.leading, 8)
+            }
+        }
+        .ignoresSafeArea(.container, edges: .bottom)
+    }
+
+    private var widePoster: some View {
+        GeometryReader { geo in
+            let compact = geo.size.height < 560
+            ZStack(alignment: .bottomLeading) {
+                RotatingArtwork(item: item, kind: .poster, size: 1000)
+                    .frame(width: geo.size.width, height: geo.size.height)
+                    .clipped()
+                LinearGradient(stops: [.init(color: .clear, location: 0.2),
+                                       .init(color: .black.opacity(0.6), location: 0.55),
+                                       .init(color: .black.opacity(0.92), location: 1)],
+                               startPoint: .top, endPoint: .bottom)
+                VStack(alignment: .leading, spacing: compact ? 9 : 14) {
+                    TitleArt(item: item, maxWidth: 300, maxHeight: compact ? 58 : 100, font: .largeTitle.bold())
+                    if !metaLine.isEmpty || networkText != nil { metaRow }
+                    if !allRatings.isEmpty { ratingsRow }
+                    header
+                }
+                .foregroundStyle(.white)
+                .scrollDisabled(true)       // the ratings strip must not swallow the drag that collapses the poster
+                .padding(.horizontal, 22)
+                .padding(.bottom, max(geo.safeAreaInsets.bottom, 0) + (compact ? 18 : 30))
+            }
+            .frame(width: geo.size.width, height: geo.size.height)
         }
     }
 

@@ -189,6 +189,7 @@ struct HomeView: View {
     @Environment(ThemeStore.self) private var theme
     @Environment(ContentPrefs.self) private var contentPrefs
     @Environment(\.scenePhase) private var phase
+    @Environment(\.wideLayout) private var wide
     @AppStorage("tmdb.key") private var tmdbKey = ""
     @AppStorage("mdblist.key") private var mdbKey = ""
     @AppStorage("mdblist.lists") private var mdbLists = ""
@@ -243,8 +244,12 @@ struct HomeView: View {
         return tmdbKey + last + "|" + contentPrefs.rules.categoryKey
     }
 
-    /// The scrolling Home feed with its chrome; navigation destinations and loading tasks are added in `body`.
-    private var feed: some View {
+    /// The Home feed with its chrome; navigation destinations and loading tasks are added in `body`.
+    @ViewBuilder private var feed: some View {
+        if wide { wideFeed } else { phoneFeed }
+    }
+
+    private var phoneFeed: some View {
         ScrollView {
             rows
                 .padding(.bottom, 40)
@@ -262,27 +267,52 @@ struct HomeView: View {
         .overlay { emptyState }
     }
 
-    @ViewBuilder private var rows: some View {
-        let hero = model.hero
-        LazyVStack(alignment: .leading, spacing: 30) {
-            if !hero.isEmpty { HeroCarousel(items: hero, tint: $tint) }
-            if !history.continueEntries.isEmpty || !model.upNext.isEmpty {
-                ContinueRow(entries: history.continueEntries, upNext: model.upNext)
+    /// Sidebar layout: the day's featured titles as a big poster panel on the left, the rows on the right. Drag the
+    /// rows left to cover the poster and get the whole width for titles.
+    private var wideFeed: some View {
+        CollapsingSplit(showsHero: !model.hero.isEmpty) {
+            WideHeroPanel(items: model.hero, tint: $tint)
+        } pane: { ctx in
+            PaneScroll(ctx: ctx, refresh: refresh) {
+                LazyVStack(alignment: .leading, spacing: 30) { feedRows }
+                    .padding(.leading, 14)
+                    .animation(.smooth(duration: 0.5), value: heroDeps)
+                    .background(alignment: .top, content: { ambient })
             }
-            if let t = themeRow(0) { ThemeCarousel(row: t) }
-            ForEach(visible(model.suggested)) { CatalogRowView(row: $0) }
-            if let t = themeRow(1) { ThemeCarousel(row: t) }
-            ForEach(model.lists) { CatalogRowView(row: $0) }
-            if let t = themeRow(2) { ThemeCarousel(row: t) }
-            // The rest of the themes are spread through the add-on rows: one after every second row.
-            let addonRows = visible(model.rows)
-            ForEach(Array(addonRows.enumerated()), id: \.element.id) { i, row in
-                CatalogRowView(row: row)
-                if i % 2 == 1, let t = themeRow(3 + i / 2) { ThemeCarousel(row: t) }
-            }
-            // Themes that found no slot between add-on rows (few or no add-on rows) close the feed.
-            ForEach(trailingThemes(addonRowCount: addonRows.count)) { ThemeCarousel(row: $0) }
         }
+        .ignoresSafeArea(.container, edges: [.top, .bottom])
+        .navigationBarTitleDisplayMode(.inline)
+        .profileToolbar(logo: true)
+        .onChange(of: phase) { _, p in if p == .active { model.refreshHeroDay() } }
+        .overlay { emptyState }
+    }
+
+    private var rows: some View {
+        LazyVStack(alignment: .leading, spacing: 30) {
+            let hero = model.hero
+            if !hero.isEmpty { HeroCarousel(items: hero, tint: $tint) }
+            feedRows
+        }
+    }
+
+    /// Everything under the hero: continue watching, themed collections and the catalogue rows.
+    @ViewBuilder private var feedRows: some View {
+        if !history.continueEntries.isEmpty || !model.upNext.isEmpty {
+            ContinueRow(entries: history.continueEntries, upNext: model.upNext)
+        }
+        if let t = themeRow(0) { ThemeCarousel(row: t) }
+        ForEach(visible(model.suggested)) { CatalogRowView(row: $0) }
+        if let t = themeRow(1) { ThemeCarousel(row: t) }
+        ForEach(model.lists) { CatalogRowView(row: $0) }
+        if let t = themeRow(2) { ThemeCarousel(row: t) }
+        // The rest of the themes are spread through the add-on rows: one after every second row.
+        let addonRows = visible(model.rows)
+        ForEach(Array(addonRows.enumerated()), id: \.element.id) { i, row in
+            CatalogRowView(row: row)
+            if i % 2 == 1, let t = themeRow(3 + i / 2) { ThemeCarousel(row: t) }
+        }
+        // Themes that found no slot between add-on rows (few or no add-on rows) close the feed.
+        ForEach(trailingThemes(addonRowCount: addonRows.count)) { ThemeCarousel(row: $0) }
     }
 
     /// The i-th themed row of today, or nil when themes are switched off or fewer than that loaded.
@@ -721,6 +751,9 @@ private struct UpNextCard: View {
 struct CatalogRowView: View {
     let row: CatalogRow
     @Environment(ThemeStore.self) private var theme
+    @Environment(\.wideLayout) private var wide
+    /// Bigger posters in the sidebar layout.
+    private var posterWidth: CGFloat { wide ? 140 : 102 }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -739,7 +772,7 @@ struct CatalogRowView: View {
             ScrollView(.horizontal) {
                 LazyHStack(spacing: 12) {
                     ForEach(row.items) { item in
-                        PosterCard(item: item)
+                        PosterCard(item: item, width: posterWidth)
                             .scrollTransition(axis: .horizontal) { content, phase in
                                 content.scaleEffect(phase.isIdentity ? 1 : 0.92).opacity(phase.isIdentity ? 1 : 0.6)
                             }
@@ -749,7 +782,7 @@ struct CatalogRowView: View {
                             Image(systemName: "arrow.right.circle").font(.title)
                             Text("See all").font(.footnote.weight(.semibold))
                         }
-                        .foregroundStyle(.secondary).frame(width: 78, height: 153)   // matches a 102pt poster's height
+                        .foregroundStyle(.secondary).frame(width: 78, height: posterWidth * 1.5)   // matches the poster height
                     }
                     .buttonStyle(.plain)
                 }

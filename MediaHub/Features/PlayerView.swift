@@ -664,7 +664,7 @@ struct PlayerScreen: View {
             pillTask?.cancel()
             volume.stopObserving()
             pip.teardown()
-            OrientationLock.set(.portrait)           // back to portrait for the rest of the app
+            OrientationLock.set(OrientationLock.appMask)   // back to what the rest of the app allows
             // Normal exit goes through close(); this covers any other way the screen can go away.
             if !closing { finalizeCurrent(); model.shutdown() }
         }

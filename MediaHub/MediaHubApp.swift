@@ -73,14 +73,22 @@ extension Color {
     }
 }
 
-/// Which orientations the app may rotate to right now. Portrait everywhere except the player (landscape only).
+/// Which orientations the app may rotate to right now. The app's own mask is portrait on iPhone (landscape too once
+/// the landscape layout is switched on in Settings) and everything on iPad; the player narrows it to landscape.
 /// `AppDelegate` reports this mask to UIKit; `set` changes it and rotates the screen to match.
 enum OrientationLock {
-    static var mask: UIInterfaceOrientationMask = .portrait
+    /// What the rest of the app (everything but the player) is allowed to do.
+    static var appMask: UIInterfaceOrientationMask {
+        if WideLayout.isPad { return .all }
+        return UserDefaults.standard.bool(forKey: WideLayout.phoneKey) ? .allButUpsideDown : .portrait
+    }
+    static var mask: UIInterfaceOrientationMask = OrientationLock.appMask
 
     @MainActor
     static func set(_ new: UIInterfaceOrientationMask) {
         mask = new
+        // The player (landscape only) owns the screen: the layout mode holds still until it is gone.
+        LayoutState.shared.playerOpen = (new == .landscape)
         let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
         guard let scene = scenes.first(where: { $0.activationState == .foregroundActive }) ?? scenes.first else { return }
         // Tell every controller in the presented chain to re-read the supported orientations.
@@ -154,20 +162,41 @@ struct RootView: View {
     @Environment(Connectivity.self) private var connectivity
     /// True when the app launched without a connection: shows the Downloads page instead of the (empty) online tabs.
     @State private var offlineMode = false
+    @Environment(\.horizontalSizeClass) private var hSize
+    @AppStorage(WideLayout.phoneKey) private var phoneLandscape = false
+    @State private var layoutState = LayoutState.shared
+    @State private var tab: AppTab = .home
+    @State private var wide = WideLayout.isPad
+    /// Window size, seeded from the screen so the very first frame already picks the right sidebar width.
+    @State private var size: CGSize = {
+        let scene = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
+        return scene?.coordinateSpace.bounds.size ?? .zero
+    }()
 
     var body: some View {
-        // System TabView gives Liquid Glass tab bar for free.
-        TabView {
-            Tab("Home", systemImage: "house.fill") { HomeView() }
-            Tab("Explore", systemImage: "safari.fill") { ExploreView() }
-            Tab("Library", systemImage: "books.vertical.fill") { LibraryView() }
-            Tab("Settings", systemImage: "gearshape.fill") { SettingsView() }
-            Tab(role: .search) { SearchView() }
+        // Sidebar layout on iPad (and on iPhone in landscape when switched on); the system TabView everywhere else,
+        // which gives the Liquid Glass tab bar for free. The selected tab carries over between the two.
+        Group {
+            if wide {
+                SidebarShell(tab: $tab, totalWidth: size.width)
+            } else {
+                TabView(selection: $tab) {
+                    Tab("Home", systemImage: "house.fill", value: AppTab.home) { HomeView() }
+                    Tab("Explore", systemImage: "safari.fill", value: AppTab.explore) { ExploreView() }
+                    Tab("Library", systemImage: "books.vertical.fill", value: AppTab.library) { LibraryView() }
+                    Tab("Settings", systemImage: "gearshape.fill", value: AppTab.settings) { SettingsView() }
+                    Tab(value: AppTab.search, role: .search) { SearchView() }
+                }
+                .tabBarMinimizeBehavior(.onScrollDown)
+            }
         }
+        .onGeometryChange(for: CGSize.self) { $0.size } action: { size = $0; updateWide() }
+        .onChange(of: hSize) { _, _ in updateWide() }
+        .onChange(of: phoneLandscape) { _, _ in updateWide() }
+        .onChange(of: layoutState.playerOpen) { _, _ in updateWide() }
         .tint(theme.accent)
         // With the neutral accent, switches would otherwise turn white-on-white; keep the stock green.
         .toggleStyle(SwitchToggleStyle(tint: theme.isSystem ? .green : theme.accent))
-        .tabBarMinimizeBehavior(.onScrollDown)
         // Each profile has its own watch history and local library; swap them when the profile changes.
         .onChange(of: profiles.activeID, initial: true) { _, id in
             history.load(profile: id)
@@ -198,6 +227,13 @@ struct RootView: View {
                 ArtworkPool.shared.flush()
             }
         }
+    }
+
+    /// Re-evaluates which layout to use. Held still while the player is open (it forces landscape).
+    private func updateWide() {
+        guard !layoutState.playerOpen else { return }
+        let now = WideLayout.isWide(size: size, hSize: hSize, phoneOptIn: phoneLandscape)
+        if now != wide { wide = now }
     }
 
     /// Foreground refresh, and only what this profile actually uses: automatic sync when it is on, Simkl's lists when

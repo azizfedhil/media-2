@@ -40,10 +40,14 @@ struct ProfileToolbar: ViewModifier {
     /// 0 at the top of the page, 1 once scrolled `fadeDistance` points. Drives the Home header directly.
     @State private var progress: CGFloat = 0
     @State private var onScreen = true
+    /// In the sidebar layout the profile lives in the sidebar, so no avatar button here.
+    @Environment(\.wideLayout) private var wide
 
     @ViewBuilder
     func body(content: Content) -> some View {
-        if logo { home(content) } else { standard(content) }
+        if wide {
+            if logo { content.toolbar(.hidden, for: .navigationBar) } else { content }
+        } else if logo { home(content) } else { standard(content) }
     }
 
     // MARK: Standard tabs

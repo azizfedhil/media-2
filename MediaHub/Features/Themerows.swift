@@ -275,6 +275,7 @@ struct ThemeCarousel: View {
 /// Big 4:5 card: key art, a small tag, the title logo and "TV Show · Thriller · Mystery". The next card peeks in.
 private struct ThemeCard: View {
     let entry: ThemedTitle
+    @Environment(\.wideLayout) private var wide
     private var item: MetaPreview { entry.item }
 
     private var tag: String? {
@@ -291,7 +292,7 @@ private struct ThemeCard: View {
         NavigationLink(value: item) {
             Color.clear
                 .aspectRatio(4.0 / 5.0, contentMode: .fit)
-                .containerRelativeFrame(.horizontal) { w, _ in min(w - 56, 440) }
+                .containerRelativeFrame(.horizontal) { w, _ in wide ? 270 : min(w - 56, 440) }
                 .overlay { RotatingArtwork(item: item, kind: .hero(wide: false), size: 440) }
                 .overlay {
                     LinearGradient(stops: [.init(color: .clear, location: 0.4), .init(color: .black.opacity(0.85), location: 1)],

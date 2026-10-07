@@ -17,6 +17,7 @@ struct SettingsView: View {
     @AppStorage("mdblist.key") private var mdbKey = ""
     @AppStorage("ui.networkBadges") private var networkBadges = true
     @AppStorage("ui.titleLogos") private var titleLogos = true
+    @AppStorage(WideLayout.phoneKey) private var landscapeLayout = false
     @AppStorage("player.glass") private var glass = true
     @AppStorage("player.autoplayNext") private var autoplayNext = true
     @AppStorage(PillItem.storageKey) private var pillPinned = PillItem.defaultRaw
@@ -135,8 +136,14 @@ struct SettingsView: View {
                     .padding(.vertical, 4)
                     Toggle("Network icons on posters", isOn: $networkBadges)
                     Toggle("Logos instead of title text", isOn: $titleLogos)
+                    // iPad always uses the sidebar layout; on iPhone it is opt-in.
+                    if !WideLayout.isPad {
+                        Toggle("Landscape layout", isOn: $landscapeLayout)
+                            // Lets the app rotate (or locks it back to portrait) right away.
+                            .onChange(of: landscapeLayout) { _, _ in OrientationLock.set(OrientationLock.appMask) }
+                    }
                 } header: { Text("Appearance") } footer: {
-                    Text("Network icons need a TMDB key and make one small request per visible poster. Logos come from TMDB, TheTVDB and Metahub and are cached after the first lookup.")
+                    Text("Network icons need a TMDB key and make one small request per visible poster. Logos come from TMDB, TheTVDB and Metahub and are cached after the first lookup.\(WideLayout.isPad ? "" : " Landscape layout turns the app sideways into the iPad-style sidebar layout when you rotate your iPhone. Off keeps the app portrait-only.")")
                 }
 
                 Section {
