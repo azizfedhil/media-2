@@ -119,7 +119,8 @@ final class PlayerModel {
         if wasDropped, keptDuration > 0 { playhead.duration = keptDuration }
         if startAt > 0 { playhead.position = startAt; holdPosition = startAt }      // seek bar holds the resume point while loading
         do {
-            if replacing { engine.stop() }
+            // An open PiP window survives a next-episode load only if the engine is not stopped in between: it hands the item over in place.
+            if replacing, !engine.pictureInPictureActive { engine.stop() }
             var url = r.url
             if let src = r.p2p {
                 // Spinner stays up while peers are found; initial buffering is the same state as for any slow source.
@@ -527,6 +528,8 @@ struct PlayerScreen: View {
     @State private var volume = SystemVolume()
     @State private var volumeTask: Task<Void, Never>?
     @State private var volumeDragging = false
+    /// Picture in Picture window (native AVPlayer path only; the pill hides the button otherwise).
+    @State private var pip = PiPController()
     @State private var sourceGroups: [(Addon, [StreamItem])] = []
     /// Add-on id the sources panel is narrowed to; nil = all add-ons.
     @State private var sourceFilter: String?
@@ -567,7 +570,8 @@ struct PlayerScreen: View {
         ZStack {
             Color.black.ignoresSafeArea()
             if let engine = model.engine { AetherPlayerSurface(engine: engine).ignoresSafeArea() }
-            SubtitleOverlay(cues: model.activeCues, lift: showControls ? 112 : 0, style: subStyle)
+            if pip.isActive { pipPlaceholder }
+            SubtitleOverlay(cues: pip.isActive ? [] : model.activeCues, lift: showControls ? 112 : 0, style: subStyle)
                 .animation(.easeInOut(duration: 0.2), value: showControls)
             Color.clear.contentShape(Rectangle()).onTapGesture { tapBackground() }
             // Only while the volume pill is open: gives us the system slider and lets the pill replace iOS's own volume HUD.
@@ -597,6 +601,7 @@ struct PlayerScreen: View {
         .task(id: showInfo ? current.id : nil) { if showInfo { await loadInfo() } }
         .task(id: current.item.id) { await loadPausedLogo() }
         .animation(.easeInOut(duration: 0.25), value: pausedDim)
+        .animation(.easeInOut(duration: 0.25), value: pip.isActive)
         .task {
             // Coarse 15 s tick: negligible wakeups, still good resume accuracy. Nothing to record while paused.
             while !Task.isCancelled {
@@ -610,6 +615,17 @@ struct PlayerScreen: View {
             if playing && !scrobbled { scrobbled = true; if libraryPrefs.usesSimkl(simkl) { simkl.scrobble("start", current, progress: 0) } }
             if playing && launching { withAnimation(.easeOut(duration: 0.25)) { launching = false } }
             if playing { scheduleHide() } else { hideTask?.cancel() }
+            // The engine's native layer exists once a session is playing, and may be a new one after a reload or episode switch.
+            if playing { pip.refresh(engine: model.engine) }
+        }
+        // Covers a layer that appears a moment after the first .playing edge (and a pause/resume that follows a reload).
+        .onChange(of: model.showSpinner) { _, spinning in
+            if !spinning { pip.refresh(engine: model.engine) }
+        }
+        // While the video is in the PiP window this screen is only a remote: keep the controls up so the way back is visible.
+        .onChange(of: pip.isActive) { _, active in
+            if active { hideTask?.cancel(); withAnimation(.easeInOut(duration: 0.2)) { showControls = true } }
+            else { scheduleHide() }
         }
         .onChange(of: model.isPaused) { _, paused in
             if paused && !showInfo { withAnimation(.easeInOut(duration: 0.2)) { showControls = true } }
@@ -634,11 +650,13 @@ struct PlayerScreen: View {
             updateIdleTimer()
             volume.startObserving()
             OrientationLock.set(.landscape)          // landscape only, free to flip 180°
+            pip.onFailure = { flash("Picture in Picture isn't available right now") }
         }
         .onDisappear {
             UIApplication.shared.isIdleTimerDisabled = false
             volumeTask?.cancel()
             volume.stopObserving()
+            pip.teardown()
             OrientationLock.set(.portrait)           // back to portrait for the rest of the app
             // Normal exit goes through close(); this covers any other way the screen can go away.
             if !closing { finalizeCurrent(); model.shutdown() }
@@ -731,7 +749,7 @@ struct PlayerScreen: View {
         .buttonStyle(.plain)
     }
 
-    /// Speed, episodes, sources, volume, subtitles, audio track, next: all inside one Liquid Glass pill.
+    /// Speed, episodes, sources, volume, Picture in Picture, subtitles, audio track, next: all inside one Liquid Glass pill.
     /// Tapping the speaker turns the whole pill into a volume slider; the icons stay in the layout (invisible), so the
     /// pill keeps its size, and they fade back in 3 s after the last adjustment.
     private var iconRow: some View {
@@ -741,6 +759,9 @@ struct PlayerScreen: View {
                 if provider != nil { pillButton("list.bullet") { openEpisodes() } }
                 pillButton("rectangle.stack") { openSources() }
                 pillButton(volume.level < 0.001 ? "speaker.slash" : "speaker.wave.2") { toggleVolume() }
+                if pip.isAvailable || pip.isActive {
+                    pillButton(pip.isActive ? "pip.exit" : "pip.enter", active: pip.isActive) { togglePiP() }
+                }
                 if !model.subtitleTracks.isEmpty || OpenSubtitlesClient.shared.enabled {
                     pillButton(model.activeSubtitleID == nil ? "captions.bubble" : "captions.bubble.fill",
                                active: showSubtitles) { toggleSubtitles() }
@@ -779,6 +800,23 @@ struct PlayerScreen: View {
                 .contentShape(Circle())
         }
         .buttonStyle(PressableStyle())
+    }
+
+    private func togglePiP() {
+        hideTask?.cancel()
+        pip.toggle()
+        scheduleHide()
+    }
+
+    /// Shown in place of the video while it plays in the PiP window.
+    private var pipPlaceholder: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "pip").font(.system(size: 36, weight: .regular))
+            Text("Playing in Picture in Picture").font(.headline)
+        }
+        .foregroundStyle(.white.opacity(0.7))
+        .allowsHitTesting(false)
+        .transition(.opacity)
     }
 
     private var nextButton: some View {
@@ -1432,7 +1470,7 @@ struct PlayerScreen: View {
 
     private func scheduleHide() {
         hideTask?.cancel()
-        guard model.isPlaying else { return }
+        guard model.isPlaying, !pip.isActive else { return }
         hideTask = Task {
             try? await Task.sleep(for: .seconds(3.5))
             guard !Task.isCancelled, !model.playhead.scrubbing, !showEpisodes, !showSubtitles, !showSources, !showSpeed, !showVolume, !showInfo else { return }

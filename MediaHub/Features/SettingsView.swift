@@ -18,6 +18,7 @@ struct SettingsView: View {
     @AppStorage("ui.titleLogos") private var titleLogos = true
     @AppStorage("player.glass") private var glass = true
     @AppStorage("player.autoplayNext") private var autoplayNext = true
+    @AppStorage(PiPController.enabledKey) private var pipEnabled = true
     @AppStorage("skip.enabled") private var skipEnabled = true
     @AppStorage("skip.fallbackSeconds") private var fallbackSkip = 85
     @AppStorage(P2PSettings.enabledKey) private var p2pEnabled = false
@@ -132,13 +133,14 @@ struct SettingsView: View {
                     }
                     Toggle("Liquid Glass controls", isOn: $glass)
                     Toggle("Autoplay next episode", isOn: $autoplayNext)
+                    Toggle("Picture in Picture", isOn: $pipEnabled)
                     Toggle("Skip intro / recap / credits", isOn: $skipEnabled)
                     if skipEnabled {
                         Stepper(fallbackSkip == 0 ? "Manual skip button: off" : "Manual skip button: \(fallbackSkip) s",
                                 value: $fallbackSkip, in: 0...180, step: 5)
                     }
                 } header: { Text("Playback") } footer: {
-                    Text("Skip buttons use community timestamps from TheIntroDB. When a show has none, the manual button jumps ahead by the chosen time. Set it to 0 to hide it. Turn Liquid Glass off if playback ever feels heavy on an older device.")
+                    Text("Skip buttons use community timestamps from TheIntroDB. When a show has none, the manual button jumps ahead by the chosen time. Set it to 0 to hide it. Turn Liquid Glass off if playback ever feels heavy on an older device. Turning Picture in Picture off removes its button and stops videos from floating when you leave the app.")
                 }
 
                 Section {

@@ -9,3 +9,6 @@ Next: Player (AVPlayer) -> Simkl PIN login/sync -> MDBList ratings/lists -> TVDB
 Torrentio torrent streams play through an embedded Rust engine (`p2p-core/`, librqbit + UniFFI). Off by default: Settings -> Peer-to-peer.
 - CI builds `Vendor/P2PCore.xcframework` before `xcodegen` (see `.github/workflows/build.yml`). Locally: `cd p2p-core && make xcframework`.
 - Swift side lives in `MediaHub/P2P/`. Engine only exists while a P2P stream is playing; idle/background/memory/network changes tear it down.
+
+## Picture in Picture
+The pill in the player has a PiP button (native AVPlayer path only; hidden for software-decoded AV1 / VP9). Leaving the app while a video plays opens the window automatically. Code: `MediaHub/Features/PlayerPiP.swift`.
