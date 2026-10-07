@@ -35,7 +35,9 @@ actor TMDBClient {
     struct Item: Decodable { let id: Int; let title: String?; let name: String?; let overview: String?
         let posterPath: String?; let backdropPath: String?; let releaseDate: String?; let firstAirDate: String?
         let mediaType: String?; let voteAverage: Double?
-        let genreIds: [Int]? }
+        let genreIds: [Int]?
+        /// Where the title comes from (anime vs. other animation). Movie lists only carry the language.
+        let originalLanguage: String?; let originCountry: [String]? }
     private struct Page: Decodable { let results: [Item] }
     private struct Find: Decodable { let movieResults: [Item]; let tvResults: [Item] }
     private struct External: Decodable { let imdbId: String? }
@@ -147,7 +149,8 @@ actor TMDBClient {
             name: i.title ?? i.name ?? "Untitled",
             poster: i.posterPath.map { Self.img + "w342" + $0 }, background: i.backdropPath.map { Self.img + "w780" + $0 },
             logo: nil, description: i.overview, releaseInfo: (i.releaseDate ?? i.firstAirDate).map { String($0.prefix(4)) },
-            rating: (i.voteAverage ?? 0) > 0 ? i.voteAverage : nil)
+            rating: (i.voteAverage ?? 0) > 0 ? i.voteAverage : nil,
+            genreIDs: i.genreIds, language: i.originalLanguage, countries: i.originCountry)
     }
 
     func trending(_ kind: String, page: Int = 1) async throws -> [MetaPreview] {
@@ -198,6 +201,24 @@ actor TMDBClient {
         guard hasKey, let tid = try? await tmdbID(for: id, type: type) else { return nil }
         let d: Details? = try? await get("/\(kind(type))/\(tid)")
         return d
+    }
+
+    private struct TraitsResponse: Decodable {
+        struct Country: Decodable { let iso31661: String? }
+        let genres: [Genre]?
+        let originalLanguage: String?
+        let originCountry: [String]?
+        let productionCountries: [Country]?
+    }
+
+    /// Genres and origin of one title: a single small request. The content filter uses it for titles that arrive
+    /// without genres (some add-ons) or as plain "Animation" (anime or a cartoon?). Results are cached by the caller.
+    func traits(for id: String, type: String) async -> TitleTraits? {
+        guard hasKey, let tid = try? await tmdbID(for: id, type: type),
+              let r: TraitsResponse = try? await get("/\(kind(type))/\(tid)") else { return nil }
+        let origin = r.originCountry ?? []
+        let countries = origin.isEmpty ? (r.productionCountries ?? []).compactMap(\.iso31661) : origin
+        return TitleTraits(genres: Set((r.genres ?? []).map(\.id)), language: r.originalLanguage, countries: countries)
     }
 
     /// Cached details lookup for quick actions (long-press menus). nil when there is no key or the title fails to resolve.
@@ -254,8 +275,10 @@ actor TMDBClient {
     }
 
     /// Filtered browsing for Explore.
-    func discover(kind: String, genre: Int?, year: Int?, sort: DiscoverSort, page: Int) async throws -> [MetaPreview] {
+    func discover(kind: String, genre: Int?, year: Int?, sort: DiscoverSort, page: Int,
+                  rules: ContentRules = .none) async throws -> [MetaPreview] {
         var q = ["page": String(page), "include_adult": "false"]
+        if let excluded = rules.excludedGenreQuery { q["without_genres"] = excluded }
         let dateField = kind == "tv" ? "first_air_date" : "primary_release_date"
         switch sort {
         case .popular: q["sort_by"] = "popularity.desc"
@@ -293,14 +316,14 @@ actor TMDBClient {
 
     /// Shows and movies tagged with any of the keywords, most popular first, shows and movies interleaved.
     /// Each result carries its genre names for the card caption (discover only returns genre ids).
-    func themed(keywords: [String], limit: Int = 8) async -> [ThemedTitle] {
+    func themed(keywords: [String], limit: Int = 8, rules: ContentRules = .none) async -> [ThemedTitle] {
         guard hasKey else { return [] }
         var ids: [Int] = []
         for q in keywords { if let id = await keywordID(q) { ids.append(id) } }
         guard !ids.isEmpty else { return [] }
         let joined = ids.map(String.init).joined(separator: "|")      // "|" = OR
-        async let tv = themedPage(kind: "tv", keywords: joined)
-        async let mv = themedPage(kind: "movie", keywords: joined)
+        async let tv = themedPage(kind: "tv", keywords: joined, rules: rules)
+        async let mv = themedPage(kind: "movie", keywords: joined, rules: rules)
         let (t, m) = await (tv, mv)
         var out: [ThemedTitle] = []
         var seen = Set<String>()
@@ -312,15 +335,19 @@ actor TMDBClient {
         return Array(out.prefix(limit))
     }
 
-    private func themedPage(kind: String, keywords: String) async -> [ThemedTitle] {
-        guard let p: Page = try? await get("/discover/\(kind)", [
+    private func themedPage(kind: String, keywords: String, rules: ContentRules) async -> [ThemedTitle] {
+        var q: [String: String] = [
             "with_keywords": keywords, "sort_by": "popularity.desc", "include_adult": "false",
             "vote_count.gte": kind == "tv" ? "100" : "200",
-        ]) else { return [] }
+        ]
+        if let excluded = rules.excludedGenreQuery { q["without_genres"] = excluded }
+        guard let p: Page = try? await get("/discover/\(kind)", q) else { return [] }
         let names = Dictionary(await genres(kind).map { ($0.id, $0.name) }, uniquingKeysWith: { a, _ in a })
-        return p.results.filter { $0.posterPath != nil }.map { i in
+        let titles = p.results.filter { $0.posterPath != nil }.map { i in
             ThemedTitle(item: preview(i, kind: kind), genres: Array((i.genreIds ?? []).compactMap { names[$0] }.prefix(2)))
         }
+        // TMDB items always carry their genres and language, so this never needs a lookup.
+        return titles.filter { rules.outcome(for: $0.item) != .hide }
     }
 
     func imdbID(tmdb id: Int, type: String) async -> String? {

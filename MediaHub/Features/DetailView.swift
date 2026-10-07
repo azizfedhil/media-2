@@ -27,6 +27,7 @@ struct DetailView: View {
     @Environment(LocalLibrary.self) private var library
     @Environment(ThemeStore.self) private var theme
     @Environment(DownloadManager.self) private var downloads
+    @Environment(ContentPrefs.self) private var contentPrefs
     @State private var imdbID: String?
     @State private var onWatchlist = false
     @State private var ratings: [MDBListClient.Rating] = []
@@ -128,7 +129,8 @@ struct DetailView: View {
             async let d = try? TMDBClient.shared.details(for: item.id, type: item.type)
             async let s = try? TMDBClient.shared.recommendations(for: item.id, type: item.type)
             details = await d
-            similar = await s ?? []
+            let recommended = await s ?? []
+            similar = await TitleClassifier.shared.filter(recommended, rules: contentPrefs.rules)
         }
         .task {
             guard MDBListClient.shared.hasKey, let imdb = await stremioID() else { return }

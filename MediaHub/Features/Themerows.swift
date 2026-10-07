@@ -43,14 +43,14 @@ enum ThemeCatalog {
     }
 
     /// Loads the rows concurrently and reports after each one lands (in theme order). A theme with too little data is skipped.
-    static func load(count: Int, offset: Int = 0, limit: Int = 8,
+    static func load(count: Int, offset: Int = 0, limit: Int = 8, rules: ContentRules = .none,
                      update: @MainActor @escaping ([ThemeRow]) -> Void) async {
-        guard TMDBClient.shared.hasKey else { await update([]); return }
+        guard TMDBClient.shared.hasKey, !rules.isRowHidden(ContentRules.Builtin.themes) else { await update([]); return }
         var done: [Int: ThemeRow] = [:]
         await withTaskGroup(of: (Int, ThemeRow?).self) { group in
             for (i, t) in today(count: count, offset: offset).enumerated() {
                 group.addTask {
-                    let items = await TMDBClient.shared.themed(keywords: t.keywords, limit: limit)
+                    let items = await TMDBClient.shared.themed(keywords: t.keywords, limit: limit, rules: rules)
                     return (i, items.count >= 3 ? ThemeRow(id: "theme-\(t.title)", title: t.title, items: items) : nil)
                 }
             }

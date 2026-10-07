@@ -12,3 +12,11 @@ Torrentio torrent streams play through an embedded Rust engine (`p2p-core/`, lib
 
 ## Picture in Picture
 The pill in the player has a PiP button (native AVPlayer path only; hidden for software-decoded AV1 / VP9). Leaving the app while a video plays opens the window automatically. Code: `MediaHub/Features/PlayerPiP.swift`.
+
+## Content & catalogues
+Settings -> Content & catalogues. Saved per profile, so a kids' profile can hide what yours doesn't.
+- **Categories:** switch off Anime, Cartoons & animation, Kids & family, Documentaries, Reality TV, Talk & news, Soap operas, Horror or Romance. Hidden titles are removed from Home, Explore, recommendations, themed collections and "See all" pages. Search is unfiltered unless you turn on "Also filter search results". Continue Watching and your library are never filtered.
+- **Rows:** switch off built-in Home rows and individual add-on catalogues (or touch and hold a row title on Home -> Hide this row). Hidden catalogues are skipped before the 12-row cap, so they don't use up slots.
+- **How titles are classified** (`Core/ContentRules.swift`, `Core/TitleClassifier.swift`): TMDB lists already carry genres and original language, and most add-ons list genre names, so most titles are decided with no extra request. Anime = Animation + Japanese origin; Cartoons = any other Animation. Titles that can't be decided (an add-on that lists no genres, or Animation with no origin) cost one small TMDB request each, run six at a time, and the answer is cached on disk forever. Kitsu/MAL/AniList items count as anime from their id alone.
+- **Without a TMDB key** anime and cartoons can't be told apart, so all animation is hidden while either is off. Titles with no genre info at all stay visible.
+- Adding a category: a case in `ContentCategory` plus its TMDB genre ids.

@@ -2,7 +2,8 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 /// Export / import of app settings as a property-list file.
-/// Includes API keys, add-on URLs, appearance, playback, subtitle style, profiles and pinned sources.
+/// Includes API keys, add-on URLs, appearance, playback, subtitle style, profiles, pinned sources and each profile's
+/// content settings (hidden categories and rows).
 /// Optionally includes each profile's watch history and local library.
 /// Not included: the Simkl login (reconnect after importing).
 enum SettingsBackup {
@@ -15,6 +16,9 @@ enum SettingsBackup {
         "skip.enabled", "skip.fallbackSeconds", "sub.lang", "sub.style", "subs.online", "subs.baseURL", "library.collapsed",
         "profiles.list", "profiles.active", "pinned.sources",
     ]
+    /// Per-profile settings (each profile's hidden categories and rows): "content.prefs" plus ".<profile id>" variants.
+    /// Always included, unlike the data below, because they are settings.
+    static let settingsPrefixes = ["content.prefs"]
     /// Per-profile data: "watch.history" and "library.local", plus their ".<profile id>" variants.
     static let dataPrefixes = ["watch.history", "watch.archive", "watch.log", "library.local", "library.prefs"]
 
@@ -56,6 +60,7 @@ enum SettingsBackup {
 
     private static func isAllowed(_ k: String, includeData: Bool) -> Bool {
         if keys.contains(k) { return true }
+        if settingsPrefixes.contains(where: { k == $0 || k.hasPrefix($0 + ".") }) { return true }
         return includeData && dataPrefixes.contains { k == $0 || k.hasPrefix($0 + ".") }
     }
 }

@@ -14,6 +14,11 @@ final class HomeModel {
     var lists: [CatalogRow] = []
     var upNext: [UpNextItem] = []
     var themes: [ThemeRow] = []
+    /// Set once the add-on rows and the TMDB suggestions have each finished loading at least once, so an empty Home
+    /// can tell "still loading" from "your content settings hide everything".
+    private var rowsLoaded = false
+    private var suggestionsLoaded = false
+    var settled: Bool { rowsLoaded && suggestionsLoaded }
 
     /// Next episode for each show whose last episode you finished. Resolved concurrently, order kept.
     func loadUpNext(_ entries: [WatchHistory.Entry]) async {
@@ -30,18 +35,19 @@ final class HomeModel {
     }
 
     /// Two themed collections, different every day.
-    func loadThemes() async {
-        await ThemeCatalog.load(count: 2) { [weak self] rows in self?.themes = rows }
+    func loadThemes(rules: ContentRules) async {
+        await ThemeCatalog.load(count: 2, rules: rules) { [weak self] rows in self?.themes = rows }
     }
 
-    func loadLists(selected: Set<Int>) async {
+    func loadLists(selected: Set<Int>, rules: ContentRules) async {
         guard MDBListClient.shared.hasKey, !selected.isEmpty else { lists = []; return }
         let chosen = await MDBListClient.shared.userLists().filter { selected.contains($0.id) }
         var done: [Int: CatalogRow] = [:]
         await withTaskGroup(of: (Int, CatalogRow?).self) { group in
             for (i, l) in chosen.enumerated() {
                 group.addTask {
-                    let items = await MDBListClient.shared.items(listID: l.id)
+                    let raw = await MDBListClient.shared.items(listID: l.id)
+                    let items = await TitleClassifier.shared.filter(raw, rules: rules)
                     return (i, items.isEmpty ? nil : CatalogRow(id: "mdb-\(l.id)", title: l.name, items: items, symbol: "list.star"))
                 }
             }
@@ -90,34 +96,45 @@ final class HomeModel {
     }
 
     /// TMDB trending + recommendations based on the last thing you watched.
-    func loadSuggestions(last: MetaPreview?) async {
+    func loadSuggestions(last: MetaPreview?, rules: ContentRules) async {
+        defer { suggestionsLoaded = true }
         guard TMDBClient.shared.hasKey else { suggested = []; return }
         async let movies = try? await TMDBClient.shared.trending("movie")
         async let shows = try? await TMDBClient.shared.trending("tv")
         async let because = Self.recommendations(after: last)
-        let (m, t, b) = await (movies, shows, because)
+        let (rawM, rawT, rawB) = await (movies, shows, because)
+        let m = await TitleClassifier.shared.filter(rawM ?? [], rules: rules)
+        let t = await TitleClassifier.shared.filter(rawT ?? [], rules: rules)
+        let b = await TitleClassifier.shared.filter(rawB, rules: rules)
         var out: [CatalogRow] = []
         if let l = last, !b.isEmpty {
-            out.append(CatalogRow(id: "because", title: "Because you watched \(l.name)", items: b, symbol: "sparkles"))
+            out.append(CatalogRow(id: "because", title: "Because you watched \(l.name)", items: b, symbol: "sparkles",
+                                  prefKey: ContentRules.Builtin.because))
         }
-        if let m, !m.isEmpty { out.append(CatalogRow(id: "trend-movie", title: "Trending Movies", items: m, source: .tmdbTrending("movie"), symbol: "flame.fill")) }
-        if let t, !t.isEmpty { out.append(CatalogRow(id: "trend-tv", title: "Trending Shows", items: t, source: .tmdbTrending("tv"), symbol: "flame.fill")) }
+        if !m.isEmpty { out.append(CatalogRow(id: "trend-movie", title: "Trending Movies", items: m, source: .tmdbTrending("movie"), symbol: "flame.fill", prefKey: ContentRules.Builtin.trendingMovies)) }
+        if !t.isEmpty { out.append(CatalogRow(id: "trend-tv", title: "Trending Shows", items: t, source: .tmdbTrending("tv"), symbol: "flame.fill", prefKey: ContentRules.Builtin.trendingShows)) }
         suggested = out
     }
 
-    func load(addons: [Addon]) async {
-        let jobs = addons.flatMap { a in a.homeCatalogs.map { (a, $0) } }.prefix(12)
+    func load(addons: [Addon], rules: ContentRules) async {
+        // Catalogues the user switched off are dropped first, so they don't use up the 12 row slots.
+        let jobs = addons.flatMap { a in
+            a.homeCatalogs.filter { !rules.isRowHidden(ContentRules.rowKey(a, $0)) }.map { (a, $0) }
+        }.prefix(12)
         var done: [Int: CatalogRow] = [:]
         await withTaskGroup(of: (Int, CatalogRow?).self) { group in
             for (i, job) in jobs.enumerated() {
                 group.addTask {
                     let (addon, cat) = job
-                    guard let items = try? await AddonClient.shared.catalog(addon: addon, catalog: cat),
-                          !items.isEmpty else { return (i, nil) }
+                    guard let raw = try? await AddonClient.shared.catalog(addon: addon, catalog: cat),
+                          !raw.isEmpty else { return (i, nil) }
+                    let items = await TitleClassifier.shared.filter(raw, rules: rules)
+                    guard !items.isEmpty else { return (i, nil) }
                     let kind = cat.type == "movie" ? "Movies" : cat.type == "series" ? "Series" : cat.type.capitalized
                     return (i, CatalogRow(id: "\(addon.id)/\(cat.type)/\(cat.id)",
                                           title: "\(cat.name ?? cat.id) \(kind)", items: items,
-                                          source: .addon(addon, cat), symbol: "film.stack"))
+                                          source: .addon(addon, cat), symbol: "film.stack",
+                                          prefKey: ContentRules.rowKey(addon, cat), rawCount: raw.count))
                 }
             }
             // Rows appear as each catalog lands; order stays stable.
@@ -131,6 +148,7 @@ final class HomeModel {
         // catalogs all failed) don't linger. Skipped when superseded by a newer load.
         guard !Task.isCancelled else { return }
         rows = done.keys.sorted().compactMap { done[$0] }
+        rowsLoaded = true
     }
 }
 
@@ -151,6 +169,7 @@ struct HomeView: View {
     @Environment(AddonStore.self) private var store
     @Environment(WatchHistory.self) private var history
     @Environment(ThemeStore.self) private var theme
+    @Environment(ContentPrefs.self) private var contentPrefs
     @Environment(\.scenePhase) private var phase
     @AppStorage("tmdb.key") private var tmdbKey = ""
     @AppStorage("mdblist.key") private var mdbKey = ""
@@ -158,7 +177,16 @@ struct HomeView: View {
     @State private var model = HomeModel()
     /// Colour pulled from the current hero artwork; washes softly behind the first rows.
     @State private var tint: Color?
-    private var addonTaskID: [String] { store.enabledAddons.map { $0.id } + [String(store.revision)] }
+    private var addonTaskID: [String] {
+        store.enabledAddons.map { $0.id } + [String(store.revision), contentPrefs.rules.addonRowKey, contentPrefs.rules.categoryKey]
+    }
+    private var themesHidden: Bool { contentPrefs.rules.isRowHidden(ContentRules.Builtin.themes) }
+    /// Everything on Home is switched off by the user's content settings (and nothing is still loading).
+    private var hidesEverything: Bool {
+        model.rows.isEmpty && model.suggested.isEmpty && model.settled
+            && (contentPrefs.rules.hasFilters || !contentPrefs.rules.hiddenRows.isEmpty)
+    }
+    private func visible(_ rows: [CatalogRow]) -> [CatalogRow] { rows.filter { !contentPrefs.rules.isRowHidden($0.prefKey) } }
     private var heroDeps: Int { model.rows.count + model.suggested.count + model.lists.count + model.upNext.count + model.themes.count }
     private var selectedLists: Set<Int> { Set(mdbLists.split(separator: ",").compactMap { Int($0) }) }
 
@@ -171,11 +199,11 @@ struct HomeView: View {
                     if !history.continueEntries.isEmpty || !model.upNext.isEmpty {
                         ContinueRow(entries: history.continueEntries, upNext: model.upNext)
                     }
-                    if let t = model.themes.first { ThemeCarousel(row: t) }
-                    ForEach(model.suggested) { CatalogRowView(row: $0) }
-                    if model.themes.count > 1 { ThemeCarousel(row: model.themes[1]) }
+                    if !themesHidden, let t = model.themes.first { ThemeCarousel(row: t) }
+                    ForEach(visible(model.suggested)) { CatalogRowView(row: $0) }
+                    if !themesHidden, model.themes.count > 1 { ThemeCarousel(row: model.themes[1]) }
                     ForEach(model.lists) { CatalogRowView(row: $0) }
-                    ForEach(model.rows) { CatalogRowView(row: $0) }
+                    ForEach(visible(model.rows)) { CatalogRowView(row: $0) }
                 }
                 .padding(.bottom, 40)
                 .animation(.smooth(duration: 0.5), value: heroDeps)
@@ -189,14 +217,30 @@ struct HomeView: View {
             .scrollIndicators(.hidden)
             .refreshable { await refresh() }
             .onChange(of: phase) { _, p in if p == .active { model.refreshHeroDay() } }
-            .overlay { if model.rows.isEmpty && model.suggested.isEmpty { ProgressView() } }
+            .overlay {
+                if hidesEverything {
+                    ContentUnavailableView {
+                        Label("Nothing to show", systemImage: "eye.slash")
+                    } description: {
+                        Text("Your content settings are hiding everything here. Change them in Settings → Content & catalogues.")
+                    }
+                } else if model.rows.isEmpty && model.suggested.isEmpty {
+                    ProgressView()
+                }
+            }
             .navigationDestination(for: MetaPreview.self) { DetailView(item: $0) }
             .navigationDestination(for: ResumeTarget.self) { DetailView(item: $0.item, startSeason: $0.season, startEpisode: $0.episode) }
             .navigationDestination(for: CatalogRow.self) { CatalogGridView(row: $0) }
-            .task(id: addonTaskID) { await model.load(addons: store.enabledAddons) }
-            .task(id: tmdbKey) { await model.loadThemes() }
-            .task(id: mdbKey + mdbLists) { await model.loadLists(selected: selectedLists) }
-            .task(id: tmdbKey + (history.lastWatched?.id ?? "")) { await model.loadSuggestions(last: history.lastWatched) }
+            .task(id: addonTaskID) { await model.load(addons: store.enabledAddons, rules: contentPrefs.rules) }
+            .task(id: tmdbKey + "|" + contentPrefs.rules.categoryKey + (themesHidden ? "|off" : "")) {
+                await model.loadThemes(rules: contentPrefs.rules)
+            }
+            .task(id: mdbKey + mdbLists + "|" + contentPrefs.rules.categoryKey) {
+                await model.loadLists(selected: selectedLists, rules: contentPrefs.rules)
+            }
+            .task(id: tmdbKey + (history.lastWatched?.id ?? "") + "|" + contentPrefs.rules.categoryKey) {
+                await model.loadSuggestions(last: history.lastWatched, rules: contentPrefs.rules)
+            }
             .task(id: history.finishedSeries) { await model.loadUpNext(history.finishedEntries) }
         }
     }
@@ -209,11 +253,12 @@ struct HomeView: View {
     }
 
     private func refresh() async {
-        async let a: () = model.load(addons: store.enabledAddons)
-        async let b: () = model.loadSuggestions(last: history.lastWatched)
-        async let c: () = model.loadLists(selected: selectedLists)
+        let rules = contentPrefs.rules
+        async let a: () = model.load(addons: store.enabledAddons, rules: rules)
+        async let b: () = model.loadSuggestions(last: history.lastWatched, rules: rules)
+        async let c: () = model.loadLists(selected: selectedLists, rules: rules)
         async let d: () = model.loadUpNext(history.finishedEntries)
-        async let e: () = model.loadThemes()
+        async let e: () = model.loadThemes(rules: rules)
         _ = await (a, b, c, d, e)
     }
 }
@@ -625,6 +670,7 @@ struct CatalogRowView: View {
                 }
             }
             .buttonStyle(.plain).padding(.horizontal, 16)
+            .modifier(HideRowMenu(key: row.prefKey))
             ScrollView(.horizontal) {
                 LazyHStack(spacing: 12) {
                     ForEach(row.items) { item in
@@ -647,6 +693,25 @@ struct CatalogRowView: View {
             .contentMargins(.horizontal, 16, for: .scrollContent)
             .scrollTargetBehavior(.viewAligned)
             .scrollIndicators(.hidden)
+        }
+    }
+}
+
+/// Long-press a row title: "Hide this row". Only rows that have a stable key (add-on catalogues, trending...) offer it;
+/// Settings -> Content & catalogues brings them back.
+private struct HideRowMenu: ViewModifier {
+    let key: String?
+    @Environment(ContentPrefs.self) private var prefs
+
+    @ViewBuilder func body(content: Content) -> some View {
+        if let key {
+            content.contextMenu {
+                Button("Hide this row", systemImage: "eye.slash") {
+                    withAnimation { prefs.setRowHidden(key, true) }
+                }
+            }
+        } else {
+            content
         }
     }
 }

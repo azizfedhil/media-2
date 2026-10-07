@@ -12,7 +12,7 @@ final class SearchModel {
     func reset() { results = []; isSearching = false; hasSearched = false }
 
     /// Add-ons that declare `search` come first (they carry IMDb ids), then TMDB fills the gaps.
-    func run(_ raw: String, addons: [Addon]) async {
+    func run(_ raw: String, addons: [Addon], rules: ContentRules = .none) async {
         let q = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard q.count >= 2 else { reset(); return }
         isSearching = true
@@ -50,6 +50,9 @@ final class SearchModel {
         }
         for i in jobs.indices { (byIndex[i] ?? []).forEach(add) }
         tmdb.forEach(add)
+        // Only when the user asked for it: a search names exactly what they want, so it is unfiltered by default.
+        if rules.filterSearch { out = await TitleClassifier.shared.filter(out, rules: rules) }
+        guard !Task.isCancelled else { return }
         results = out
         hasSearched = true
         isSearching = false
@@ -58,6 +61,7 @@ final class SearchModel {
 
 struct SearchView: View {
     @Environment(AddonStore.self) private var store
+    @Environment(ContentPrefs.self) private var contentPrefs
     @State private var query = ""
     @State private var scope: Scope = .all
     @State private var model = SearchModel()
@@ -100,11 +104,11 @@ struct SearchView: View {
         .searchScopes($scope) {
             ForEach(Scope.allCases) { Text($0.rawValue).tag($0) }
         }
-        .task(id: query) {
+        .task(id: query + "|" + (contentPrefs.rules.filterSearch ? contentPrefs.rules.categoryKey : "")) {
             // Debounce: only the last keystroke in a 350 ms window hits the network.
             try? await Task.sleep(for: .milliseconds(350))
             guard !Task.isCancelled else { return }
-            await model.run(query, addons: store.enabledAddons)
+            await model.run(query, addons: store.enabledAddons, rules: contentPrefs.rules)
         }
     }
 

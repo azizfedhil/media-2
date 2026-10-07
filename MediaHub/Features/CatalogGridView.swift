@@ -9,11 +9,15 @@ final class GridModel {
     private let source: CatalogSource
     private var tmdbPage = 1
     private var fetched: Int      // raw count served by an add-on so far (its `skip` cursor)
+    /// Everything fetched so far, including what the content filter removed, so a hidden title isn't counted as new.
+    private var seen: Set<String>
 
     init(row: CatalogRow) {
         items = row.items
         source = row.source
-        fetched = row.items.count
+        // The row on Home may already be filtered: the add-on's cursor counts what it served, not what was kept.
+        fetched = row.rawCount ?? row.items.count
+        seen = Set(row.items.map(\.id))
         switch row.source {
         case .none: hasMore = false
         case .tmdbTrending: hasMore = true
@@ -21,30 +25,39 @@ final class GridModel {
         }
     }
 
-    func loadMore() async {
+    func loadMore(rules: ContentRules = .none) async {
         guard hasMore, !isLoading else { return }
         isLoading = true; defer { isLoading = false }
-        var fresh: [MetaPreview] = []
-        switch source {
-        case .none:
-            break
-        case .tmdbTrending(let kind):
-            fresh = (try? await TMDBClient.shared.trending(kind, page: tmdbPage + 1)) ?? []
-            if !fresh.isEmpty { tmdbPage += 1 }
-        case .addon(let addon, let cat):
-            fresh = (try? await AddonClient.shared.catalog(addon: addon, catalog: cat, skip: fetched)) ?? []
-            fetched += fresh.count
+        // A page the content filter empties would add nothing, and the scroll trigger only fires when the item count
+        // changes, so keep fetching (a few pages at most) until something is added.
+        var added = 0, attempts = 0
+        while hasMore, added < 12, attempts < 4 {
+            attempts += 1
+            var fresh: [MetaPreview] = []
+            switch source {
+            case .none:
+                break
+            case .tmdbTrending(let kind):
+                fresh = (try? await TMDBClient.shared.trending(kind, page: tmdbPage + 1)) ?? []
+                if !fresh.isEmpty { tmdbPage += 1 }
+            case .addon(let addon, let cat):
+                fresh = (try? await AddonClient.shared.catalog(addon: addon, catalog: cat, skip: fetched)) ?? []
+                fetched += fresh.count
+            }
+            let new = fresh.filter { !seen.contains($0.id) }
+            seen.formUnion(new.map(\.id))
+            // Stop when a page is empty or adds nothing new (avoids looping on add-ons that ignore `skip`).
+            hasMore = !new.isEmpty
+            let kept = await TitleClassifier.shared.filter(new, rules: rules)
+            items += kept
+            added += kept.count
         }
-        let known = Set(items.map(\.id))
-        let new = fresh.filter { !known.contains($0.id) }
-        items += new
-        // Stop when a page is empty or adds nothing new (avoids looping on add-ons that ignore `skip`).
-        hasMore = !new.isEmpty
     }
 }
 
 struct CatalogGridView: View {
     let row: CatalogRow
+    @Environment(ContentPrefs.self) private var contentPrefs
     @State private var model: GridModel
     @State private var order: Order = .newest
     private let columns = [GridItem(.adaptive(minimum: 104, maximum: 160), spacing: 12, alignment: .top)]
@@ -89,7 +102,7 @@ struct CatalogGridView: View {
                     }
                 }
                 // Reaching the bottom loads the next page; re-fires after each page until the screen is full.
-                Color.clear.frame(height: 1).task(id: model.items.count) { await model.loadMore() }
+                Color.clear.frame(height: 1).task(id: model.items.count) { await model.loadMore(rules: contentPrefs.rules) }
                 if model.isLoading { ProgressView().frame(maxWidth: .infinity).padding(24) }
             }
         }

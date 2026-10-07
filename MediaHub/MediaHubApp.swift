@@ -117,6 +117,7 @@ struct MediaHubApp: App {
     @State private var profiles = ProfileStore()
     @State private var library = LocalLibrary()
     @State private var libraryPrefs = LibraryPrefs()
+    @State private var contentPrefs = ContentPrefs()
     @State private var downloads = DownloadManager.shared
     @State private var connectivity = Connectivity.shared
 
@@ -130,7 +131,7 @@ struct MediaHubApp: App {
             RootView()
                 .environment(store).environment(history).environment(simkl).environment(pins).environment(theme)
                 .environment(profiles).environment(library).environment(watchLog).environment(libraryPrefs)
-                .environment(downloads).environment(connectivity)
+                .environment(contentPrefs).environment(downloads).environment(connectivity)
                 .preferredColorScheme(Theme.forceDark ? .dark : nil)
                 .pearLaunchScreen()
         }
@@ -146,6 +147,7 @@ struct RootView: View {
     @Environment(LocalLibrary.self) private var library
     @Environment(WatchLog.self) private var watchLog
     @Environment(LibraryPrefs.self) private var libraryPrefs
+    @Environment(ContentPrefs.self) private var contentPrefs
     @Environment(AddonStore.self) private var addonStore
     @Environment(PinnedSources.self) private var pinnedSources
     @Environment(DownloadManager.self) private var downloads
@@ -172,6 +174,7 @@ struct RootView: View {
             library.load(profile: id)
             watchLog.load(profile: id)
             libraryPrefs.load(profile: id)
+            contentPrefs.load(profile: id)
         }
         .sensoryFeedback(.selection, trigger: profiles.activeID)
         .task { await refreshLibrary() }

@@ -9,6 +9,7 @@ struct SettingsView: View {
     @Environment(WatchHistory.self) private var history
     @Environment(LocalLibrary.self) private var library
     @Environment(LibraryPrefs.self) private var libraryPrefs
+    @Environment(ContentPrefs.self) private var contentPrefs
     @Environment(WatchLog.self) private var watchLog
     @Environment(PinnedSources.self) private var pins
     @AppStorage("tmdb.key") private var tmdbKey = ""
@@ -41,6 +42,11 @@ struct SettingsView: View {
         return on == store.addons.count ? "\(on) installed" : "\(on) of \(store.addons.count) on"
     }
 
+    private var contentSummary: String {
+        let n = contentPrefs.rules.hiddenCategories.count + contentPrefs.rules.hiddenRows.count
+        return n == 0 ? "Everything shown" : "\(n) hidden"
+    }
+
     var body: some View {
         NavigationStack {
             Form {
@@ -66,6 +72,18 @@ struct SettingsView: View {
                     }
                 } footer: {
                     Text("Add, reorder, switch off and configure your Stremio add-ons.")
+                }
+
+                Section {
+                    NavigationLink { ContentSettingsView() } label: {
+                        HStack {
+                            Label("Content & catalogues", systemImage: "line.3.horizontal.decrease.circle.fill")
+                            Spacer()
+                            Text(contentSummary).font(.footnote).foregroundStyle(.secondary)
+                        }
+                    }
+                } header: { Text("Content · \(profiles.active.name)") } footer: {
+                    Text("Hide anime, cartoons and other kinds of titles, or switch off individual Home rows. Chosen per profile.")
                 }
 
                 Section {
@@ -203,6 +221,7 @@ struct SettingsView: View {
         do {
             let n = try SettingsBackup.restore(try Data(contentsOf: url))
             theme.reload(); profiles.reload(); history.reload(); library.reload(); watchLog.reload(); pins.reload(); libraryPrefs.reload()
+            contentPrefs.reload()
             Task { await store.reloadFromDefaults() }
             backupNote = "Imported \(n) settings."
         } catch {

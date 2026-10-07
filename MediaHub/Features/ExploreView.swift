@@ -11,6 +11,7 @@ final class ExploreModel {
     private(set) var isLoading = false
     private(set) var hasMore = true
     private(set) var themes: [ThemeRow] = []
+    private(set) var rules = ContentRules.none
     private var page = 0
     private var generation = 0
 
@@ -31,9 +32,20 @@ final class ExploreModel {
     func setSort(_ s: DiscoverSort) async { guard s != sort else { return }; sort = s; await reload() }
     func clearFilters() async { genre = nil; year = nil; sort = .popular; await reload() }
 
+    /// Genre chips, minus the ones that could only lead to hidden titles.
+    var visibleGenres: [TMDBClient.Genre] { genres.filter { !rules.hidesGenre($0.id) } }
+
+    /// Applies the user's content rules. Reloads when the hidden categories changed, or when nothing has loaded yet.
+    func use(_ new: ContentRules) async {
+        let changed = new.categoryKey != rules.categoryKey
+        rules = new
+        if let g = genre, new.hidesGenre(g) { genre = nil }
+        if changed || items.isEmpty { await reload() }
+    }
+
     /// Three themed rows (the ones after Home's), shown above the grid while no filter is active.
-    func loadThemes() async {
-        await ThemeCatalog.load(count: 3, offset: 2, limit: 16) { [weak self] rows in self?.themes = rows }
+    func loadThemes(rules: ContentRules) async {
+        await ThemeCatalog.load(count: 3, offset: 2, limit: 16, rules: rules) { [weak self] rows in self?.themes = rows }
     }
     /// Movies tab shows movie rows, Shows tab shows series rows.
     var themeRows: [ThemeRow] { themes.compactMap { $0.filtered(type: kind == "tv" ? "series" : "movie") } }
@@ -55,20 +67,31 @@ final class ExploreModel {
         let gen = generation
         isLoading = true
         defer { if gen == generation { isLoading = false } }
-        let next = page + 1
-        let fresh: [MetaPreview]
-        if isTrending { fresh = (try? await TMDBClient.shared.trending(kind, page: next)) ?? [] }
-        else { fresh = (try? await TMDBClient.shared.discover(kind: kind, genre: genre, year: year, sort: sort, page: next)) ?? [] }
-        guard gen == generation else { return }          // filters changed while this page was loading
-        page = next
-        let known = Set(items.map(\.id))
-        items += fresh.filter { !known.contains($0.id) }
-        hasMore = !fresh.isEmpty && page < 40
+        // A page the content filter empties would add nothing, and the scroll trigger only fires when the item count
+        // changes, so keep fetching (a few pages at most) until something is added.
+        var added = 0, attempts = 0
+        while added < 12, attempts < 4, hasMore {
+            attempts += 1
+            let next = page + 1
+            let raw: [MetaPreview]
+            if isTrending { raw = (try? await TMDBClient.shared.trending(kind, page: next)) ?? [] }
+            else { raw = (try? await TMDBClient.shared.discover(kind: kind, genre: genre, year: year, sort: sort, page: next, rules: rules)) ?? [] }
+            guard gen == generation else { return }          // filters changed while this page was loading
+            page = next
+            hasMore = !raw.isEmpty && page < 40
+            let kept = await TitleClassifier.shared.filter(raw, rules: rules)
+            guard gen == generation else { return }
+            let known = Set(items.map(\.id))
+            let fresh = kept.filter { !known.contains($0.id) }
+            items += fresh
+            added += fresh.count
+        }
     }
 }
 
 struct ExploreView: View {
     @Environment(ThemeStore.self) private var theme
+    @Environment(ContentPrefs.self) private var contentPrefs
     @State private var model = ExploreModel()
     @AppStorage("tmdb.key") private var tmdbKey = ""
     private let columns = [GridItem(.adaptive(minimum: 104, maximum: 160), spacing: 12, alignment: .top)]
@@ -89,11 +112,12 @@ struct ExploreView: View {
             .profileToolbar()
             .navigationDestination(for: MetaPreview.self) { DetailView(item: $0) }
         }
-        .task(id: tmdbKey) {
+        .task(id: tmdbKey + "|" + contentPrefs.rules.categoryKey + (contentPrefs.rules.isRowHidden(ContentRules.Builtin.themes) ? "|off" : "")) {
             guard !tmdbKey.isEmpty else { return }
+            let rules = contentPrefs.rules
             async let g: () = model.loadGenres()
-            async let t: () = model.loadThemes()
-            if model.items.isEmpty { await model.reload() }
+            async let t: () = model.loadThemes(rules: rules)
+            await model.use(rules)
             _ = await (g, t)
         }
     }
@@ -132,7 +156,7 @@ struct ExploreView: View {
         }
         .scrollIndicators(.hidden)
         .refreshable {
-            async let t: () = model.loadThemes()
+            async let t: () = model.loadThemes(rules: contentPrefs.rules)
             await model.reload()
             await t
         }
@@ -161,7 +185,7 @@ struct ExploreView: View {
             ScrollView(.horizontal) {
                 HStack(spacing: 8) {
                     chip("All genres", on: model.genre == nil) { Task { await model.setGenre(nil) } }
-                    ForEach(model.genres) { g in
+                    ForEach(model.visibleGenres) { g in
                         chip(g.name, on: model.genre == g.id) { Task { await model.setGenre(g.id) } }
                     }
                 }

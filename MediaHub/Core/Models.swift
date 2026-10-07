@@ -117,6 +117,12 @@ struct MetaPreview: Identifiable, Sendable, Hashable {
     let releaseInfo: String?
     /// 0-10. IMDb rating for add-on items (`imdbRating`), TMDB vote average for TMDB items.
     var rating: Double? = nil
+    /// What the title is, for the content filter (see `ContentRules`). TMDB genre ids: straight from TMDB, or mapped
+    /// from the genre names an add-on lists. nil = the source didn't say.
+    var genreIDs: [Int]? = nil
+    /// Original language / countries of origin (TMDB items). Tells anime from other animation.
+    var language: String? = nil
+    var countries: [String]? = nil
 
     var posterURL: URL? { poster.flatMap(URL.init(string:)) ?? metahub("poster") }
     var backdropURL: URL? {
@@ -151,6 +157,8 @@ struct MetaPreview: Identifiable, Sendable, Hashable {
 extension MetaPreview: Codable {
     private enum K: String, CodingKey {
         case id, type, name, poster, background, logo, description, releaseInfo, rating, imdbRating
+        // Add-ons send `genres` (older ones `genre`). The rest are this app's own, written when a title is saved.
+        case genres, genre, tmdbGenres, lang, countries
     }
 
     init(from decoder: Decoder) throws {
@@ -167,6 +175,21 @@ extension MetaPreview: Codable {
         else { releaseInfo = nil }
         let r = Self.number(c, .rating) ?? Self.number(c, .imdbRating)
         rating = (r ?? 0) > 0 ? r : nil
+        if let saved = try? c.decodeIfPresent([Int].self, forKey: .tmdbGenres) { genreIDs = saved }
+        else { genreIDs = Self.mappedGenres(c) }
+        language = try? c.decodeIfPresent(String.self, forKey: .lang)
+        countries = try? c.decodeIfPresent([String].self, forKey: .countries)
+    }
+
+    /// Only the genres the content filter cares about are kept, as TMDB ids. nil when the add-on listed none:
+    /// an empty list usually means "unknown", not "has no genre".
+    private static func mappedGenres(_ c: KeyedDecodingContainer<K>) -> [Int]? {
+        let list = try? c.decodeIfPresent([String].self, forKey: .genres)
+        let older = try? c.decodeIfPresent([String].self, forKey: .genre)
+        let single = try? c.decodeIfPresent(String.self, forKey: .genre)
+        let names: [String]? = list ?? older ?? single.map { [$0] }
+        guard let names, !names.isEmpty else { return nil }
+        return GenreNames.ids(from: names)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -180,6 +203,9 @@ extension MetaPreview: Codable {
         try c.encodeIfPresent(description, forKey: .description)
         try c.encodeIfPresent(releaseInfo, forKey: .releaseInfo)
         try c.encodeIfPresent(rating, forKey: .rating)
+        try c.encodeIfPresent(genreIDs, forKey: .tmdbGenres)
+        try c.encodeIfPresent(language, forKey: .lang)
+        try c.encodeIfPresent(countries, forKey: .countries)
     }
 
     private static func number(_ c: KeyedDecodingContainer<K>, _ k: K) -> Double? {
@@ -239,6 +265,10 @@ struct CatalogRow: Identifiable, Sendable, Hashable {
     var source: CatalogSource = .none
     /// SF Symbol shown next to the row title on Home.
     var symbol: String? = nil
+    /// Stable id the user's "hide this row" choice is stored under (see `ContentRules.rowKey`). nil = can't be hidden.
+    var prefKey: String? = nil
+    /// How many titles the source served before the content filter removed some. Its `skip` cursor for "See all".
+    var rawCount: Int? = nil
 
     // Identity only: rows are navigation values, not data to compare.
     static func == (a: CatalogRow, b: CatalogRow) -> Bool { a.id == b.id }
