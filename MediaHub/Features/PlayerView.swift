@@ -518,7 +518,7 @@ struct PlayerScreen: View {
     /// Pill buttons that stay visible while it is folded (Settings → Playback → Player controls).
     @AppStorage(PillItem.storageKey) private var pillPinned = PillItem.defaultRaw
     @AppStorage(PillItem.orderKey) private var pillOrder = PillItem.defaultOrderRaw
-    @AppStorage("skip.fallbackSeconds") private var fallbackSkip = 85
+    @AppStorage("skip.fallbackSeconds") private var fallbackSkip = 0     // 0 = manual skip button off
     @State private var current: PlayRequest
     @State private var model = PlayerModel()
     @State private var showControls = true

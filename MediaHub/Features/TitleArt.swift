@@ -9,6 +9,8 @@ struct TitleArt: View {
     var font: Font = .largeTitle.bold()
     var alignment: Alignment = .leading
     @State private var image: UIImage?
+    /// Title the shown logo belongs to, so a new logo for the same title replaces it without a flash of plain text.
+    @State private var shownID: String?
 
     var body: some View {
         ZStack(alignment: alignment) {
@@ -28,12 +30,14 @@ struct TitleArt: View {
         }
         .frame(maxWidth: .infinity, alignment: alignment)
         .animation(.easeOut(duration: 0.3), value: image == nil)
-        .task(id: item.id) {
-            image = nil
+        // Also re-runs when the same title comes back with another logo (enriched by an add-on).
+        .task(id: item.id + "|" + (item.logo ?? "")) {
+            if shownID != item.id { image = nil }
             guard let url = await LogoResolver.shared.logo(for: item) else { return }
             let img = await ImagePipeline.shared.image(for: url, maxPixel: 900)
             guard !Task.isCancelled else { return }
             image = img
+            shownID = item.id
         }
     }
 }

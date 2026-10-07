@@ -76,6 +76,51 @@ actor AddonClient {
         return try MetaPreview.decodeList(try await data(url))
     }
 
+    // MARK: Metadata extras (theme rows)
+
+    /// The two things Home's theme rows take from an add-on's `meta` response.
+    struct MetaExtras: Sendable {
+        let genres: [String]
+        let logo: URL?
+        static let empty = MetaExtras(genres: [], logo: nil)
+    }
+
+    private struct MetaEnvelope: Decodable {
+        struct Meta: Decodable {
+            let genres: [String]
+            let logo: String?
+            private enum K: String, CodingKey { case genres, logo }
+            // Tolerant like the rest of the add-on models: one odd field must not lose the other.
+            init(from decoder: Decoder) throws {
+                let c = try decoder.container(keyedBy: K.self)
+                genres = (try? c.decodeIfPresent([String].self, forKey: .genres)) ?? []
+                logo = try? c.decodeIfPresent(String.self, forKey: .logo)
+            }
+        }
+        let meta: Meta
+    }
+
+    /// Answers kept for this launch: a title is asked about once however often Home reloads. Failures and timeouts
+    /// are not kept, so a flaky moment doesn't blank a title until the next launch.
+    private var metaCache: [String: MetaExtras] = [:]
+
+    /// Genres and logo for one title from `addon`'s `meta` resource (`.empty` when it has none, doesn't serve this id,
+    /// or doesn't answer within the stream deadline).
+    func metaExtras(addon: Addon, type: String, id: String) async -> MetaExtras {
+        let key = addon.id + "|" + type + "|" + id
+        if let hit = metaCache[key] { return hit }
+        guard addon.provides("meta", type: type, id: id) else { metaCache[key] = .empty; return .empty }
+        guard let url = URL(string: addon.baseURL.absoluteString + "meta/\(type)/\(id).json"),
+              let data = try? await streamData(url), !Task.isCancelled else { return .empty }
+        guard let decoded = try? JSONDecoder().decode(MetaEnvelope.self, from: data) else {
+            metaCache[key] = .empty
+            return .empty
+        }
+        let out = MetaExtras(genres: decoded.meta.genres, logo: decoded.meta.logo.flatMap { URL(string: $0) })
+        metaCache[key] = out
+        return out
+    }
+
     /// Fans out only to add-ons that declare the `stream` resource for this type/id, and yields each add-on's
     /// result the moment it answers (completion order; use `ordered(_:by:)` to restore the user's add-on order).
     /// Add-ons that fail or time out are simply skipped. Cancelling the consumer cancels the lookups.

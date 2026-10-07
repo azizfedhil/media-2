@@ -316,14 +316,16 @@ actor TMDBClient {
 
     /// Shows and movies tagged with any of the keywords, most popular first, shows and movies interleaved.
     /// Each result carries its genre names for the card caption (discover only returns genre ids).
-    func themed(keywords: [String], limit: Int = 8, rules: ContentRules = .none) async -> [ThemedTitle] {
+    /// `language` (ISO 639-1 original language) narrows the match; with no keywords at all it is the whole theme.
+    func themed(keywords: [String], language: String? = nil, limit: Int = 8, rules: ContentRules = .none) async -> [ThemedTitle] {
         guard hasKey else { return [] }
         var ids: [Int] = []
         for q in keywords { if let id = await keywordID(q) { ids.append(id) } }
-        guard !ids.isEmpty else { return [] }
+        // Keywords that TMDB doesn't know would otherwise widen the theme to "everything": skip it instead.
+        guard !ids.isEmpty || (keywords.isEmpty && language != nil) else { return [] }
         let joined = ids.map(String.init).joined(separator: "|")      // "|" = OR
-        async let tv = themedPage(kind: "tv", keywords: joined, rules: rules)
-        async let mv = themedPage(kind: "movie", keywords: joined, rules: rules)
+        async let tv = themedPage(kind: "tv", keywords: joined, language: language, rules: rules)
+        async let mv = themedPage(kind: "movie", keywords: joined, language: language, rules: rules)
         let (t, m) = await (tv, mv)
         var out: [ThemedTitle] = []
         var seen = Set<String>()
@@ -335,11 +337,13 @@ actor TMDBClient {
         return Array(out.prefix(limit))
     }
 
-    private func themedPage(kind: String, keywords: String, rules: ContentRules) async -> [ThemedTitle] {
+    private func themedPage(kind: String, keywords: String, language: String?, rules: ContentRules) async -> [ThemedTitle] {
         var q: [String: String] = [
-            "with_keywords": keywords, "sort_by": "popularity.desc", "include_adult": "false",
+            "sort_by": "popularity.desc", "include_adult": "false",
             "vote_count.gte": kind == "tv" ? "100" : "200",
         ]
+        if !keywords.isEmpty { q["with_keywords"] = keywords }
+        if let language { q["with_original_language"] = language }
         if let excluded = rules.excludedGenreQuery { q["without_genres"] = excluded }
         guard let p: Page = try? await get("/discover/\(kind)", q) else { return [] }
         let names = Dictionary(await genres(kind).map { ($0.id, $0.name) }, uniquingKeysWith: { a, _ in a })

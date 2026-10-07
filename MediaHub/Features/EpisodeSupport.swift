@@ -10,6 +10,25 @@ struct EpisodeItem: Identifiable {
     var airDate: String?        // yyyy-MM-dd, when known
 }
 
+extension EpisodeItem {
+    private static let isoDay: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.dateFormat = "yyyy-MM-dd"; return f
+    }()
+
+    /// The air date is known and still ahead of today (local calendar day). Unknown dates count as aired, same as
+    /// `UpNext` and `Downloads`, so a show whose source gives no dates never looks unreleased.
+    var isUpcoming: Bool {
+        guard let d = airDate, !d.isEmpty else { return false }
+        return d > Self.isoDay.string(from: .now)
+    }
+
+    /// "Oct 14, 2026" for an episode that hasn't aired yet; nil once it has (or when the date is unknown).
+    var airsOn: String? {
+        guard isUpcoming, let d = airDate, let date = Self.isoDay.date(from: d) else { return nil }
+        return date.formatted(.dateTime.month(.abbreviated).day().year())
+    }
+}
+
 struct NextEpisode {
     let season: Int
     let episode: EpisodeItem
@@ -45,7 +64,7 @@ enum EpisodeLoader {
             if list.isEmpty {
                 list = tv.compactMap { e in
                     e.number.map { EpisodeItem(id: $0, name: e.name ?? "Episode \($0)", overview: e.overview,
-                                               image: e.imageURL, rating: nil, runtime: e.runtime) }
+                                               image: e.imageURL, rating: nil, runtime: e.runtime, airDate: e.aired) }
                 }
             } else {
                 for i in list.indices where list[i].image == nil {

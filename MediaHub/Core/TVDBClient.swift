@@ -12,6 +12,8 @@ actor TVDBClient {
     struct Episode: Decodable, Identifiable, Sendable {
         let id: Int; let name: String?; let overview: String?; let image: String?
         let number: Int?; let seasonNumber: Int?; let runtime: Int?
+        /// "2024-05-01". Lets the episode list tell what hasn't aired yet when TVDB stands in for TMDB.
+        let aired: String?
         var imageURL: URL? { image.flatMap { TVDBClient.absolute($0) } }
     }
     private struct Envelope<T: Decodable>: Decodable { let data: T }

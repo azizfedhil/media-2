@@ -43,12 +43,17 @@ final class ExploreModel {
         if changed || items.isEmpty { await reload() }
     }
 
-    /// Three themed rows (the ones after Home's), shown above the grid while no filter is active.
-    func loadThemes(rules: ContentRules) async {
-        await ThemeCatalog.load(count: 3, offset: 2, limit: 16, rules: rules) { [weak self] rows in self?.themes = rows }
+    /// Themed rows (the ones after Home's candidates), shown above the grid while no filter is active. One more theme
+    /// than shown is loaded, because the Movies / Shows tabs each drop a theme that is mostly the other kind.
+    func loadThemes(rules: ContentRules, enrichWith addon: Addon?) async {
+        await ThemeCatalog.load(count: ThemeCatalog.exploreCandidates, offset: ThemeCatalog.homeCandidates, limit: 16,
+                                rules: rules, enrichWith: addon) { [weak self] rows in self?.themes = rows }
     }
     /// Movies tab shows movie rows, Shows tab shows series rows.
-    var themeRows: [ThemeRow] { themes.compactMap { $0.filtered(type: kind == "tv" ? "series" : "movie") } }
+    var themeRows: [ThemeRow] {
+        let type = kind == "tv" ? "series" : "movie"
+        return Array(themes.compactMap { $0.filtered(type: type) }.prefix(ThemeCatalog.exploreRows))
+    }
 
     func loadGenres() async {
         let k = kind
@@ -92,6 +97,7 @@ final class ExploreModel {
 struct ExploreView: View {
     @Environment(ThemeStore.self) private var theme
     @Environment(ContentPrefs.self) private var contentPrefs
+    @Environment(AddonStore.self) private var store
     @State private var model = ExploreModel()
     @AppStorage("tmdb.key") private var tmdbKey = ""
     private let columns = [GridItem(.adaptive(minimum: 104, maximum: 160), spacing: 12, alignment: .top)]
@@ -112,14 +118,22 @@ struct ExploreView: View {
             .profileToolbar()
             .navigationDestination(for: MetaPreview.self) { DetailView(item: $0) }
         }
-        .task(id: tmdbKey + "|" + contentPrefs.rules.categoryKey + (contentPrefs.rules.isRowHidden(ContentRules.Builtin.themes) ? "|off" : "")) {
+        .task(id: themesTaskID) {
             guard !tmdbKey.isEmpty else { return }
             let rules = contentPrefs.rules
             async let g: () = model.loadGenres()
-            async let t: () = model.loadThemes(rules: rules)
+            async let t: () = model.loadThemes(rules: rules, enrichWith: store.enrichmentAddon)
             await model.use(rules)
             _ = await (g, t)
         }
+    }
+
+    /// Reloads when the key, the content filter, the themes switch or the enrichment add-on changes. Built as typed
+    /// Strings: a long `+` chain in the modifier list can make the compiler give up.
+    private var themesTaskID: String {
+        let off: String = contentPrefs.rules.isRowHidden(ContentRules.Builtin.themes) ? "|off" : ""
+        let aio: String = store.enrichmentAddon?.id ?? ""
+        return tmdbKey + "|" + contentPrefs.rules.categoryKey + off + "|" + aio
     }
 
     private var content: some View {
@@ -156,7 +170,7 @@ struct ExploreView: View {
         }
         .scrollIndicators(.hidden)
         .refreshable {
-            async let t: () = model.loadThemes(rules: contentPrefs.rules)
+            async let t: () = model.loadThemes(rules: contentPrefs.rules, enrichWith: store.enrichmentAddon)
             await model.reload()
             await t
         }

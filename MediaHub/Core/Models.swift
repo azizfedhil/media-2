@@ -150,6 +150,12 @@ struct MetaPreview: Identifiable, Sendable, Hashable {
     var ratingLabel: String { id.hasPrefix("tmdb:") ? "TMDB" : "IMDb" }
     var typeLabel: String { type == "series" ? "Series" : "Movie" }
     func with(rating r: Double?) -> MetaPreview { var c = self; c.rating = r; return c }
+    /// Same title with another logo URL (everything else untouched).
+    func with(logo l: String?) -> MetaPreview {
+        MetaPreview(id: id, type: type, name: name, poster: poster, background: background, logo: l,
+                    description: description, releaseInfo: releaseInfo, rating: rating,
+                    genreIDs: genreIDs, language: language, countries: countries)
+    }
 
     /// Bigger artwork for full-width hero cards (the list sizes are tuned for small posters).
     func heroURL(wide: Bool) -> URL? {

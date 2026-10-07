@@ -59,13 +59,13 @@ struct CatalogGridView: View {
     let row: CatalogRow
     @Environment(ContentPrefs.self) private var contentPrefs
     @State private var model: GridModel
-    @State private var order: Order = .newest
+    @State private var order: Order = .original
     private let columns = [GridItem(.adaptive(minimum: 104, maximum: 160), spacing: 12, alignment: .top)]
 
     enum Order: String, CaseIterable, Identifiable {
+        case original = "Original order"
         case newest = "Newest first"
         case oldest = "Oldest first"
-        case original = "Original order"
         var id: String { rawValue }
     }
 

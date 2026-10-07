@@ -19,6 +19,9 @@ struct EpisodeCard<Actions: View>: View {
     static var height: CGFloat { 292 }
     private let radius: CGFloat = 22
 
+    /// Not aired yet: the artwork is greyed out and the card says when it comes out.
+    private var upcoming: Bool { ep.isUpcoming }
+
     private var runtime: String? {
         guard let m = ep.runtime, m > 0 else { return nil }
         return m >= 60 ? (m % 60 == 0 ? "\(m / 60)h" : "\(m / 60)h \(m % 60)m") : "\(m)m"
@@ -30,6 +33,9 @@ struct EpisodeCard<Actions: View>: View {
             if let tint { tint.opacity(0.3).transition(.opacity) }
             // Still across the top ~60%, dissolving into the panel instead of ending at an edge.
             StillImage(url: ep.image, size: Self.height * 0.62 * 16 / 9)
+                // Only the artwork fades: the panel stays dark so the white text keeps its contrast.
+                .saturation(upcoming ? 0.1 : 1)
+                .opacity(upcoming ? 0.5 : 1)
                 .frame(width: Self.width, height: Self.height * 0.62)
                 .mask {
                     LinearGradient(stops: [.init(color: .black, location: 0), .init(color: .black, location: 0.5),
@@ -79,12 +85,20 @@ struct EpisodeCard<Actions: View>: View {
             Text("EPISODE \(ep.id)").font(.system(size: 12, weight: .semibold)).tracking(0.8)
                 .foregroundStyle(.white.opacity(0.65))
             Text(ep.name).font(.system(size: 18, weight: .bold)).lineLimit(1)
+                .opacity(upcoming ? 0.7 : 1)
             if let o = ep.overview, !o.isEmpty {
-                Text(o).font(.system(size: 13)).foregroundStyle(.white.opacity(0.7)).lineLimit(3)
+                Text(o).font(.system(size: 13)).foregroundStyle(.white.opacity(upcoming ? 0.5 : 0.7)).lineLimit(3)
                     .multilineTextAlignment(.leading)
             }
-            Text(runtime ?? " ").font(.system(size: 14, weight: .medium)).foregroundStyle(.white.opacity(0.85))
-                .padding(.top, 6)
+            Group {
+                if let airs = ep.airsOn {
+                    Label("Airs on \(airs)", systemImage: "calendar")
+                        .font(.system(size: 14, weight: .semibold)).foregroundStyle(.white.opacity(0.9))
+                } else {
+                    Text(runtime ?? " ").font(.system(size: 14, weight: .medium)).foregroundStyle(.white.opacity(0.85))
+                }
+            }
+            .padding(.top, 6)
         }
         .foregroundStyle(.white)
         .padding(.horizontal, 16).padding(.bottom, 14)

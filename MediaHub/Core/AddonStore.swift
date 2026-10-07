@@ -46,6 +46,12 @@ final class AddonStore {
     /// AIOMetadata) instead of all showing by default.
     func usesCatalogPicker(_ addon: Addon) -> Bool { addon.isAIOMetadata || pickerIDs.contains(addon.id) }
 
+    /// The add-on Home's theme rows are enriched with: a switched-on AIOMetadata (or one marked as such by hand) that
+    /// serves `meta`. nil when there isn't one, and the rows just use TMDB.
+    var enrichmentAddon: Addon? {
+        enabledAddons.first { usesCatalogPicker($0) && ($0.manifest.resources?.contains { $0.name == "meta" } ?? false) }
+    }
+
     /// Treats an add-on like AIOMetadata even though it doesn't say so by name (a self-hosted copy).
     func setCatalogPicker(_ addon: Addon, _ on: Bool) {
         if on { pickerIDs.insert(addon.id) } else { pickerIDs.remove(addon.id) }

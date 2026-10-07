@@ -19,8 +19,22 @@ actor LogoResolver {
         }
     }
 
+    /// Logos an enrichment source (the AIOMetadata add-on, on Home's theme rows) vouched for this launch. They win over
+    /// TMDB / TVDB for that title, but are never saved: remove the add-on and the usual logos are back immediately.
+    private var preferred: [String: URL] = [:]
+
+    /// Remembers `url` as the logo to use for `id`, if it really loads. Returns whether it was accepted.
+    func prefer(_ url: URL, for id: String) async -> Bool {
+        guard enabled else { return false }
+        if preferred[id] == url { return true }
+        guard await exists(url) else { return false }
+        preferred[id] = url
+        return true
+    }
+
     func logo(for item: MetaPreview) async -> URL? {
         guard enabled else { return nil }
+        if let url = preferred[item.id] { return url }
         if let hit = cache[item.id] { return hit }
         if misses.contains(item.id) { return nil }
         if let running = inflight[item.id] { return await running.value }

@@ -34,9 +34,10 @@ final class HomeModel {
         }
     }
 
-    /// Two themed collections, different every day.
-    func loadThemes(rules: ContentRules) async {
-        await ThemeCatalog.load(count: 2, rules: rules) { [weak self] rows in self?.themes = rows }
+    /// Five themed collections, different every day. One spare theme is loaded in case another has too little data.
+    func loadThemes(rules: ContentRules, enrichWith addon: Addon?) async {
+        await ThemeCatalog.load(count: ThemeCatalog.homeCandidates, show: ThemeCatalog.homeRows, rules: rules,
+                                enrichWith: addon) { [weak self] rows in self?.themes = rows }
     }
 
     func loadLists(selected: Set<Int>, rules: ContentRules) async {
@@ -220,7 +221,7 @@ struct HomeView: View {
                 .navigationDestination(for: ResumeTarget.self) { DetailView(item: $0.item, startSeason: $0.season, startEpisode: $0.episode) }
                 .navigationDestination(for: CatalogRow.self) { CatalogGridView(row: $0) }
                 .task(id: addonTaskID) { await model.load(addons: store.enabledAddons, rules: contentPrefs.rules, pickers: store.pickerIDs) }
-                .task(id: themesTaskID) { await model.loadThemes(rules: contentPrefs.rules) }
+                .task(id: themesTaskID) { await model.loadThemes(rules: contentPrefs.rules, enrichWith: store.enrichmentAddon) }
                 .task(id: listsTaskID) { await model.loadLists(selected: selectedLists, rules: contentPrefs.rules) }
                 .task(id: suggestionsTaskID) { await model.loadSuggestions(last: history.lastWatched, rules: contentPrefs.rules) }
                 .task(id: history.finishedSeries) { await model.loadUpNext(history.finishedEntries) }
@@ -231,7 +232,8 @@ struct HomeView: View {
     // modifier list make the compiler give up ("unable to type-check this expression in reasonable time").
     private var themesTaskID: String {
         let off: String = themesHidden ? "|off" : ""
-        return tmdbKey + "|" + contentPrefs.rules.categoryKey + off
+        let aio: String = store.enrichmentAddon?.id ?? ""
+        return tmdbKey + "|" + contentPrefs.rules.categoryKey + off + "|" + aio
     }
     private var listsTaskID: String {
         return mdbKey + mdbLists + "|" + contentPrefs.rules.categoryKey
@@ -267,12 +269,33 @@ struct HomeView: View {
             if !history.continueEntries.isEmpty || !model.upNext.isEmpty {
                 ContinueRow(entries: history.continueEntries, upNext: model.upNext)
             }
-            if !themesHidden, let t = model.themes.first { ThemeCarousel(row: t) }
+            if let t = themeRow(0) { ThemeCarousel(row: t) }
             ForEach(visible(model.suggested)) { CatalogRowView(row: $0) }
-            if !themesHidden, model.themes.count > 1 { ThemeCarousel(row: model.themes[1]) }
+            if let t = themeRow(1) { ThemeCarousel(row: t) }
             ForEach(model.lists) { CatalogRowView(row: $0) }
-            ForEach(visible(model.rows)) { CatalogRowView(row: $0) }
+            if let t = themeRow(2) { ThemeCarousel(row: t) }
+            // The rest of the themes are spread through the add-on rows: one after every second row.
+            let addonRows = visible(model.rows)
+            ForEach(Array(addonRows.enumerated()), id: \.element.id) { i, row in
+                CatalogRowView(row: row)
+                if i % 2 == 1, let t = themeRow(3 + i / 2) { ThemeCarousel(row: t) }
+            }
+            // Themes that found no slot between add-on rows (few or no add-on rows) close the feed.
+            ForEach(trailingThemes(addonRowCount: addonRows.count)) { ThemeCarousel(row: $0) }
         }
+    }
+
+    /// The i-th themed row of today, or nil when themes are switched off or fewer than that loaded.
+    private func themeRow(_ i: Int) -> ThemeRow? {
+        guard !themesHidden, model.themes.indices.contains(i) else { return nil }
+        return model.themes[i]
+    }
+
+    private func trailingThemes(addonRowCount: Int) -> [ThemeRow] {
+        guard !themesHidden else { return [] }
+        let first = 3 + addonRowCount / 2
+        guard model.themes.count > first else { return [] }
+        return Array(model.themes[first...])
     }
 
     @ViewBuilder private var emptyState: some View {
@@ -300,7 +323,7 @@ struct HomeView: View {
         async let b: () = model.loadSuggestions(last: history.lastWatched, rules: rules)
         async let c: () = model.loadLists(selected: selectedLists, rules: rules)
         async let d: () = model.loadUpNext(history.finishedEntries)
-        async let e: () = model.loadThemes(rules: rules)
+        async let e: () = model.loadThemes(rules: rules, enrichWith: store.enrichmentAddon)
         _ = await (a, b, c, d, e)
     }
 }
@@ -726,7 +749,7 @@ struct CatalogRowView: View {
                             Image(systemName: "arrow.right.circle").font(.title)
                             Text("See all").font(.footnote.weight(.semibold))
                         }
-                        .foregroundStyle(.secondary).frame(width: 67, height: 131)
+                        .foregroundStyle(.secondary).frame(width: 78, height: 153)   // matches a 102pt poster's height
                     }
                     .buttonStyle(.plain)
                 }
@@ -775,7 +798,7 @@ struct PressableStyle: ButtonStyle {
 /// Tap opens the detail page; long tap shows the actions dropdown (watched / library / details).
 struct PosterCard: View {
     let item: MetaPreview
-    var width: CGFloat? = 87          // 33% smaller than the old 130, closer to the Apple TV+ look
+    var width: CGFloat? = 102         // was 87; the original 130 was too big, 87 a bit too small
     var showsTitle = false
     @Environment(WatchHistory.self) private var history
     @Environment(ThemeStore.self) private var theme
@@ -783,7 +806,7 @@ struct PosterCard: View {
     @State private var network: TMDBClient.NetworkBadge?
 
     /// Small row posters get slightly smaller badges so they don't cover the artwork.
-    private var compact: Bool { (width ?? 130) < 100 }
+    private var compact: Bool { (width ?? 130) < 115 }
 
     private var caption: String {
         [item.year.map(String.init), item.typeLabel].compactMap { $0 }.joined(separator: " · ")

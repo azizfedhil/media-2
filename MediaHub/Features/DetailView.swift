@@ -192,7 +192,7 @@ struct DetailView: View {
             if let t = details?.tagline, !t.isEmpty {
                 Text(t).font(.footnote.italic()).foregroundStyle(.tertiary)
             }
-            if let d = descriptionText { ExpandableText(text: d, lines: 3) }
+            if let d = descriptionText { ExpandableText(text: d, lines: 2) }
         }
     }
 
@@ -784,15 +784,20 @@ struct DetailView: View {
                         }
                     }
                 }
+            }
+            // Pinned above the list (not the last row) so it is seen while sources keep arriving, scrolled or not.
+            .safeAreaInset(edge: .top, spacing: 0) {
                 if loadingStreams && !streams.isEmpty {
                     HStack(spacing: 8) {
                         ProgressView().controlSize(.small)
                         Text("Checking more add-ons…").font(.footnote).foregroundStyle(.secondary)
                     }
-                    .frame(maxWidth: .infinity)
-                    .listRowBackground(Color.clear)
+                    .frame(maxWidth: .infinity).padding(.vertical, 8)
+                    .background(.bar)
+                    .transition(.opacity)
                 }
             }
+            .animation(.easeOut(duration: 0.2), value: loadingStreams)
             .overlay {
                 if loadingStreams && streams.isEmpty { ProgressView() }
                 else if !loadingStreams && streams.isEmpty {

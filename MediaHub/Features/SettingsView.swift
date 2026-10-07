@@ -22,7 +22,7 @@ struct SettingsView: View {
     @AppStorage(PillItem.storageKey) private var pillPinned = PillItem.defaultRaw
     @AppStorage(PiPController.enabledKey) private var pipEnabled = true
     @AppStorage("skip.enabled") private var skipEnabled = true
-    @AppStorage("skip.fallbackSeconds") private var fallbackSkip = 85
+    @AppStorage("skip.fallbackSeconds") private var fallbackSkip = 0     // 0 = manual skip button off
     @AppStorage(P2PSettings.enabledKey) private var p2pEnabled = false
     @AppStorage(P2PSettings.wifiOnlyKey) private var p2pWifiOnly = true
     @State private var confirmP2P = false
@@ -168,7 +168,7 @@ struct SettingsView: View {
                                 value: $fallbackSkip, in: 0...180, step: 5)
                     }
                 } header: { Text("Playback") } footer: {
-                    Text("Skip buttons use community timestamps from TheIntroDB. When a show has none, the manual button jumps ahead by the chosen time. Set it to 0 to hide it. Turn Liquid Glass off if playback ever feels heavy on an older device. Turning Picture in Picture off removes its button and stops videos from floating when you leave the app.")
+                    Text("Skip buttons use community timestamps from TheIntroDB. When a show has none, the manual button jumps ahead by the chosen time. It's off by default; set a time above 0 to turn it on. Turn Liquid Glass off if playback ever feels heavy on an older device. Turning Picture in Picture off removes its button and stops videos from floating when you leave the app.")
                 }
 
                 Section {
@@ -189,19 +189,23 @@ struct SettingsView: View {
 
                 Section {
                     Toggle("Include watch history & library", isOn: $includeData)
+                    // Exporter and importer sit on different views: two file pickers on one view fight over the
+                    // presentation and only one of them opens.
                     Button { export() } label: { Label("Export settings", systemImage: "square.and.arrow.up") }
+                        .fileExporter(isPresented: $showExporter, document: exportDoc ?? BackupDocument(),
+                                      contentType: .propertyList, defaultFilename: "Pear-Settings") { r in
+                            if case .failure = r { backupNote = "Export failed." } else { backupNote = "Settings exported." }
+                        }
                     Button { showImporter = true } label: { Label("Import settings", systemImage: "square.and.arrow.down") }
+                        // Any file can be picked (a backup that was renamed or re-saved isn't greyed out);
+                        // the content is checked when it is read.
+                        .fileImporter(isPresented: $showImporter, allowedContentTypes: [.propertyList, .xml, .data]) { r in
+                            importSettings(r)
+                        }
                     if let backupNote { Text(backupNote).font(.footnote).foregroundStyle(.secondary) }
                 } header: { Text("Backup") } footer: {
                     Text("The file contains your API keys and add-on URLs, so keep it private. The Simkl login isn't included; reconnect it after importing.")
                 }
-            }
-            .fileExporter(isPresented: $showExporter, document: exportDoc ?? BackupDocument(),
-                          contentType: .propertyList, defaultFilename: "Pear-Settings") { r in
-                if case .failure = r { backupNote = "Export failed." } else { backupNote = "Settings exported." }
-            }
-            .fileImporter(isPresented: $showImporter, allowedContentTypes: [.propertyList]) { r in
-                importSettings(r)
             }
             .navigationTitle("Settings")
             .profileToolbar()
@@ -225,17 +229,27 @@ struct SettingsView: View {
     }
 
     private func importSettings(_ result: Result<URL, Error>) {
-        guard case .success(let url) = result else { return }
+        let url: URL
+        switch result {
+        case .failure(let error):
+            // Closing the picker isn't an error; anything else used to vanish silently.
+            if (error as? CocoaError)?.code != .userCancelled {
+                backupNote = "Couldn't open that file: \(error.localizedDescription)"
+            }
+            return
+        case .success(let picked):
+            url = picked
+        }
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
         do {
-            let n = try SettingsBackup.restore(try Data(contentsOf: url))
+            let n = try SettingsBackup.restore(try SettingsBackup.read(url))
             theme.reload(); profiles.reload(); history.reload(); library.reload(); watchLog.reload(); pins.reload(); libraryPrefs.reload()
             contentPrefs.reload()
             Task { await store.reloadFromDefaults() }
             backupNote = "Imported \(n) settings."
         } catch {
-            backupNote = (error as? LocalizedError)?.errorDescription ?? "Import failed."
+            backupNote = (error as? LocalizedError)?.errorDescription ?? "Import failed: \(error.localizedDescription)"
         }
     }
 }

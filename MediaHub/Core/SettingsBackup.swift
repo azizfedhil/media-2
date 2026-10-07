@@ -13,6 +13,7 @@ enum SettingsBackup {
     static let keys = [
         "addon.manifestURLs", "addon.disabled", "addon.catalogPicker", "tmdb.key", "tvdb.key", "tvdb.pin", "mdblist.key", "mdblist.lists",
         "ui.accent", "ui.networkBadges", "ui.titleLogos", "player.glass", "player.autoplayNext",
+        "player.pip", "player.pillPinned", "player.pillOrder",
         "skip.enabled", "skip.fallbackSeconds", "sub.lang", "sub.style", "subs.online", "subs.baseURL", "library.collapsed",
         "profiles.list", "profiles.active", "pinned.sources",
     ]
@@ -38,6 +39,18 @@ enum SettingsBackup {
         var out: [String: Any] = [formatKey: version]
         for (k, v) in all where isAllowed(k, includeData: includeData) { out[k] = v }
         return try PropertyListSerialization.data(fromPropertyList: out, format: .xml, options: 0)
+    }
+
+    /// Reads a picked file. Goes through a file coordinator, so a backup that sits in iCloud Drive (or another
+    /// provider) and isn't on the device yet is downloaded first instead of failing to open.
+    static func read(_ url: URL) throws -> Data {
+        var coordinationError: NSError?
+        var result: Result<Data, Error> = .failure(Failure.unreadable)
+        NSFileCoordinator().coordinate(readingItemAt: url, options: [], error: &coordinationError) { readURL in
+            result = Result { try Data(contentsOf: readURL) }
+        }
+        if let coordinationError { throw coordinationError }
+        return try result.get()
     }
 
     /// Writes the file's settings into UserDefaults. Returns the number of values restored.
