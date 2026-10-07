@@ -498,13 +498,6 @@ private struct GlassCard: ViewModifier {
     }
 }
 
-// MARK: - Controls pill items
-
-/// Everything that can sit in the controls pill. Declaration order is the on-screen order.
-private enum PillItem: CaseIterable {
-    case speed, episodes, sources, volume, pip, subtitles, audio, next
-}
-
 // MARK: - Player screen
 
 struct PlayerScreen: View {
@@ -522,6 +515,8 @@ struct PlayerScreen: View {
     @AppStorage("sub.lang") private var subLang = "off"
     @AppStorage("player.glass") private var glassPref = true
     @AppStorage("player.autoplayNext") private var autoplayNext = true
+    /// Pill buttons that stay visible while it is folded (Settings → Playback → Player controls).
+    @AppStorage(PillItem.storageKey) private var pillPinned = PillItem.defaultRaw
     @AppStorage("skip.fallbackSeconds") private var fallbackSkip = 85
     @State private var current: PlayRequest
     @State private var model = PlayerModel()
@@ -765,26 +760,26 @@ struct PlayerScreen: View {
     private static let pillSlot: CGFloat = 46          // one icon
     private static let pillGap: CGFloat = 2            // between icons
     private static let pillPad: CGFloat = 4            // glass padding around the icons
-    /// A pill with more items than this folds: it shows this many plus a chevron, the rest unfold to the left.
-    private static let pillFolded = 4
+    /// A pill with more items than this folds: it shows the pinned ones plus a chevron, the rest unfold to the left.
+    private static let pillFolded = PillItem.maxPinned
     /// Seconds an unfolded pill stays open after the last tap.
     private static let pillLife: Double = 5
     /// Narrowest the volume slider may get (inner width, without the glass padding).
     private static let volumeMinWidth: CGFloat = 260
-    /// Which items stay visible while the pill is folded, most important first.
-    private static let pillPriority: [PillItem] = [.volume, .subtitles, .speed, .next, .audio, .pip, .episodes, .sources]
 
     /// Width of `n` icons side by side.
     private static func pillSpan(_ n: Int) -> CGFloat {
         n <= 0 ? 0 : CGFloat(n) * pillSlot + CGFloat(n - 1) * pillGap
     }
 
-    /// The items that exist right now, in on-screen order. When there are more than `pillFolded`, the ones that
-    /// fold away come first (left), so unfolding grows the pill to the left, and `extras` says how many they are.
+    /// The items that exist right now, in on-screen order. When there are more than `pillFolded`, the ones that are
+    /// not pinned come first (left), so unfolding grows the pill to the left, and `extras` says how many they are.
     private var pillLayout: (items: [PillItem], extras: Int) {
         let all = PillItem.allCases.filter { pillHas($0) }
         guard all.count > Self.pillFolded else { return (all, 0) }
-        let keep = Set(Self.pillPriority.filter { all.contains($0) }.prefix(Self.pillFolded))
+        // The user's pinned items that exist right now; if none of them do, the defaults.
+        var keep = PillItem.decode(pillPinned).intersection(all)
+        if keep.isEmpty { keep = PillItem.defaultPinned.intersection(all) }
         let extras = all.filter { !keep.contains($0) }
         let kept = all.filter { keep.contains($0) }
         return (extras + kept, extras.count)
@@ -806,8 +801,8 @@ struct PlayerScreen: View {
     ///
     /// Every width here is computed, never measured, so the glass, the icons and the volume slider can't disagree:
     /// - Up to 4 items: they all show.
-    /// - More than 4: the pill stays 4 items wide plus a chevron. The chevron unfolds it to the left; it folds
-    ///   itself again `pillLife` seconds after the last tap.
+    /// - More than 4: only the pinned items (default: volume, subtitles, speed, PiP) plus a chevron show. The
+    ///   chevron unfolds the rest to the left; it folds itself again `pillLife` seconds after the last tap.
     /// - Tapping the speaker turns the pill into a volume slider of a fixed width (never narrower than
     ///   `volumeMinWidth`); the icons fade out and come back 3 s after the last adjustment.
     /// The pill's layout footprint is always its folded size. Anything wider (unfolded, or the slider) grows to the
@@ -816,7 +811,7 @@ struct PlayerScreen: View {
         let layout = pillLayout
         let n = layout.items.count
         let overflow = layout.extras > 0
-        let rest = Self.pillSpan(overflow ? Self.pillFolded + 1 : n)        // folded: chevron + 4 items
+        let rest = Self.pillSpan(overflow ? n - layout.extras + 1 : n)      // folded: chevron + pinned items
         let open = overflow && pillExpanded && !showVolume
         let width = showVolume ? max(rest, Self.volumeMinWidth) : (open ? Self.pillSpan(n + 1) : rest)
 
