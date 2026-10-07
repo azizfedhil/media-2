@@ -10,7 +10,15 @@ struct ContentSettingsView: View {
 
     private var rules: ContentRules { prefs.rules }
     private var hidesAnimation: Bool { rules.hiddenCategories.contains(.anime) || rules.hiddenCategories.contains(.cartoons) }
-    private var catalogAddons: [Addon] { store.addons.filter { !$0.homeCatalogs.isEmpty } }
+    /// Add-ons whose catalogues all show on Home unless switched off. Add-ons with a catalogue picker (AIOMetadata)
+    /// have their own screen, because their catalogue list is long and starts empty.
+    private var catalogAddons: [Addon] { store.addons.filter { !$0.homeCatalogs.isEmpty && !store.usesCatalogPicker($0) } }
+    private var pickerAddons: [Addon] { store.addons.filter { store.usesCatalogPicker($0) } }
+    private var addedCount: Int {
+        pickerAddons.reduce(0) { total, a in
+            total + a.homeCatalogs.filter { rules.isRowAdded(ContentRules.rowKey(a, $0)) }.count
+        }
+    }
 
     var body: some View {
         Form {
@@ -40,6 +48,20 @@ struct ContentSettingsView: View {
                 Text("You can also touch and hold a row's title on Home and choose Hide this row.")
             }
 
+            Section {
+                NavigationLink { AIOMetadataSettingsView() } label: {
+                    HStack {
+                        Label("AIOMetadata catalogues", systemImage: "square.grid.2x2.fill")
+                        Spacer()
+                        Text(pickerSummary).font(.footnote).foregroundStyle(.secondary)
+                    }
+                }
+            } header: {
+                Text("AIOMetadata")
+            } footer: {
+                Text("Pick which AIOMetadata catalogues get a row on Home. None show until you add them.")
+            }
+
             ForEach(catalogAddons) { addon in
                 Section {
                     ForEach(addon.homeCatalogs, id: \.self) { cat in
@@ -65,7 +87,7 @@ struct ContentSettingsView: View {
 
             Section {
                 Button("Show everything again", role: .destructive) { prefs.reset() }
-                    .disabled(rules == ContentRules())
+                    .disabled(!rules.hidesAnything)
             }
         }
         .navigationTitle("Content & catalogues")
@@ -73,6 +95,11 @@ struct ContentSettingsView: View {
     }
 
     // MARK: Pieces
+
+    private var pickerSummary: String {
+        if pickerAddons.isEmpty { return "Not set up" }
+        return addedCount == 0 ? "None on Home" : "\(addedCount) on Home"
+    }
 
     private var categoryFooter: String {
         var text = "Hidden titles are removed from Home, Explore, recommendations and themed collections."

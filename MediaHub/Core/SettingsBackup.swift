@@ -3,7 +3,7 @@ import UniformTypeIdentifiers
 
 /// Export / import of app settings as a property-list file.
 /// Includes API keys, add-on URLs, appearance, playback, subtitle style, profiles, pinned sources and each profile's
-/// content settings (hidden categories and rows).
+/// content settings (hidden categories and rows, and the catalogues added to Home from AIOMetadata).
 /// Optionally includes each profile's watch history and local library.
 /// Not included: the Simkl login (reconnect after importing).
 enum SettingsBackup {
@@ -11,7 +11,7 @@ enum SettingsBackup {
     static let version = 1
 
     static let keys = [
-        "addon.manifestURLs", "addon.disabled", "tmdb.key", "tvdb.key", "tvdb.pin", "mdblist.key", "mdblist.lists",
+        "addon.manifestURLs", "addon.disabled", "addon.catalogPicker", "tmdb.key", "tvdb.key", "tvdb.pin", "mdblist.key", "mdblist.lists",
         "ui.accent", "ui.networkBadges", "ui.titleLogos", "player.glass", "player.autoplayNext",
         "skip.enabled", "skip.fallbackSeconds", "sub.lang", "sub.style", "subs.online", "subs.baseURL", "library.collapsed",
         "profiles.list", "profiles.active", "pinned.sources",

@@ -133,7 +133,7 @@ final class DownloadManager {
     private init() {
         DownloadFiles.prepare()
         records = Self.loadIndex()
-        let cfg = URLSessionConfiguration.background(withIdentifier: "com.example.MediaHub.downloads")
+        let cfg = URLSessionConfiguration.background(withIdentifier: "com.mediahub.pear.downloads")
         cfg.sessionSendsLaunchEvents = true
         cfg.isDiscretionary = false
         cfg.httpMaximumConnectionsPerHost = 1

@@ -10,10 +10,15 @@ final class AddonStore {
     private(set) var disabledIDs: Set<String> = []
     /// Add-ons currently in use: installed and switched on, in the user's order.
     var enabledAddons: [Addon] { addons.filter { !disabledIDs.contains($0.id) } }
+    /// Ids of add-ons whose catalogues the user picks one by one instead of getting them all on Home. AIOMetadata is
+    /// recognised on its own (`Addon.isAIOMetadata`); this holds the ones switched on by hand, for a copy hosted
+    /// under another name.
+    private(set) var pickerIDs: Set<String> = []
     /// Bumps after a reload so Home refetches catalogs even though the add-on ids are unchanged.
     private(set) var revision = 0
     private let key = "addon.manifestURLs"
     private static let disabledKey = "addon.disabled"
+    private static let pickerKey = "addon.catalogPicker"
     /// Saved add-on URLs that couldn't be fetched at launch (offline, server down). They aren't shown, but
     /// they are written back on every save so reordering or adding an add-on never drops them from storage.
     @ObservationIgnored private var unreachable: [String] = []
@@ -22,6 +27,7 @@ final class AddonStore {
 
     init() {
         disabledIDs = Self.loadDisabled()
+        pickerIDs = Self.loadPickers()
         let saved = UserDefaults.standard.stringArray(forKey: key) ?? Self.defaults
         Task { await restore(saved) }
     }
@@ -30,7 +36,21 @@ final class AddonStore {
         Set(UserDefaults.standard.stringArray(forKey: disabledKey) ?? [])
     }
 
+    private static func loadPickers() -> Set<String> {
+        Set(UserDefaults.standard.stringArray(forKey: pickerKey) ?? [])
+    }
+
     func isEnabled(_ addon: Addon) -> Bool { !disabledIDs.contains(addon.id) }
+
+    /// True when this add-on's catalogues are added to Home one by one (Settings -> Content & catalogues ->
+    /// AIOMetadata) instead of all showing by default.
+    func usesCatalogPicker(_ addon: Addon) -> Bool { addon.isAIOMetadata || pickerIDs.contains(addon.id) }
+
+    /// Treats an add-on like AIOMetadata even though it doesn't say so by name (a self-hosted copy).
+    func setCatalogPicker(_ addon: Addon, _ on: Bool) {
+        if on { pickerIDs.insert(addon.id) } else { pickerIDs.remove(addon.id) }
+        UserDefaults.standard.set(pickerIDs.sorted(), forKey: Self.pickerKey)
+    }
 
     /// Switches an add-on on or off without uninstalling it.
     func setEnabled(_ addon: Addon, _ on: Bool) {
@@ -80,6 +100,7 @@ final class AddonStore {
     /// Re-reads the saved add-on list (after a settings import).
     func reloadFromDefaults() async {
         disabledIDs = Self.loadDisabled()
+        pickerIDs = Self.loadPickers()
         await restore(UserDefaults.standard.stringArray(forKey: key) ?? Self.defaults)
         revision += 1
     }
@@ -88,8 +109,10 @@ final class AddonStore {
         let gone = offsets.map { addons[$0].id }
         addons.remove(atOffsets: offsets)
         disabledIDs.subtract(gone)
+        pickerIDs.subtract(gone)
         persist()
         persistDisabled()
+        UserDefaults.standard.set(pickerIDs.sorted(), forKey: Self.pickerKey)
     }
 
     // TODO: move to Keychain — debrid add-on URLs embed API keys.

@@ -517,6 +517,7 @@ struct PlayerScreen: View {
     @AppStorage("player.autoplayNext") private var autoplayNext = true
     /// Pill buttons that stay visible while it is folded (Settings → Playback → Player controls).
     @AppStorage(PillItem.storageKey) private var pillPinned = PillItem.defaultRaw
+    @AppStorage(PillItem.orderKey) private var pillOrder = PillItem.defaultOrderRaw
     @AppStorage("skip.fallbackSeconds") private var fallbackSkip = 85
     @State private var current: PlayRequest
     @State private var model = PlayerModel()
@@ -772,10 +773,11 @@ struct PlayerScreen: View {
         n <= 0 ? 0 : CGFloat(n) * pillSlot + CGFloat(n - 1) * pillGap
     }
 
-    /// The items that exist right now, in on-screen order. When there are more than `pillFolded`, the ones that are
-    /// not pinned come first (left), so unfolding grows the pill to the left, and `extras` says how many they are.
+    /// The items that exist right now, in on-screen order (the user's order, see Settings -> Player controls). When
+    /// there are more than `pillFolded`, the ones that are not pinned come first (left), so unfolding grows the pill
+    /// to the left, and `extras` says how many they are. Each group keeps the user's order.
     private var pillLayout: (items: [PillItem], extras: Int) {
-        let all = PillItem.allCases.filter { pillHas($0) }
+        let all = PillItem.decodeOrder(pillOrder).filter { pillHas($0) }
         guard all.count > Self.pillFolded else { return (all, 0) }
         // The user's pinned items that exist right now; if none of them do, the defaults.
         var keep = PillItem.decode(pillPinned).intersection(all)

@@ -152,7 +152,7 @@ final class SimklStore {
     // MARK: HTTP
 
     private static let appName = "mediahub"
-    private static let appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0"
+    private static let appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.1.0"
     private static var userAgent: String { "MediaHub/\(appVersion)" }
 
     /// Every Simkl API call carries `client_id`, `app-name` and `app-version` as URL parameters plus a User-Agent.

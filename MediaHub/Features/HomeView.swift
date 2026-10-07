@@ -116,11 +116,28 @@ final class HomeModel {
         suggested = out
     }
 
-    func load(addons: [Addon], rules: ContentRules) async {
-        // Catalogues the user switched off are dropped first, so they don't use up the 12 row slots.
-        let jobs = addons.flatMap { a in
-            a.homeCatalogs.filter { !rules.isRowHidden(ContentRules.rowKey(a, $0)) }.map { (a, $0) }
-        }.prefix(12)
+    /// Add-on catalogues that get a row on Home, in add-on order.
+    /// Catalogues the user switched off are dropped first, so they don't use up the 12 row slots. Add-ons with a
+    /// catalogue picker (AIOMetadata) contribute only what the user added, and those rows are never cut by the cap:
+    /// the user asked for each one.
+    nonisolated static func homeJobs(addons: [Addon], rules: ContentRules, pickers: Set<String>) -> [(Addon, AddonManifest.CatalogDef)] {
+        var slots = 12
+        var jobs: [(Addon, AddonManifest.CatalogDef)] = []
+        for a in addons {
+            let picker = a.isAIOMetadata || pickers.contains(a.id)
+            for c in a.homeCatalogs where rules.showsOnHome(a, c, picker: picker) {
+                if !picker {
+                    guard slots > 0 else { continue }
+                    slots -= 1
+                }
+                jobs.append((a, c))
+            }
+        }
+        return jobs
+    }
+
+    func load(addons: [Addon], rules: ContentRules, pickers: Set<String> = []) async {
+        let jobs = Self.homeJobs(addons: addons, rules: rules, pickers: pickers)
         var done: [Int: CatalogRow] = [:]
         await withTaskGroup(of: (Int, CatalogRow?).self) { group in
             for (i, job) in jobs.enumerated() {
@@ -177,9 +194,15 @@ struct HomeView: View {
     @State private var model = HomeModel()
     /// Colour pulled from the current hero artwork; washes softly behind the first rows.
     @State private var tint: Color?
+    /// Reloads the add-on rows when the add-ons, the catalogues chosen for Home, or the content filter change.
+    /// `pickerKey` covers an add-on being switched to / from picking its catalogues by hand.
     private var addonTaskID: [String] {
-        store.enabledAddons.map { $0.id } + [String(store.revision), contentPrefs.rules.addonRowKey, contentPrefs.rules.categoryKey]
+        let ids: [String] = store.enabledAddons.map { $0.id }
+        let rules = contentPrefs.rules
+        let extra: [String] = [String(store.revision), rules.addonRowKey, rules.categoryKey, pickerKey]
+        return ids + extra
     }
+    private var pickerKey: String { store.pickerIDs.sorted().joined(separator: ",") }
     private var themesHidden: Bool { contentPrefs.rules.isRowHidden(ContentRules.Builtin.themes) }
     /// Everything on Home is switched off by the user's content settings (and nothing is still loading).
     private var hidesEverything: Bool {
@@ -196,7 +219,7 @@ struct HomeView: View {
                 .navigationDestination(for: MetaPreview.self) { DetailView(item: $0) }
                 .navigationDestination(for: ResumeTarget.self) { DetailView(item: $0.item, startSeason: $0.season, startEpisode: $0.episode) }
                 .navigationDestination(for: CatalogRow.self) { CatalogGridView(row: $0) }
-                .task(id: addonTaskID) { await model.load(addons: store.enabledAddons, rules: contentPrefs.rules) }
+                .task(id: addonTaskID) { await model.load(addons: store.enabledAddons, rules: contentPrefs.rules, pickers: store.pickerIDs) }
                 .task(id: themesTaskID) { await model.loadThemes(rules: contentPrefs.rules) }
                 .task(id: listsTaskID) { await model.loadLists(selected: selectedLists, rules: contentPrefs.rules) }
                 .task(id: suggestionsTaskID) { await model.loadSuggestions(last: history.lastWatched, rules: contentPrefs.rules) }
@@ -273,7 +296,7 @@ struct HomeView: View {
 
     private func refresh() async {
         let rules = contentPrefs.rules
-        async let a: () = model.load(addons: store.enabledAddons, rules: rules)
+        async let a: () = model.load(addons: store.enabledAddons, rules: rules, pickers: store.pickerIDs)
         async let b: () = model.loadSuggestions(last: history.lastWatched, rules: rules)
         async let c: () = model.loadLists(selected: selectedLists, rules: rules)
         async let d: () = model.loadUpNext(history.finishedEntries)
@@ -716,16 +739,18 @@ struct CatalogRowView: View {
     }
 }
 
-/// Long-press a row title: "Hide this row". Only rows that have a stable key (add-on catalogues, trending...) offer it;
-/// Settings -> Content & catalogues brings them back.
+/// Long-press a row title: "Hide this row" (or "Remove from Home" for a catalogue the user added from AIOMetadata).
+/// Only rows that have a stable key (add-on catalogues, trending...) offer it; Settings -> Content & catalogues
+/// brings them back.
 private struct HideRowMenu: ViewModifier {
     let key: String?
     @Environment(ContentPrefs.self) private var prefs
 
     @ViewBuilder func body(content: Content) -> some View {
         if let key {
+            let added = prefs.rules.isRowAdded(key)
             content.contextMenu {
-                Button("Hide this row", systemImage: "eye.slash") {
+                Button(added ? "Remove from Home" : "Hide this row", systemImage: added ? "minus.circle" : "eye.slash") {
                     withAnimation { prefs.setRowHidden(key, true) }
                 }
             }

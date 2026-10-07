@@ -33,7 +33,30 @@ final class ContentPrefs {
     }
 
     func setRowHidden(_ key: String, _ hidden: Bool) {
-        if hidden { rules.hiddenRows.insert(key) } else { rules.hiddenRows.remove(key) }
+        if hidden, rules.addedRows.contains(key) {
+            // A catalogue the user added is taken off Home rather than "hidden": it was never on by default.
+            rules.addedRows.remove(key)
+        } else if hidden {
+            rules.hiddenRows.insert(key)
+        } else {
+            rules.hiddenRows.remove(key)
+        }
+        save()
+    }
+
+    /// Adds a catalogue to Home (or takes it off again). For add-ons with a catalogue picker, e.g. AIOMetadata.
+    func setRowAdded(_ key: String, _ added: Bool) {
+        setRowsAdded([key], added)
+    }
+
+    /// Same, for several catalogues at once (one save).
+    func setRowsAdded(_ keys: [String], _ added: Bool) {
+        if added {
+            rules.addedRows.formUnion(keys)
+            rules.hiddenRows.subtract(keys)
+        } else {
+            rules.addedRows.subtract(keys)
+        }
         save()
     }
 
@@ -43,9 +66,11 @@ final class ContentPrefs {
         save()
     }
 
-    /// Back to the default: everything shown.
+    /// Back to the default: everything shown. Catalogues the user added to Home stay.
     func reset() {
-        rules = ContentRules()
+        var fresh = ContentRules()
+        fresh.addedRows = rules.addedRows
+        rules = fresh
         save()
     }
 

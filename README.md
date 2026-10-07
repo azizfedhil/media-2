@@ -1,4 +1,6 @@
 # MediaHub (iOS 26, SwiftUI)
+App name "Pear.", version 0.1.0, bundle id `com.mediahub.pear` (set in `project.yml`).
+
 1. `brew install xcodegen && xcodegen` (generates MediaHub.xcodeproj from project.yml)
 2. Open in Xcode 26, run on an iOS 26 simulator/device.
 Or: new iOS App project in Xcode 26, drag in the `MediaHub/` folder.
@@ -17,6 +19,7 @@ The pill in the player has a PiP button (native AVPlayer path only; hidden for s
 Settings -> Content & catalogues. Saved per profile, so a kids' profile can hide what yours doesn't.
 - **Categories:** switch off Anime, Cartoons & animation, Kids & family, Documentaries, Reality TV, Talk & news, Soap operas, Horror or Romance. Hidden titles are removed from Home, Explore, recommendations, themed collections and "See all" pages. Search is unfiltered unless you turn on "Also filter search results". Continue Watching and your library are never filtered.
 - **Rows:** switch off built-in Home rows and individual add-on catalogues (or touch and hold a row title on Home -> Hide this row). Hidden catalogues are skipped before the 12-row cap, so they don't use up slots.
+- **AIOMetadata:** Settings -> Content & catalogues -> AIOMetadata. An AIOMetadata add-on can offer dozens of catalogues (TMDB, TVDB, MDBList, MAL, streaming services...), so unlike other add-ons none of them show on Home until you add them. Switch a catalogue on to give it a row, off (or touch and hold its row title on Home -> Remove from Home) to take it away. Saved per profile and included in settings backups; "Show everything again" leaves them alone. The add-on is recognised by \"aiometadata\" in its manifest id, name, description or host (`Addon.isAIOMetadata`); a copy hosted under another name can be switched on by hand under \"Other add-ons\" on that screen. Added rows are not counted against the 12-row cap. Code: `Features/AIOMetadataSettingsView.swift`, `ContentRules.addedRows`.
 - **How titles are classified** (`Core/ContentRules.swift`, `Core/TitleClassifier.swift`): TMDB lists already carry genres and original language, and most add-ons list genre names, so most titles are decided with no extra request. Anime = Animation + Japanese origin; Cartoons = any other Animation. Titles that can't be decided (an add-on that lists no genres, or Animation with no origin) cost one small TMDB request each, run six at a time, and the answer is cached on disk forever. Kitsu/MAL/AniList items count as anime from their id alone.
 - **Without a TMDB key** anime and cartoons can't be told apart, so all animation is hidden while either is off. Titles with no genre info at all stay visible.
 - Adding a category: a case in `ContentCategory` plus its TMDB genre ids.

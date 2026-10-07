@@ -81,6 +81,15 @@ struct Addon: Identifiable, Sendable, Hashable {
     var baseURL: URL { manifestURL.deletingLastPathComponent() }
     var homeCatalogs: [AddonManifest.CatalogDef] { (manifest.catalogs ?? []).filter(\.isBrowsable) }
 
+    /// AIOMetadata (github.com/cedya77/aiometadata) is recognised by name: its manifest id, name, description or the
+    /// host it is served from says so ("AIOMetadata", "aio-metadata"...). Only the host is looked at, never the path,
+    /// because add-on URLs can embed secrets. A self-hosted copy under another name can be switched on by hand
+    /// (`AddonStore.setCatalogPicker`).
+    var isAIOMetadata: Bool {
+        let fields = [manifest.id, manifest.name, manifest.description ?? "", manifestURL.host ?? ""]
+        return fields.contains { $0.lowercased().filter(\.isLetter).contains("aiometadata") }
+    }
+
     /// The add-on says it has a setup page (`behaviorHints.configurable`), or can't work without one.
     var isConfigurable: Bool {
         manifest.behaviorHints?.configurable == true || manifest.behaviorHints?.configurationRequired == true

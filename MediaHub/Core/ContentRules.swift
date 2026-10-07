@@ -113,6 +113,9 @@ struct ContentRules: Hashable, Sendable {
     var hiddenCategories: Set<ContentCategory> = []
     /// Rows switched off on Home / Explore (see `rowKey` and `Builtin`).
     var hiddenRows: Set<String> = []
+    /// Add-on catalogues the user chose to put on Home (`rowKey`). Only used for add-ons with a long catalogue list
+    /// that starts empty, like AIOMetadata (see `AddonStore.usesCatalogPicker`): nothing from them shows until added.
+    var addedRows: Set<String> = []
     /// Search is an explicit request, so by default it isn't filtered.
     var filterSearch = false
 
@@ -120,10 +123,18 @@ struct ContentRules: Hashable, Sendable {
 
     var hasFilters: Bool { !hiddenCategories.isEmpty }
 
+    /// Something is switched off (a category, a row or search filtering). Catalogues the user added don't count:
+    /// "Show everything again" must not take those away.
+    var hidesAnything: Bool { !hiddenCategories.isEmpty || !hiddenRows.isEmpty || filterSearch }
+
     /// Changes whenever the category choice does. Used as a `.task(id:)` so screens reload exactly when needed.
     var categoryKey: String { hiddenCategories.map(\.rawValue).sorted().joined(separator: ",") }
-    /// Changes whenever an add-on catalogue is switched on or off.
-    var addonRowKey: String { hiddenRows.filter { $0.hasPrefix("addon:") }.sorted().joined(separator: ",") }
+    /// Changes whenever an add-on catalogue is switched on or off, or added to / removed from Home.
+    var addonRowKey: String {
+        let hidden: String = hiddenRows.filter { $0.hasPrefix("addon:") }.sorted().joined(separator: ",")
+        let added: String = addedRows.sorted().joined(separator: ",")
+        return hidden + "|" + added
+    }
 
     // MARK: Rows
 
@@ -144,6 +155,15 @@ struct ContentRules: Hashable, Sendable {
     func isRowHidden(_ key: String?) -> Bool {
         guard let key else { return false }
         return hiddenRows.contains(key)
+    }
+
+    func isRowAdded(_ key: String) -> Bool { addedRows.contains(key) }
+
+    /// Whether this catalogue gets a row on Home. Add-ons with a catalogue picker show only what was added;
+    /// every other add-on shows everything that wasn't switched off.
+    func showsOnHome(_ addon: Addon, _ catalog: AddonManifest.CatalogDef, picker: Bool) -> Bool {
+        let key = Self.rowKey(addon, catalog)
+        return picker ? addedRows.contains(key) : !hiddenRows.contains(key)
     }
 
     // MARK: Genres
@@ -195,13 +215,14 @@ struct ContentRules: Hashable, Sendable {
 
 /// Stored tolerantly: a value written by a newer build (an unknown category) is dropped, never fatal.
 extension ContentRules: Codable {
-    private enum K: String, CodingKey { case categories, rows, filterSearch }
+    private enum K: String, CodingKey { case categories, rows, added, filterSearch }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: K.self)
         let names = (try? c.decodeIfPresent([String].self, forKey: .categories)) ?? []
         hiddenCategories = Set(names.compactMap(ContentCategory.init(rawValue:)))
         hiddenRows = Set((try? c.decodeIfPresent([String].self, forKey: .rows)) ?? [])
+        addedRows = Set((try? c.decodeIfPresent([String].self, forKey: .added)) ?? [])
         filterSearch = (try? c.decodeIfPresent(Bool.self, forKey: .filterSearch)) ?? false
     }
 
@@ -209,6 +230,7 @@ extension ContentRules: Codable {
         var c = encoder.container(keyedBy: K.self)
         try c.encode(hiddenCategories.map(\.rawValue).sorted(), forKey: .categories)
         try c.encode(hiddenRows.sorted(), forKey: .rows)
+        try c.encode(addedRows.sorted(), forKey: .added)
         try c.encode(filterSearch, forKey: .filterSearch)
     }
 }
