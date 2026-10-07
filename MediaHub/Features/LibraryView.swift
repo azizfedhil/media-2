@@ -131,6 +131,7 @@ struct LibraryView: View {
                 }
             }
             .navigationDestination(for: MetaPreview.self) { DetailView(item: $0) }
+            .navigationDestination(for: CatalogRow.self) { CatalogGridView(row: $0) }
             .navigationTitle("Library")
             .navigationSubtitle(subtitle)
             .navigationBarTitleDisplayMode(.large)

@@ -251,6 +251,7 @@ private struct CataloguePage: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color(.systemBackground))
             .navigationDestination(for: MetaPreview.self) { DetailView(item: $0) }
+            .navigationDestination(for: CatalogRow.self) { CatalogGridView(row: $0) }
         }
         .task(id: ref.id) {
             let raw = (try? await AddonClient.shared.catalog(addon: ref.addon, catalog: ref.def)) ?? []
@@ -452,7 +453,7 @@ struct WideHeroPanel: View {
             if let d = item.description, !d.isEmpty {
                 Text(d).font(.subheadline).lineLimit(compact ? 2 : 3).opacity(0.85)
             }
-            Label("Details", systemImage: "info.circle")
+            Text("Details")
                 .font(.subheadline.weight(.semibold)).padding(.horizontal, 18).padding(.vertical, 10)
                 .background(.white.opacity(0.2), in: Capsule())
                 .overlay(Capsule().strokeBorder(.white.opacity(0.28), lineWidth: 0.5))

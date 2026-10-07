@@ -1186,7 +1186,7 @@ struct PlayerScreen: View {
             Spacer(minLength: 0)
             PlayerInfoCard(info: info, onClose: { closeInfo() })
                 .foregroundStyle(.white)
-                .padding(18)
+                .padding(20)
                 .frame(maxWidth: 720)
                 .modifier(GlassCard(on: glass))
                 .padding(.horizontal, 20).padding(.bottom, 10)
@@ -1211,7 +1211,8 @@ struct PlayerScreen: View {
     private func basicInfo() -> PlayerInfo {
         let req = current, item = current.item
         if let s = req.season, let e = req.episode {
-            return PlayerInfo(kicker: "\(item.name) · S\(s) · E\(e)", title: req.episodeTitle ?? "Episode \(e)",
+            return PlayerInfo(kicker: item.name, episodeTag: "S\(s) · E\(e)", isLoading: true,
+                              title: req.episodeTitle ?? "Episode \(e)",
                               image: req.thumb ?? item.backdropURL, overview: nil)
         }
         return PlayerInfo(kicker: nil, title: item.name, image: req.thumb ?? item.backdropURL,
@@ -1266,6 +1267,7 @@ struct PlayerScreen: View {
             out.ratings = ratings
         }
         guard !Task.isCancelled else { return }
+        out.isLoading = false
         info = out
     }
 

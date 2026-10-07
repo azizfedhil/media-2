@@ -152,6 +152,7 @@ struct ProfileSheet: View {
     @State private var target: ProfileTarget?
     @State private var showProfile = false
     @State private var showDownloads = false
+    @State private var showSimkl = false
     @Environment(DownloadManager.self) private var downloads
     @State private var detent: PresentationDetent = .medium
 
@@ -161,7 +162,7 @@ struct ProfileSheet: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 28) {
-                    if !managing { profileLink; downloadsLink }
+                    if !managing { profileLink; simklLink; downloadsLink }
                     LazyVGrid(columns: columns, spacing: 22) {
                         ForEach(profiles.profiles) { tile($0) }
                         if profiles.canAdd { addTile }
@@ -182,6 +183,7 @@ struct ProfileSheet: View {
             }
             .navigationDestination(isPresented: $showProfile) { ProfileDetailView() }
             .navigationDestination(isPresented: $showDownloads) { DownloadsView() }
+            .navigationDestination(isPresented: $showSimkl) { SimklLoginPage() }
         }
         .presentationDetents([.medium, .large], selection: $detent)
         .sheet(item: $target) { ProfileEditor(target: $0) }
@@ -205,6 +207,28 @@ struct ProfileSheet: View {
         }
         .buttonStyle(PressableStyle())
         .accessibilityHint("Shows watch statistics for this profile")
+    }
+
+    /// Opens the Simkl login page: its own page, right under "View profile", not a card inside the profile.
+    private var simklLink: some View {
+        Button { detent = .large; showSimkl = true } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "arrow.triangle.2.circlepath").font(.title3.weight(.semibold))
+                    .foregroundStyle(theme.accent).frame(width: 44, height: 44)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Simkl").font(.headline)
+                    Text(simkl.isConnected ? "Connected" : "Log in to sync your library")
+                        .font(.caption).foregroundStyle(simkl.isConnected ? Color.green : Color.secondary)
+                }
+                Spacer()
+                Image(systemName: "chevron.right").font(.footnote.weight(.bold)).foregroundStyle(.secondary)
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity)
+            .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        }
+        .buttonStyle(PressableStyle())
+        .accessibilityHint("Log in to or manage your Simkl account")
     }
 
     /// Opens the Downloads page (offline files and the storage they use).

@@ -2,8 +2,12 @@ import SwiftUI
 
 /// What the player's info card shows for the episode (or movie) that is playing now.
 struct PlayerInfo {
-    /// "Dark Matter · S2 · E6" for an episode; nil for a movie.
+    /// The series name for an episode; nil for a movie.
     var kicker: String?
+    /// "S2 · E6" for an episode; nil for a movie. Sits on the thumbnail.
+    var episodeTag: String?
+    /// True while an episode's synopsis is still being fetched, so the card shows placeholder lines instead of jumping in height.
+    var isLoading = false
     var title: String
     /// Episode still, or the movie's backdrop.
     var image: URL?
@@ -29,58 +33,78 @@ struct PlayerInfo {
     }
 }
 
-/// Content of the info card opened by tapping the title: thumbnail on the left; title, date, runtime, ratings and
-/// synopsis on the right. No background of its own: the player puts it on its glass card.
+/// Content of the info card opened by tapping the title. Wide: still on the left, details on the right. Narrow
+/// (portrait phone): still on top, details underneath. Details are the series and title, date / runtime / rating chips,
+/// then the synopsis. No background of its own: the player puts it on its glass card.
 struct PlayerInfoCard: View {
     let info: PlayerInfo
     let onClose: () -> Void
 
-    private static let thumbWidth: CGFloat = 220
+    private static let thumbWidth: CGFloat = 230
+    /// Below this width the still moves above the text; beside it, the text column would be too narrow to read.
+    private static let stackBelow: CGFloat = 520
+    @State private var stacked = false
 
     private var runtimeText: String? {
         guard let m = info.runtime, m > 0 else { return nil }
         return m >= 60 ? (m % 60 == 0 ? "\(m / 60)h" : "\(m / 60)h \(m % 60)m") : "\(m) min"
     }
 
-    private var metaLine: String? {
-        let parts = [info.date, runtimeText].compactMap { $0 }
-        return parts.isEmpty ? nil : parts.joined(separator: "  ·  ")
-    }
-
     var body: some View {
-        HStack(alignment: .top, spacing: 16) {
-            thumbnail
-            VStack(alignment: .leading, spacing: 8) {
-                header
-                if let metaLine {
-                    Text(metaLine).font(.system(size: 15, weight: .medium)).foregroundStyle(.white.opacity(0.75))
-                }
-                if !info.ratings.isEmpty { ratingsRow }
-                synopsis
+        Group {
+            if stacked {
+                VStack(alignment: .leading, spacing: 14) { thumbnail; details }
+            } else {
+                HStack(alignment: .top, spacing: 18) { thumbnail; details }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .onGeometryChange(for: Bool.self) { $0.size.width < Self.stackBelow } action: { stacked = $0 }
+    }
+
+    // MARK: Thumbnail
+
+    @ViewBuilder private var thumbnail: some View {
+        if info.image != nil {
+            ZStack(alignment: .topLeading) {
+                Color.white.opacity(0.08)
+                StillImage(url: info.image, size: stacked ? 480 : Self.thumbWidth)
+                LinearGradient(colors: [.black.opacity(0.4), .clear], startPoint: .top, endPoint: .center)
+                if let tag = info.episodeTag {
+                    Text(tag).font(.caption2.bold()).monospacedDigit().foregroundStyle(.white)
+                        .padding(.horizontal, 8).padding(.vertical, 4)
+                        .background(.black.opacity(0.55), in: Capsule())
+                        .padding(8)
+                }
+            }
+            .aspectRatio(16.0 / 9.0, contentMode: .fit)
+            .frame(width: stacked ? nil : Self.thumbWidth)
+            .frame(maxWidth: stacked ? .infinity : nil)
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(.white.opacity(0.12), lineWidth: 1))
+            .accessibilityHidden(true)
         }
     }
 
-    private var thumbnail: some View {
-        ZStack {
-            Color.white.opacity(0.08)
-            StillImage(url: info.image, size: Self.thumbWidth)
+    // MARK: Details
+
+    private var details: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            header
+            chips
+            synopsis
         }
-        .frame(width: Self.thumbWidth, height: Self.thumbWidth * 9 / 16)
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(.white.opacity(0.1), lineWidth: 1))
-        .accessibilityHidden(true)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var header: some View {
         HStack(alignment: .top, spacing: 8) {
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: 4) {
                 if let k = info.kicker {
-                    Text(k.uppercased()).font(.caption.weight(.bold)).tracking(0.8)
+                    Text(k.uppercased()).font(.caption.weight(.bold)).tracking(0.9)
                         .foregroundStyle(.white.opacity(0.6)).lineLimit(1)
                 }
-                Text(info.title).font(.system(size: 21, weight: .bold)).lineLimit(2)
+                Text(info.title).font(.system(size: 23, weight: .bold)).lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 0)
             // Mirrors the chevron on the title that opened this card.
@@ -94,37 +118,80 @@ struct PlayerInfoCard: View {
         }
     }
 
-    private var ratingsRow: some View {
-        ScrollView(.horizontal) {
-            HStack(spacing: 14) {
-                ForEach(info.ratings) { RatingBadge(rating: $0, flat: true) }
+    /// Date, runtime and ratings as one row of matching capsules.
+    @ViewBuilder private var chips: some View {
+        if info.date != nil || runtimeText != nil || !info.ratings.isEmpty {
+            ScrollView(.horizontal) {
+                HStack(spacing: 8) {
+                    if let d = info.date { chip(d, symbol: "calendar") }
+                    if let r = runtimeText { chip(r, symbol: "clock") }
+                    ForEach(info.ratings) { ratingChip($0) }
+                }
             }
+            .scrollIndicators(.hidden)
         }
-        .scrollIndicators(.hidden)
     }
 
-    /// Plain text when it fits; scrolls when a long synopsis would push the card off a landscape phone.
-    @ViewBuilder private var synopsis: some View {
-        if let o = info.overview, !o.isEmpty {
-            VStack(alignment: .leading, spacing: 4) {
-                if let n = info.overviewNote {
-                    Text(n.uppercased()).font(.caption2.weight(.bold)).tracking(0.8).foregroundStyle(.white.opacity(0.5))
-                }
+    private func chip(_ text: String, symbol: String) -> some View {
+        Label(text, systemImage: symbol)
+            .font(.system(size: 13, weight: .semibold)).lineLimit(1)
+            .foregroundStyle(.white.opacity(0.9))
+            .padding(.horizontal, 11).padding(.vertical, 7)
+            .background(.white.opacity(0.12), in: Capsule())
+    }
+
+    private func ratingChip(_ r: MDBListClient.Rating) -> some View {
+        HStack(spacing: 6) {
+            RatingLogo(label: r.label, score: r.score, height: 15)
+            Text(r.text).font(.system(size: 13, weight: .bold)).monospacedDigit()
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 11).padding(.vertical, 6)
+        .background(.white.opacity(0.12), in: Capsule())
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(r.label) \(r.text)")
+    }
+
+    // MARK: Synopsis
+
+    private var synopsis: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text((info.overviewNote ?? "Synopsis").uppercased())
+                .font(.caption2.weight(.bold)).tracking(0.9).foregroundStyle(.white.opacity(0.5))
+            if let o = info.overview, !o.isEmpty {
+                // Plain text when it fits; scrolls when a long synopsis would push the card off a landscape phone.
                 ViewThatFits(in: .vertical) {
                     text(o)
-                    ScrollView { text(o) }.scrollIndicators(.hidden)
+                    ScrollView { text(o) }.scrollIndicators(.automatic)
                 }
-                .frame(maxHeight: 112)
+                .frame(maxHeight: 124)
+            } else if info.isLoading {
+                skeleton
+            } else {
+                Text("No synopsis available yet.").font(.system(size: 15).italic()).foregroundStyle(.white.opacity(0.5))
             }
-            .padding(.top, 2)
         }
     }
 
     private func text(_ s: String) -> some View {
         Text(s)
-            .font(.system(size: 15, weight: .regular))
+            .font(.system(size: 15, weight: .regular)).lineSpacing(3)
             .foregroundStyle(.white.opacity(0.9))
             .frame(maxWidth: .infinity, alignment: .leading)
             .fixedSize(horizontal: false, vertical: true)
+    }
+
+    /// Static placeholder lines while the episode's synopsis loads.
+    private var skeleton: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            let widths: [CGFloat] = [1, 1, 0.6]
+            ForEach(widths.indices, id: \.self) { i in
+                Capsule().fill(.white.opacity(0.1)).frame(height: 10)
+                    .frame(maxWidth: .infinity)
+                    .scaleEffect(x: widths[i], anchor: .leading)
+            }
+        }
+        .padding(.vertical, 4)
+        .accessibilityHidden(true)
     }
 }

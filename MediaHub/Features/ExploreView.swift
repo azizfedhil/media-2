@@ -117,6 +117,7 @@ struct ExploreView: View {
             .navigationTitle("Explore")
             .profileToolbar()
             .navigationDestination(for: MetaPreview.self) { DetailView(item: $0) }
+            .navigationDestination(for: CatalogRow.self) { CatalogGridView(row: $0) }
         }
         .task(id: themesTaskID) {
             guard !tmdbKey.isEmpty else { return }

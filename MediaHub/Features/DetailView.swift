@@ -46,6 +46,8 @@ struct DetailView: View {
     @State private var playRequest: PlayRequest?
     @State private var upNext: UpNextItem?
     @State private var userPicked = false
+    /// Bumped when the opening episode is restored from history, so the strip scrolls to it even if the season did not change.
+    @State private var restoreTick = 0
     @State private var pendingPlay: PlayRequest?
     @State private var season = 1
     @State private var episode = 1
@@ -359,16 +361,28 @@ struct DetailView: View {
 
     // MARK: Up next / continue
 
-    /// Opens on the episode you should watch: where you stopped, or the one after a finished episode.
+    /// Opens on the episode you should watch: where you stopped, or the one after a finished episode. When there is
+    /// no next episode (you finished the last one, or the last one that has aired), it stays on the episode you
+    /// finished instead of falling back to S1 E1.
     private func configureFromHistory() async {
         guard isSeries, let e = history.entry(for: item.id) else { return }
+        var target: (season: Int, episode: Int)?
         if e.isInProgress, let se = e.seasonEpisode {
-            if !explicitStart, !userPicked { season = se.season; episode = se.episode }
-        } else if e.watchedThrough != nil {
-            guard let n = await UpNext.resolve(e) else { return }
-            upNext = n
-            if !explicitStart && !userPicked { season = n.season; episode = n.episode }
+            target = se
+        } else if let w = e.watchedThrough {
+            if let n = await UpNext.resolve(e) {
+                upNext = n
+                target = (n.season, n.episode)
+            } else {
+                target = w
+            }
+        } else if let se = e.seasonEpisode {
+            target = se
         }
+        guard let t = target, !explicitStart, !userPicked else { return }
+        season = t.season
+        episode = t.episode
+        restoreTick += 1
     }
 
     // MARK: Seasons + episodes
@@ -500,8 +514,13 @@ struct DetailView: View {
                 .contentMargins(.horizontal, 20, for: .scrollContent)
                 .scrollTargetBehavior(.viewAligned)
                 .scrollIndicators(.hidden)
+                // A fresh strip per season, so switching seasons starts at the first episode instead of keeping the old offset.
+                .id(season)
                 .onChange(of: episodes.count) { _, _ in
                     if episode > 1 { proxy.scrollTo(episode, anchor: .center) }
+                }
+                .onChange(of: restoreTick) { _, _ in
+                    if episode > 1, !episodes.isEmpty { proxy.scrollTo(episode, anchor: .center) }
                 }
             }
             // No TMDB/TVDB data: keep a manual way to pick the episode.

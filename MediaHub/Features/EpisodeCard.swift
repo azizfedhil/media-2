@@ -47,11 +47,19 @@ struct EpisodeCard<Actions: View>: View {
             VStack(alignment: .leading, spacing: 0) {
                 if watched { badge("checkmark.circle.fill", "Watched") }
                 else if upNext { badge(nil, "UP NEXT", fill: theme.accent, text: theme.onAccent) }
-                if let download { downloadBadge(download, below: watched || upNext) }
+                // New episodes announce themselves until you've watched them.
+                if !watched, let f = ep.freshness {
+                    badge("sparkles", f.label, fill: Color(red: 0.13, green: 0.62, blue: 0.35), text: .white)
+                }
+                if let download { downloadBadge(download, below: watched || upNext || (ep.freshness != nil)) }
             }
         }
         .overlay(alignment: .topTrailing) {
-            if let r = ep.rating, r > 0 { ratingBadge(r) }
+            VStack(alignment: .trailing, spacing: 0) {
+                let rated = (ep.rating ?? 0) > 0
+                if let r = ep.rating, r > 0 { ratingBadge(r) }
+                if ep.isTopRated { topRatedBadge(below: rated) }
+            }
         }
         .overlay(alignment: .bottomLeading) { text }
         .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
@@ -117,6 +125,16 @@ struct EpisodeCard<Actions: View>: View {
         .background(.black.opacity(0.55), in: Capsule())
         .padding(10)
         .allowsHitTesting(false)
+    }
+
+    /// Best rated episode of the season.
+    private func topRatedBadge(below: Bool) -> some View {
+        HStack(spacing: 4) { Image(systemName: "star.fill"); Text("TOP RATED") }
+            .font(.caption2.bold()).foregroundStyle(.black)
+            .padding(.horizontal, 8).padding(.vertical, 4)
+            .background(Color(red: 1.0, green: 0.78, blue: 0.2), in: Capsule())
+            .padding(.trailing, 10).padding(.top, below ? 0 : 10)
+            .allowsHitTesting(false)
     }
 
     /// Saved / saving state. Solid accent once the file is on the device.

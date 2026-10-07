@@ -110,7 +110,7 @@ actor TMDBClient {
 
     struct EpisodeInfo: Decodable, Identifiable, Sendable {
         let id: Int; let name: String?; let overview: String?; let episodeNumber: Int
-        let stillPath: String?; let voteAverage: Double?; let runtime: Int?; let airDate: String?
+        let stillPath: String?; let voteAverage: Double?; let voteCount: Int?; let runtime: Int?; let airDate: String?
         var stillURL: URL? { stillPath.flatMap { URL(string: TMDBClient.img + "w300" + $0) } }
     }
 

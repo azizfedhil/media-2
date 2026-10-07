@@ -8,6 +8,9 @@ struct EpisodeItem: Identifiable {
     var rating: Double?
     var runtime: Int?
     var airDate: String?        // yyyy-MM-dd, when known
+    var votes: Int?             // TMDB vote count behind `rating`, when known
+    /// Best rated episode of its season (set by `EpisodeLoader`, see `markTopRated`).
+    var isTopRated = false
 }
 
 extension EpisodeItem {
@@ -20,6 +23,33 @@ extension EpisodeItem {
     var isUpcoming: Bool {
         guard let d = airDate, !d.isEmpty else { return false }
         return d > Self.isoDay.string(from: .now)
+    }
+
+    enum Freshness {
+        case justAired, new
+        var label: String { self == .justAired ? "JUST AIRED" : "NEW" }
+    }
+
+    /// Aired today or yesterday = "Just aired"; within the last week = "New"; nil otherwise (older, upcoming or no date).
+    var freshness: Freshness? {
+        guard let d = airDate, let date = Self.isoDay.date(from: d) else { return nil }
+        let cal = Calendar.current
+        guard let days = cal.dateComponents([.day], from: cal.startOfDay(for: date), to: cal.startOfDay(for: .now)).day,
+              days >= 0 else { return nil }
+        if days <= 1 { return .justAired }
+        return days <= 7 ? .new : nil
+    }
+
+    /// Flags the season's best rated episode(s). Only aired episodes with a real rating count (and, when TMDB says how
+    /// many votes stand behind it, at least 5), at least three of them must be rated, and the top score has to beat
+    /// the lowest, so a season of identical scores doesn't crown everything.
+    static func markTopRated(_ list: inout [EpisodeItem]) {
+        for i in list.indices { list[i].isTopRated = false }
+        let rated = list.filter { !$0.isUpcoming && ($0.rating ?? 0) > 0 && ($0.votes ?? 5) >= 5 }
+        guard rated.count >= 3,
+              let top = rated.compactMap(\.rating).max(),
+              let low = rated.compactMap(\.rating).min(), top > low else { return }
+        for i in list.indices where list[i].rating == top && !list[i].isUpcoming { list[i].isTopRated = true }
     }
 
     /// "Oct 14, 2026" for an episode that hasn't aired yet; nil once it has (or when the date is unknown).
@@ -56,7 +86,8 @@ enum EpisodeLoader {
                      imdb resolveIMDB: () async -> String?) async -> [EpisodeItem] {
         var list = await TMDBClient.shared.episodes(for: itemID, type: type, season: season).map {
             EpisodeItem(id: $0.episodeNumber, name: $0.name ?? "Episode \($0.episodeNumber)", overview: $0.overview,
-                        image: $0.stillURL, rating: $0.voteAverage, runtime: $0.runtime, airDate: $0.airDate)
+                        image: $0.stillURL, rating: $0.voteAverage, runtime: $0.runtime, airDate: $0.airDate,
+                        votes: $0.voteCount)
         }
         let needsArt = list.contains(where: { $0.image == nil })
         if (list.isEmpty || needsArt), TVDBClient.shared.hasKey, let imdb = await resolveIMDB() {
@@ -72,6 +103,7 @@ enum EpisodeLoader {
                 }
             }
         }
+        EpisodeItem.markTopRated(&list)
         return list
     }
 }

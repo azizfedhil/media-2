@@ -20,29 +20,61 @@ final class HomeModel {
     private var suggestionsLoaded = false
     var settled: Bool { rowsLoaded && suggestionsLoaded }
 
+    /// What each loader last finished with (its input key + when). Home's loading tasks restart every time the page
+    /// comes back on screen (e.g. after leaving a catalogue or a title). Without this, each restart refetched
+    /// everything and rebuilt the row lists from scratch, so the page shrank, re-grew and animated under your finger.
+    /// A loader whose inputs are unchanged and whose data is recent now does nothing; pull-to-refresh forces it.
+    @ObservationIgnored private var loadedAt: [String: (key: String, at: Date)] = [:]
+    private static let freshFor: TimeInterval = 15 * 60
+    private func isFresh(_ slot: String, _ key: String) -> Bool {
+        guard let l = loadedAt[slot], l.key == key else { return false }
+        return Date().timeIntervalSince(l.at) < Self.freshFor
+    }
+    private func markLoaded(_ slot: String, _ key: String) { loadedAt[slot] = (key, Date()) }
+    @ObservationIgnored private var pendingThemes: [ThemeRow]?
+
     /// Next episode for each show whose last episode you finished. Resolved concurrently, order kept.
-    func loadUpNext(_ entries: [WatchHistory.Entry]) async {
+    func loadUpNext(_ entries: [WatchHistory.Entry], key: String, force: Bool = false) async {
+        if !force, isFresh("upNext", key) { return }
         let batch = entries
-        guard !batch.isEmpty else { upNext = []; return }
+        guard !batch.isEmpty else { upNext = []; markLoaded("upNext", key); return }
+        // Fill in as results land only when there is nothing on screen yet; otherwise swap once, at the end,
+        // so a reload never shrinks the row the user is looking at.
+        let progressive = upNext.isEmpty
         var done: [Int: UpNextItem] = [:]
         await withTaskGroup(of: (Int, UpNextItem?).self) { group in
             for (i, e) in batch.enumerated() { group.addTask { (i, await UpNext.resolve(e)) } }
             for await (i, n) in group {
                 if let n { done[i] = n }
-                upNext = done.keys.sorted().compactMap { done[$0] }
+                if progressive { upNext = done.keys.sorted().compactMap { done[$0] } }
             }
         }
+        guard !Task.isCancelled else { return }
+        upNext = done.keys.sorted().compactMap { done[$0] }
+        markLoaded("upNext", key)
     }
 
     /// Five themed collections, different every day. One spare theme is loaded in case another has too little data.
-    func loadThemes(rules: ContentRules, enrichWith addon: Addon?) async {
+    func loadThemes(rules: ContentRules, enrichWith addon: Addon?, key: String, force: Bool = false) async {
+        if !force, isFresh("themes", key) { return }
+        let progressive = themes.isEmpty
+        pendingThemes = nil
         await ThemeCatalog.load(count: ThemeCatalog.homeCandidates, show: ThemeCatalog.homeRows, rules: rules,
-                                enrichWith: addon) { [weak self] rows in self?.themes = rows }
+                                enrichWith: addon) { [weak self] rows in
+            guard let self else { return }
+            self.pendingThemes = rows
+            if progressive { self.themes = rows }
+        }
+        guard !Task.isCancelled, let latest = pendingThemes else { return }
+        themes = latest
+        if !latest.isEmpty { markLoaded("themes", key) }
     }
 
-    func loadLists(selected: Set<Int>, rules: ContentRules) async {
+    func loadLists(selected: Set<Int>, rules: ContentRules, key: String, force: Bool = false) async {
         guard MDBListClient.shared.hasKey, !selected.isEmpty else { lists = []; return }
+        if !force, isFresh("lists", key) { return }
         let chosen = await MDBListClient.shared.userLists().filter { selected.contains($0.id) }
+        let progressive = lists.isEmpty
         var done: [Int: CatalogRow] = [:]
         await withTaskGroup(of: (Int, CatalogRow?).self) { group in
             for (i, l) in chosen.enumerated() {
@@ -55,9 +87,12 @@ final class HomeModel {
             for await (i, row) in group {
                 guard let row else { continue }
                 done[i] = row
-                lists = done.keys.sorted().compactMap { done[$0] }
+                if progressive { lists = done.keys.sorted().compactMap { done[$0] } }
             }
         }
+        guard !Task.isCancelled else { return }
+        lists = done.keys.sorted().compactMap { done[$0] }
+        if !done.isEmpty { markLoaded("lists", key) }
     }
 
     /// Calendar day number (local time). Changes at local midnight.
@@ -97,9 +132,10 @@ final class HomeModel {
     }
 
     /// TMDB trending + recommendations based on the last thing you watched.
-    func loadSuggestions(last: MetaPreview?, rules: ContentRules) async {
+    func loadSuggestions(last: MetaPreview?, rules: ContentRules, key: String, force: Bool = false) async {
         defer { suggestionsLoaded = true }
         guard TMDBClient.shared.hasKey else { suggested = []; return }
+        if !force, isFresh("suggested", key) { return }
         async let movies = try? await TMDBClient.shared.trending("movie")
         async let shows = try? await TMDBClient.shared.trending("tv")
         async let because = Self.recommendations(after: last)
@@ -114,7 +150,9 @@ final class HomeModel {
         }
         if !m.isEmpty { out.append(CatalogRow(id: "trend-movie", title: "Trending Movies", items: m, source: .tmdbTrending("movie"), symbol: "flame.fill", prefKey: ContentRules.Builtin.trendingMovies)) }
         if !t.isEmpty { out.append(CatalogRow(id: "trend-tv", title: "Trending Shows", items: t, source: .tmdbTrending("tv"), symbol: "flame.fill", prefKey: ContentRules.Builtin.trendingShows)) }
+        guard !Task.isCancelled else { return }
         suggested = out
+        if !out.isEmpty { markLoaded("suggested", key) }
     }
 
     /// Add-on catalogues that get a row on Home, in add-on order.
@@ -137,8 +175,12 @@ final class HomeModel {
         return jobs
     }
 
-    func load(addons: [Addon], rules: ContentRules, pickers: Set<String> = []) async {
+    func load(addons: [Addon], rules: ContentRules, pickers: Set<String> = [], key: String, force: Bool = false) async {
+        if !force, rowsLoaded, isFresh("rows", key) { return }
         let jobs = Self.homeJobs(addons: addons, rules: rules, pickers: pickers)
+        // Rows appear one by one only on the very first load. A reload keeps what is on screen and swaps once at
+        // the end, so the page never collapses to a single row and re-grows (that was the jump after leaving a catalogue).
+        let progressive = rows.isEmpty
         var done: [Int: CatalogRow] = [:]
         await withTaskGroup(of: (Int, CatalogRow?).self) { group in
             for (i, job) in jobs.enumerated() {
@@ -159,7 +201,7 @@ final class HomeModel {
             for await (i, row) in group {
                 guard let row else { continue }
                 done[i] = row
-                rows = done.keys.sorted().compactMap { done[$0] }
+                if progressive { rows = done.keys.sorted().compactMap { done[$0] } }
             }
         }
         // Settle on exactly this run's result, so rows from an add-on that was just switched off (or whose
@@ -167,6 +209,7 @@ final class HomeModel {
         guard !Task.isCancelled else { return }
         rows = done.keys.sorted().compactMap { done[$0] }
         rowsLoaded = true
+        if !done.isEmpty || jobs.isEmpty { markLoaded("rows", key) }
     }
 }
 
@@ -213,6 +256,9 @@ struct HomeView: View {
     }
     private func visible(_ rows: [CatalogRow]) -> [CatalogRow] { rows.filter { !contentPrefs.rules.isRowHidden($0.prefKey) } }
     private var heroDeps: Int { model.rows.count + model.suggested.count + model.lists.count + model.upNext.count + model.themes.count }
+    /// Rows fade in while Home first fills; once it has settled, later changes (themes, lists, Up Next) land without
+    /// animating the whole feed, which is what made the page lurch.
+    private var loadAnimation: Animation? { model.settled ? nil : .smooth(duration: 0.5) }
     private var selectedLists: Set<Int> { Set(mdbLists.split(separator: ",").compactMap { Int($0) }) }
 
     var body: some View {
@@ -221,11 +267,11 @@ struct HomeView: View {
                 .navigationDestination(for: MetaPreview.self) { DetailView(item: $0) }
                 .navigationDestination(for: ResumeTarget.self) { DetailView(item: $0.item, startSeason: $0.season, startEpisode: $0.episode) }
                 .navigationDestination(for: CatalogRow.self) { CatalogGridView(row: $0) }
-                .task(id: addonTaskID) { await model.load(addons: store.enabledAddons, rules: contentPrefs.rules, pickers: store.pickerIDs) }
-                .task(id: themesTaskID) { await model.loadThemes(rules: contentPrefs.rules, enrichWith: store.enrichmentAddon) }
-                .task(id: listsTaskID) { await model.loadLists(selected: selectedLists, rules: contentPrefs.rules) }
-                .task(id: suggestionsTaskID) { await model.loadSuggestions(last: history.lastWatched, rules: contentPrefs.rules) }
-                .task(id: history.finishedSeries) { await model.loadUpNext(history.finishedEntries) }
+                .task(id: addonTaskID) { await model.load(addons: store.enabledAddons, rules: contentPrefs.rules, pickers: store.pickerIDs, key: addonTaskID.joined(separator: "|")) }
+                .task(id: themesTaskID) { await model.loadThemes(rules: contentPrefs.rules, enrichWith: store.enrichmentAddon, key: themesTaskID) }
+                .task(id: listsTaskID) { await model.loadLists(selected: selectedLists, rules: contentPrefs.rules, key: listsTaskID) }
+                .task(id: suggestionsTaskID) { await model.loadSuggestions(last: history.lastWatched, rules: contentPrefs.rules, key: suggestionsTaskID) }
+                .task(id: history.finishedSeries) { await model.loadUpNext(history.finishedEntries, key: history.finishedSeries.sorted().joined(separator: ",")) }
         }
     }
 
@@ -253,7 +299,7 @@ struct HomeView: View {
         ScrollView {
             rows
                 .padding(.bottom, 40)
-                .animation(.smooth(duration: 0.5), value: heroDeps)
+                .animation(loadAnimation, value: heroDeps)
                 .background(alignment: .top, content: { ambient })
         }
         .ignoresSafeArea(edges: .top)
@@ -276,7 +322,7 @@ struct HomeView: View {
             PaneScroll(ctx: ctx, refresh: refresh) {
                 LazyVStack(alignment: .leading, spacing: 30) { feedRows }
                     .padding(.leading, 14)
-                    .animation(.smooth(duration: 0.5), value: heroDeps)
+                    .animation(loadAnimation, value: heroDeps)
                     .background(alignment: .top, content: { ambient })
             }
         }
@@ -349,11 +395,11 @@ struct HomeView: View {
 
     private func refresh() async {
         let rules = contentPrefs.rules
-        async let a: () = model.load(addons: store.enabledAddons, rules: rules, pickers: store.pickerIDs)
-        async let b: () = model.loadSuggestions(last: history.lastWatched, rules: rules)
-        async let c: () = model.loadLists(selected: selectedLists, rules: rules)
-        async let d: () = model.loadUpNext(history.finishedEntries)
-        async let e: () = model.loadThemes(rules: rules, enrichWith: store.enrichmentAddon)
+        async let a: () = model.load(addons: store.enabledAddons, rules: rules, pickers: store.pickerIDs, key: addonTaskID.joined(separator: "|"), force: true)
+        async let b: () = model.loadSuggestions(last: history.lastWatched, rules: rules, key: suggestionsTaskID, force: true)
+        async let c: () = model.loadLists(selected: selectedLists, rules: rules, key: listsTaskID, force: true)
+        async let d: () = model.loadUpNext(history.finishedEntries, key: history.finishedSeries.sorted().joined(separator: ","), force: true)
+        async let e: () = model.loadThemes(rules: rules, enrichWith: store.enrichmentAddon, key: themesTaskID, force: true)
         _ = await (a, b, c, d, e)
     }
 }
@@ -366,6 +412,9 @@ struct HeroCarousel: View {
     @Environment(\.horizontalSizeClass) private var hSize
     @State private var page: String?
     @State private var visible = true
+    /// True while a finger is on the carousel, so the auto-advance never fights a swipe in progress.
+    @State private var dragging = false
+    @State private var swipeTick = 0
 
     private static let interval = 7.0
     private var wide: Bool { hSize == .regular }
@@ -373,7 +422,7 @@ struct HeroCarousel: View {
     private var currentID: String { page ?? items.first?.id ?? "" }
     private var index: Int { items.firstIndex(where: { $0.id == currentID }) ?? 0 }
 
-    private struct AutoKey: Hashable { let page: String; let visible: Bool }
+    private struct AutoKey: Hashable { let page: String; let visible: Bool; let dragging: Bool }
 
     var body: some View {
         ScrollView(.horizontal) {
@@ -390,17 +439,25 @@ struct HeroCarousel: View {
         .scrollIndicators(.hidden)
         .frame(height: height)
         .overlay(alignment: .bottom) {
-            if items.count > 1 { HeroIndicator(count: items.count, index: index, duration: Self.interval).padding(.bottom, 12) }
+            if items.count > 1 {
+                HeroIndicator(count: items.count, index: index, duration: Self.interval, running: visible && !dragging)
+                    .padding(.bottom, 12)
+            }
         }
-        .sensoryFeedback(.selection, trigger: page)
+        // Haptic only when the user's own swipe settles on a page, not on every automatic advance.
+        .onScrollPhaseChange { old, new in
+            dragging = new == .interacting
+            if old == .decelerating, new == .idle { swipeTick += 1 }
+        }
+        .sensoryFeedback(.selection, trigger: swipeTick)
         .onAppear { visible = true }
         .onDisappear { visible = false }
         .onChange(of: items.map(\.id)) { _, ids in
             if let p = page, !ids.contains(p) { page = ids.first }
         }
         // Auto-advance. The task restarts on every page change (manual swipes included) and pauses off-screen.
-        .task(id: AutoKey(page: currentID, visible: visible)) {
-            guard visible, items.count > 1 else { return }
+        .task(id: AutoKey(page: currentID, visible: visible, dragging: dragging)) {
+            guard visible, !dragging, items.count > 1 else { return }
             try? await Task.sleep(for: .seconds(Self.interval))
             guard !Task.isCancelled else { return }
             let next = (index + 1) % items.count
@@ -465,7 +522,7 @@ private struct HeroPage: View {
                 Text(d).font(.subheadline).lineLimit(2).opacity(0.85)
             }
             // Flat on purpose: live glass over artwork that is moving would be re-sampled every frame.
-            Label("Details", systemImage: "info.circle")
+            Text("Details")
                 .font(.subheadline.weight(.semibold)).padding(.horizontal, 18).padding(.vertical, 10)
                 .background(.white.opacity(0.2), in: Capsule())
                 .overlay(Capsule().strokeBorder(.white.opacity(0.28), lineWidth: 0.5))
@@ -496,14 +553,16 @@ private extension LinearGradient {
     }
 }
 
-/// Slow zoom on the hero artwork. Motion this small doesn't need the display's full refresh rate: it steps at 24 Hz
-/// (a fraction of a point per step, so it still reads as continuous) instead of 120 Hz, and it stops completely
-/// off screen, under Reduce Motion, and in Low Power Mode.
+/// Slow zoom on the hero artwork while its page is showing. One long linear animation handed to Core Animation, so
+/// the zoom runs on the render server at the display's own rate: no per-frame SwiftUI work (the old 24 Hz timeline
+/// re-evaluated the view and re-rasterised the masked artwork on every tick, and stepped visibly). It stops under
+/// Reduce Motion and in Low Power Mode. When the page stops being active the zoom is left alone while the page is
+/// still sliding out, and only reset once it is off screen, so nothing snaps back mid-swipe.
 private struct KenBurns<Content: View>: View {
     let active: Bool
     let content: Content
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var began = Date()
+    @State private var zoomed = false
 
     init(active: Bool, @ViewBuilder content: () -> Content) {
         self.active = active
@@ -513,16 +572,25 @@ private struct KenBurns<Content: View>: View {
     private var moving: Bool { active && !reduceMotion && !PowerMode.shared.saving }
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 24.0, paused: !moving)) { tl in
-            content.scaleEffect(scale(at: tl.date))
-        }
-        .onChange(of: moving) { _, on in if on { began = Date() } }
+        content
+            .scaleEffect(zoomed ? 1.08 : 1)
+            .task(id: moving) {
+                if moving {
+                    reset()
+                    try? await Task.sleep(for: .milliseconds(40))
+                    guard !Task.isCancelled else { return }
+                    withAnimation(.linear(duration: 9)) { zoomed = true }
+                } else {
+                    try? await Task.sleep(for: .seconds(1.2))
+                    guard !Task.isCancelled else { return }
+                    reset()
+                }
+            }
     }
 
-    private func scale(at date: Date) -> CGFloat {
-        guard moving else { return 1 }
-        let t = min(max(date.timeIntervalSince(began), 0) / 9, 1)
-        return 1 + 0.08 * CGFloat(t)
+    private func reset() {
+        var t = Transaction(); t.disablesAnimations = true
+        withTransaction(t) { zoomed = false }
     }
 }
 
@@ -530,6 +598,8 @@ private struct HeroIndicator: View {
     let count: Int
     let index: Int
     let duration: Double
+    /// False while the carousel is off screen or being dragged: the fill rests empty instead of lying about progress.
+    let running: Bool
 
     var body: some View {
         HStack(spacing: 6) {
@@ -537,22 +607,31 @@ private struct HeroIndicator: View {
                 let on = i == index
                 Capsule().fill(.white.opacity(0.35))
                     .frame(width: on ? 28 : 6, height: 5)
-                    .overlay(alignment: .leading) { if on { AutoFill(duration: duration) } }
+                    .overlay(alignment: .leading) { if on { AutoFill(duration: duration, running: running) } }
                     .animation(.spring(response: 0.4, dampingFraction: 0.8), value: index)
             }
         }
     }
 }
 
-/// White fill that sweeps across the active indicator over one auto-advance interval.
+/// White fill that sweeps across the active indicator over one auto-advance interval. It restarts from empty every
+/// time `running` flips on (returning from a title, finishing a drag), in step with the carousel's own timer.
 private struct AutoFill: View {
     let duration: Double
+    let running: Bool
     @State private var on = false
 
     var body: some View {
         Capsule().fill(.white)
             .frame(width: on ? 28 : 0, height: 5)
-            .onAppear { withAnimation(.linear(duration: duration)) { on = true } }
+            .task(id: running) {
+                var t = Transaction(); t.disablesAnimations = true
+                withTransaction(t) { on = false }
+                guard running else { return }
+                try? await Task.sleep(for: .milliseconds(30))
+                guard !Task.isCancelled else { return }
+                withAnimation(.linear(duration: duration)) { on = true }
+            }
     }
 }
 
@@ -773,9 +852,6 @@ struct CatalogRowView: View {
                 LazyHStack(spacing: 12) {
                     ForEach(row.items) { item in
                         PosterCard(item: item, width: posterWidth)
-                            .scrollTransition(axis: .horizontal) { content, phase in
-                                content.scaleEffect(phase.isIdentity ? 1 : 0.92).opacity(phase.isIdentity ? 1 : 0.6)
-                            }
                     }
                     NavigationLink(value: row) {
                         VStack(spacing: 8) {

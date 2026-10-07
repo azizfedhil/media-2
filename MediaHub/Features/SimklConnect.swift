@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// "Connect to Simkl" with PIN login. One control, used by Integrations and by the Profile page.
+/// "Connect to Simkl" with PIN login. One control, used by Integrations and by the Simkl page under "View profile".
 /// MediaHub ships its own Simkl app, so nobody has to register one: tap Connect, enter the code on simkl.com/pin.
 struct SimklConnectControls: View {
     @Environment(SimklStore.self) private var simkl
@@ -64,5 +64,29 @@ struct SimklConnectControls: View {
             Button("Cancel", role: .cancel) { simkl.cancelLogin() }.font(.footnote)
         }
         .padding(.vertical, 4)
+    }
+}
+
+
+/// The Simkl login as a page of its own, reached from "Simkl" under "View profile" in the profile sheet.
+struct SimklLoginPage: View {
+    @Environment(SimklStore.self) private var simkl
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                SimklConnectControls()
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(16)
+                    .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                Text("Tap Connect to Simkl, then enter the code at simkl.com/pin. No account setup, keys or redirects needed. Your library syncs when the app opens and only downloads what changed.")
+                    .font(.footnote).foregroundStyle(.secondary)
+                    .padding(.horizontal, 4)
+            }
+            .padding(16)
+        }
+        .scrollIndicators(.hidden)
+        .navigationTitle("Simkl")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
