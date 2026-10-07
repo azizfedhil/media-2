@@ -191,57 +191,76 @@ struct HomeView: View {
     private var selectedLists: Set<Int> { Set(mdbLists.split(separator: ",").compactMap { Int($0) }) }
 
     var body: some View {
-        let hero = model.hero
         NavigationStack {
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 30) {
-                    if !hero.isEmpty { HeroCarousel(items: hero, tint: $tint) }
-                    if !history.continueEntries.isEmpty || !model.upNext.isEmpty {
-                        ContinueRow(entries: history.continueEntries, upNext: model.upNext)
-                    }
-                    if !themesHidden, let t = model.themes.first { ThemeCarousel(row: t) }
-                    ForEach(visible(model.suggested)) { CatalogRowView(row: $0) }
-                    if !themesHidden, model.themes.count > 1 { ThemeCarousel(row: model.themes[1]) }
-                    ForEach(model.lists) { CatalogRowView(row: $0) }
-                    ForEach(visible(model.rows)) { CatalogRowView(row: $0) }
-                }
+            feed
+                .navigationDestination(for: MetaPreview.self) { DetailView(item: $0) }
+                .navigationDestination(for: ResumeTarget.self) { DetailView(item: $0.item, startSeason: $0.season, startEpisode: $0.episode) }
+                .navigationDestination(for: CatalogRow.self) { CatalogGridView(row: $0) }
+                .task(id: addonTaskID) { await model.load(addons: store.enabledAddons, rules: contentPrefs.rules) }
+                .task(id: themesTaskID) { await model.loadThemes(rules: contentPrefs.rules) }
+                .task(id: listsTaskID) { await model.loadLists(selected: selectedLists, rules: contentPrefs.rules) }
+                .task(id: suggestionsTaskID) { await model.loadSuggestions(last: history.lastWatched, rules: contentPrefs.rules) }
+                .task(id: history.finishedSeries) { await model.loadUpNext(history.finishedEntries) }
+        }
+    }
+
+    // The task ids are built here, one typed String each: long `a + "|" + b + (c ? ...)` chains inside the
+    // modifier list make the compiler give up ("unable to type-check this expression in reasonable time").
+    private var themesTaskID: String {
+        let off: String = themesHidden ? "|off" : ""
+        return tmdbKey + "|" + contentPrefs.rules.categoryKey + off
+    }
+    private var listsTaskID: String {
+        return mdbKey + mdbLists + "|" + contentPrefs.rules.categoryKey
+    }
+    private var suggestionsTaskID: String {
+        let last: String = history.lastWatched?.id ?? ""
+        return tmdbKey + last + "|" + contentPrefs.rules.categoryKey
+    }
+
+    /// The scrolling Home feed with its chrome; navigation destinations and loading tasks are added in `body`.
+    private var feed: some View {
+        ScrollView {
+            rows
                 .padding(.bottom, 40)
                 .animation(.smooth(duration: 0.5), value: heroDeps)
                 .background(alignment: .top, content: { ambient })
+        }
+        .ignoresSafeArea(edges: .top)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
+        .scrollEdgeEffectHidden(true, for: .top)
+        .profileToolbar(logo: true)
+        .scrollIndicators(.hidden)
+        .refreshable { await refresh() }
+        .onChange(of: phase) { _, p in if p == .active { model.refreshHeroDay() } }
+        .overlay { emptyState }
+    }
+
+    @ViewBuilder private var rows: some View {
+        let hero = model.hero
+        LazyVStack(alignment: .leading, spacing: 30) {
+            if !hero.isEmpty { HeroCarousel(items: hero, tint: $tint) }
+            if !history.continueEntries.isEmpty || !model.upNext.isEmpty {
+                ContinueRow(entries: history.continueEntries, upNext: model.upNext)
             }
-            .ignoresSafeArea(edges: .top)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
-            .scrollEdgeEffectHidden(true, for: .top)
-            .profileToolbar(logo: true)
-            .scrollIndicators(.hidden)
-            .refreshable { await refresh() }
-            .onChange(of: phase) { _, p in if p == .active { model.refreshHeroDay() } }
-            .overlay {
-                if hidesEverything {
-                    ContentUnavailableView {
-                        Label("Nothing to show", systemImage: "eye.slash")
-                    } description: {
-                        Text("Your content settings are hiding everything here. Change them in Settings → Content & catalogues.")
-                    }
-                } else if model.rows.isEmpty && model.suggested.isEmpty {
-                    ProgressView()
-                }
+            if !themesHidden, let t = model.themes.first { ThemeCarousel(row: t) }
+            ForEach(visible(model.suggested)) { CatalogRowView(row: $0) }
+            if !themesHidden, model.themes.count > 1 { ThemeCarousel(row: model.themes[1]) }
+            ForEach(model.lists) { CatalogRowView(row: $0) }
+            ForEach(visible(model.rows)) { CatalogRowView(row: $0) }
+        }
+    }
+
+    @ViewBuilder private var emptyState: some View {
+        if hidesEverything {
+            ContentUnavailableView {
+                Label("Nothing to show", systemImage: "eye.slash")
+            } description: {
+                Text("Your content settings are hiding everything here. Change them in Settings → Content & catalogues.")
             }
-            .navigationDestination(for: MetaPreview.self) { DetailView(item: $0) }
-            .navigationDestination(for: ResumeTarget.self) { DetailView(item: $0.item, startSeason: $0.season, startEpisode: $0.episode) }
-            .navigationDestination(for: CatalogRow.self) { CatalogGridView(row: $0) }
-            .task(id: addonTaskID) { await model.load(addons: store.enabledAddons, rules: contentPrefs.rules) }
-            .task(id: tmdbKey + "|" + contentPrefs.rules.categoryKey + (themesHidden ? "|off" : "")) {
-                await model.loadThemes(rules: contentPrefs.rules)
-            }
-            .task(id: mdbKey + mdbLists + "|" + contentPrefs.rules.categoryKey) {
-                await model.loadLists(selected: selectedLists, rules: contentPrefs.rules)
-            }
-            .task(id: tmdbKey + (history.lastWatched?.id ?? "") + "|" + contentPrefs.rules.categoryKey) {
-                await model.loadSuggestions(last: history.lastWatched, rules: contentPrefs.rules)
-            }
-            .task(id: history.finishedSeries) { await model.loadUpNext(history.finishedEntries) }
+        } else if model.rows.isEmpty && model.suggested.isEmpty {
+            ProgressView()
         }
     }
 
