@@ -19,6 +19,7 @@ struct SettingsView: View {
     @AppStorage("ui.titleLogos") private var titleLogos = true
     @AppStorage("player.glass") private var glass = true
     @AppStorage("player.autoplayNext") private var autoplayNext = true
+    @AppStorage(PillItem.storageKey) private var pillPinned = PillItem.defaultRaw
     @AppStorage(PiPController.enabledKey) private var pipEnabled = true
     @AppStorage("skip.enabled") private var skipEnabled = true
     @AppStorage("skip.fallbackSeconds") private var fallbackSkip = 85
@@ -147,6 +148,15 @@ struct SettingsView: View {
                             Spacer()
                             Text(subLang == "off" ? "Off" : (SubLanguages.all.first { $0.code == subLang }?.name ?? subLang))
                                 .font(.footnote).foregroundStyle(.secondary)
+                        }
+                    }
+                    NavigationLink {
+                        PlayerControlsSettingsView()
+                    } label: {
+                        HStack {
+                            Label("Player controls", systemImage: "slider.horizontal.3")
+                            Spacer()
+                            Text("\(PillItem.decode(pillPinned).count) pinned").font(.footnote).foregroundStyle(.secondary)
                         }
                     }
                     Toggle("Liquid Glass controls", isOn: $glass)
