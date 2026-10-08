@@ -30,3 +30,13 @@ Editorial collections ("Small-Town Secrets", "K-Drama Fever"...) on Home and Exp
 - **Rotation:** one daily slate of 10 themes (Home's 6 candidates, then Explore's 4), taken from seeded shuffles of the whole catalogue. Nothing repeats until every theme has had a turn, consecutive days never overlap, and Home and Explore never share a theme. Home shows 5 rows (the sixth is a spare in case one theme is empty), spread through the feed: after Continue Watching, after the suggestions, after your lists, then after every second add-on row. Explore shows 3.
 - **AIOMetadata enrichment:** when an AIOMetadata add-on (or one marked as such under Settings -> Content & catalogues -> AIOMetadata) is switched on and serves `meta`, theme rows load from TMDB first and are then updated in place with the add-on's genres (the caption under the logo) and its title logo, which takes priority over the TMDB / TVDB logo for the session. Only the first 8 titles of a row are looked up; titles the add-on doesn't know keep their TMDB data. Skipped in Low Power Mode. Code: `ThemeEnrichment`, `AddonClient.metaExtras`, `LogoResolver.prefer`.
 
+
+## Performance & battery notes
+- **Hidden pages rest.** The sidebar layout keeps visited pages alive under `opacity(0)`, so `onAppear`/`onDisappear` never fire for them. `EnvironmentValues.pageActive` (set in `SidebarShell`, and cleared for the poster panel while the pane covers it) tells loops like the hero auto-advance and Ken Burns zoom to stop. `HeroCarousel` / `WideHeroPanel` also stop outside `scenePhase == .active`.
+- **Failed reloads keep the page.** Home's rows, suggestions and lists no longer swap in an empty result when every request failed; they keep what is on screen (re-filtered with the current content rules) and are not marked fresh, so the next visit retries.
+- **Explore theme rows** are loaded once per 15 minutes per input set and swapped in once, not rebuilt every time the tab is revisited.
+- **TMDB**: one shared `/find` per IMDb id (a detail page used to send several), no request at all for ids TMDB can't resolve (kitsu:, mal:...), URLs built without force unwraps, keyword/id caches written in batches and flushed when the app leaves the foreground.
+- **Logos**: cache writes are batched; "no logo" answers are kept for 6 h on disk (not recorded while offline).
+- **Downloads**: URLSession progress callbacks are throttled to 1% steps on the delegate queue before touching the main actor; season enqueue saves the index once.
+- **Pear loader** runs at 30 fps (the launch intro stays at 60 unless Low Power Mode / heat).
+- **Player** banks the resume point when paused and when the app goes to the background.

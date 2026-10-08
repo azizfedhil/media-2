@@ -511,6 +511,7 @@ struct PlayerScreen: View {
     @Environment(ThemeStore.self) private var theme
     @Environment(AddonStore.self) private var store
     @Environment(\.openURL) private var openURL
+    @Environment(\.scenePhase) private var scenePhase
     @AppStorage(SubtitleStyle.storageKey) private var subJSON = ""
     @AppStorage("sub.lang") private var subLang = "off"
     @AppStorage("player.glass") private var glassPref = true
@@ -635,7 +636,14 @@ struct PlayerScreen: View {
         }
         .onChange(of: model.isPaused) { _, paused in
             if paused && !showInfo { withAnimation(.easeInOut(duration: 0.2)) { showControls = true } }
+            // The 15 s tick skips paused time, and a paused player can sit in the background until iOS ends the app,
+            // so pausing is when the resume point gets banked.
+            if paused { save(isFinal: false) }
             updateIdleTimer()
+        }
+        // Same for leaving the app while playing (PiP, background audio): the system may end it without notice.
+        .onChange(of: scenePhase) { _, p in
+            if p == .background { logPlayTime(); save(isFinal: false) }
         }
         .onChange(of: model.error) { _, _ in updateIdleTimer() }
         .onChange(of: showControls, initial: true) { _, shown in

@@ -53,7 +53,7 @@ actor OpenSubtitlesClient {
             guard let u = s.url.flatMap(URL.init(string:)), let lang = s.lang, !lang.isEmpty else { return nil }
             return OnlineSubtitle(id: s.id ?? "\(i)-\(lang)", url: u, lang: lang)
         }
-        if !out.isEmpty { cache[key] = out }
+        cache[key] = out            // a 200 with nothing in it is an answer too: don't ask again this launch
         return out
     }
 

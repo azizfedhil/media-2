@@ -225,6 +225,7 @@ struct RootView: View {
             } else {
                 watchLog.flush()
                 ArtworkPool.shared.flush()
+                Task { await TMDBClient.shared.flushPending(); await LogoResolver.shared.flush() }
             }
         }
     }

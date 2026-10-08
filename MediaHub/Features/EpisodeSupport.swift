@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 struct EpisodeItem: Identifiable {
     let id: Int          // episode number
@@ -18,16 +19,35 @@ extension EpisodeItem {
         let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.dateFormat = "yyyy-MM-dd"; return f
     }()
 
+    private struct DayStamp: Sendable { var text = ""; var expires = Date.distantPast }
+    private static let dayStamp = OSAllocatedUnfairLock(initialState: DayStamp())
+
+    /// Today as "yyyy-MM-dd" (local calendar day), formatted once per day. Every episode card asks several times per
+    /// redraw whether its episode is upcoming; formatting a date each time added up across a season's worth of cards.
+    static var todayString: String {
+        dayStamp.withLock { s in
+            let now = Date()
+            if now >= s.expires {
+                s.text = isoDay.string(from: now)
+                let cal = Calendar.current
+                s.expires = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: now)) ?? now.addingTimeInterval(3600)
+            }
+            return s.text
+        }
+    }
+
     /// The air date is known and still ahead of today (local calendar day). Unknown dates count as aired, same as
     /// `UpNext` and `Downloads`, so a show whose source gives no dates never looks unreleased.
     var isUpcoming: Bool {
         guard let d = airDate, !d.isEmpty else { return false }
-        return d > Self.isoDay.string(from: .now)
+        return d > Self.todayString
     }
 
     enum Freshness {
         case justAired, new
         var label: String { self == .justAired ? "JUST AIRED" : "NEW" }
+        /// For running text, e.g. the line under an episode's description.
+        var text: String { self == .justAired ? "Just aired" : "New" }
     }
 
     /// Aired today or yesterday = "Just aired"; within the last week = "New"; nil otherwise (older, upcoming or no date).

@@ -36,9 +36,10 @@ actor MDBListClient {
 
     private func get<T: Decodable>(_ path: String, _ q: [String: String] = [:]) async throws -> T {
         guard hasKey else { throw URLError(.userAuthenticationRequired) }
-        var c = URLComponents(string: "https://api.mdblist.com\(path)")!
+        guard var c = URLComponents(string: "https://api.mdblist.com\(path)") else { throw URLError(.badURL) }
         c.queryItems = [URLQueryItem(name: "apikey", value: apiKey)] + q.map { URLQueryItem(name: $0, value: $1) }
-        let (d, r) = try await URLSession.shared.data(from: c.url!)
+        guard let url = c.url else { throw URLError(.badURL) }
+        let (d, r) = try await URLSession.shared.data(from: url)
         guard (r as? HTTPURLResponse)?.statusCode == 200 else { throw URLError(.badServerResponse) }
         let dec = JSONDecoder(); dec.keyDecodingStrategy = .convertFromSnakeCase
         return try dec.decode(T.self, from: d)
@@ -46,6 +47,7 @@ actor MDBListClient {
 
     func ratings(imdb: String, type: String) async -> [Rating] {
         if let hit = ratingCache[imdb] { return hit }
+        guard imdb.hasPrefix("tt") else { return [] }       // MDBList is keyed by IMDb id; anything else can't match
         guard let r: RatingsResponse = try? await get("/imdb/\(type == "series" ? "show" : "movie")/\(imdb)") else { return [] }
         let by = Dictionary(r.ratings?.compactMap { x in x.value.map { (x.source, $0) } } ?? [], uniquingKeysWith: { a, _ in a })
         var out: [Rating] = []

@@ -14,6 +14,9 @@ final class ExploreModel {
     private(set) var rules = ContentRules.none
     private var page = 0
     private var generation = 0
+    /// What the last theme load finished with, so coming back to the tab doesn't refetch and rebuild the rows.
+    @ObservationIgnored private var themesLoaded: (key: String, at: Date)?
+    @ObservationIgnored private var pendingThemes: [ThemeRow]?
 
     /// No filters: show what's trending this week.
     var isTrending: Bool { genre == nil && year == nil && sort == .popular }
@@ -45,9 +48,24 @@ final class ExploreModel {
 
     /// Themed rows (the ones after Home's candidates), shown above the grid while no filter is active. One more theme
     /// than shown is loaded, because the Movies / Shows tabs each drop a theme that is mostly the other kind.
-    func loadThemes(rules: ContentRules, enrichWith addon: Addon?) async {
+    ///
+    /// The tab's loading task restarts every time the tab comes back on screen. Rows that are already showing and recent
+    /// are left alone, and a refresh swaps the finished set in once, so the rows never shrink and re-grow under the
+    /// user's finger as each theme lands. Pull-to-refresh forces a reload.
+    func loadThemes(rules: ContentRules, enrichWith addon: Addon?, key: String = "", force: Bool = false) async {
+        if !force, !themes.isEmpty, let l = themesLoaded, l.key == key,
+           Date().timeIntervalSince(l.at) < 15 * 60 { return }
+        let progressive = themes.isEmpty
+        pendingThemes = nil
         await ThemeCatalog.load(count: ThemeCatalog.exploreCandidates, offset: ThemeCatalog.homeCandidates, limit: 16,
-                                rules: rules, enrichWith: addon) { [weak self] rows in self?.themes = rows }
+                                rules: rules, enrichWith: addon) { [weak self] rows in
+            guard let self else { return }
+            self.pendingThemes = rows
+            if progressive { self.themes = rows }
+        }
+        guard !Task.isCancelled, let latest = pendingThemes else { return }
+        themes = latest
+        if !latest.isEmpty { themesLoaded = (key, Date()) }
     }
     /// Movies tab shows movie rows, Shows tab shows series rows.
     var themeRows: [ThemeRow] {
@@ -123,7 +141,7 @@ struct ExploreView: View {
             guard !tmdbKey.isEmpty else { return }
             let rules = contentPrefs.rules
             async let g: () = model.loadGenres()
-            async let t: () = model.loadThemes(rules: rules, enrichWith: store.enrichmentAddon)
+            async let t: () = model.loadThemes(rules: rules, enrichWith: store.enrichmentAddon, key: themesTaskID)
             await model.use(rules)
             _ = await (g, t)
         }
@@ -171,7 +189,8 @@ struct ExploreView: View {
         }
         .scrollIndicators(.hidden)
         .refreshable {
-            async let t: () = model.loadThemes(rules: contentPrefs.rules, enrichWith: store.enrichmentAddon)
+            async let t: () = model.loadThemes(rules: contentPrefs.rules, enrichWith: store.enrichmentAddon,
+                                               key: themesTaskID, force: true)
             await model.reload()
             await t
         }

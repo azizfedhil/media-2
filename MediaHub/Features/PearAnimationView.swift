@@ -18,7 +18,11 @@ struct PearAnimationView: View {
                 Canvas { ctx, size in Self.draw(PearGeometry.shared.restFrame(mode: mode), &ctx, size) }
             } else {
                 let t0 = start, mode = mode, speed = speed
-                TimelineView(.animation(minimumInterval: 1.0 / 60.0)) { tl in
+                // The one-shot intro is a brand moment and keeps 60 fps. The loader can run for a long time while a
+                // stream opens (torrents especially), and a morphing outline reads the same at 30, so it costs half
+                // the path building. Low Power Mode / a hot phone drops the intro to 30 as well.
+                let fps: Double = (mode == .intro && !PowerMode.shared.saving) ? 60 : 30
+                TimelineView(.animation(minimumInterval: 1.0 / fps)) { tl in
                     Canvas(rendersAsynchronously: true) { ctx, size in
                         let ms = tl.date.timeIntervalSince(t0) * 1000 * speed
                         Self.draw(PearGeometry.shared.frame(at: ms, mode: mode), &ctx, size)

@@ -33,6 +33,20 @@ final class HomeModel {
     private func markLoaded(_ slot: String, _ key: String) { loadedAt[slot] = (key, Date()) }
     @ObservationIgnored private var pendingThemes: [ThemeRow]?
 
+    /// Rows that are already on screen, with today's content rules applied again. Used when a reload brings nothing
+    /// back (no connection, add-ons down): the page keeps what it has instead of collapsing to empty, and a filter the
+    /// user just switched on still takes effect.
+    private func refiltered(_ old: [CatalogRow], rules: ContentRules) async -> [CatalogRow] {
+        var kept: [CatalogRow] = []
+        for row in old {
+            let items = await TitleClassifier.shared.filter(row.items, rules: rules)
+            guard !items.isEmpty else { continue }
+            kept.append(CatalogRow(id: row.id, title: row.title, items: items, source: row.source,
+                                   symbol: row.symbol, prefKey: row.prefKey, rawCount: row.rawCount))
+        }
+        return kept
+    }
+
     /// Next episode for each show whose last episode you finished. Resolved concurrently, order kept.
     func loadUpNext(_ entries: [WatchHistory.Entry], key: String, force: Bool = false) async {
         if !force, isFresh("upNext", key) { return }
@@ -91,6 +105,12 @@ final class HomeModel {
             }
         }
         guard !Task.isCancelled else { return }
+        // Nothing came back (MDBList unreachable): keep the lists on screen, minus any that were just deselected.
+        if done.isEmpty, !lists.isEmpty {
+            let wanted = Set(selected.map { "mdb-\($0)" })
+            lists = await refiltered(lists.filter { wanted.contains($0.id) }, rules: rules)
+            return
+        }
         lists = done.keys.sorted().compactMap { done[$0] }
         if !done.isEmpty { markLoaded("lists", key) }
     }
@@ -151,6 +171,11 @@ final class HomeModel {
         if !m.isEmpty { out.append(CatalogRow(id: "trend-movie", title: "Trending Movies", items: m, source: .tmdbTrending("movie"), symbol: "flame.fill", prefKey: ContentRules.Builtin.trendingMovies)) }
         if !t.isEmpty { out.append(CatalogRow(id: "trend-tv", title: "Trending Shows", items: t, source: .tmdbTrending("tv"), symbol: "flame.fill", prefKey: ContentRules.Builtin.trendingShows)) }
         guard !Task.isCancelled else { return }
+        // Both trending requests failed (no connection): keep the rows on screen rather than blanking them.
+        if rawM == nil, rawT == nil, !suggested.isEmpty {
+            suggested = await refiltered(suggested, rules: rules)
+            return
+        }
         suggested = out
         if !out.isEmpty { markLoaded("suggested", key) }
     }
@@ -182,23 +207,26 @@ final class HomeModel {
         // the end, so the page never collapses to a single row and re-grows (that was the jump after leaving a catalogue).
         let progressive = rows.isEmpty
         var done: [Int: CatalogRow] = [:]
-        await withTaskGroup(of: (Int, CatalogRow?).self) { group in
+        var fetchFailures = 0
+        await withTaskGroup(of: (Int, CatalogRow?, Bool).self) { group in
             for (i, job) in jobs.enumerated() {
                 group.addTask {
                     let (addon, cat) = job
-                    guard let raw = try? await AddonClient.shared.catalog(addon: addon, catalog: cat),
-                          !raw.isEmpty else { return (i, nil) }
+                    // The Bool says the request itself failed (as opposed to an empty or fully filtered catalogue).
+                    guard let raw = try? await AddonClient.shared.catalog(addon: addon, catalog: cat) else { return (i, nil, true) }
+                    guard !raw.isEmpty else { return (i, nil, false) }
                     let items = await TitleClassifier.shared.filter(raw, rules: rules)
-                    guard !items.isEmpty else { return (i, nil) }
+                    guard !items.isEmpty else { return (i, nil, false) }
                     let kind = cat.type == "movie" ? "Movies" : cat.type == "series" ? "Series" : cat.type.capitalized
                     return (i, CatalogRow(id: "\(addon.id)/\(cat.type)/\(cat.id)",
                                           title: "\(cat.name ?? cat.id) \(kind)", items: items,
                                           source: .addon(addon, cat), symbol: "film.stack",
-                                          prefKey: ContentRules.rowKey(addon, cat), rawCount: raw.count))
+                                          prefKey: ContentRules.rowKey(addon, cat), rawCount: raw.count), false)
                 }
             }
             // Rows appear as each catalog lands; order stays stable.
-            for await (i, row) in group {
+            for await (i, row, failed) in group {
+                if failed { fetchFailures += 1 }
                 guard let row else { continue }
                 done[i] = row
                 if progressive { rows = done.keys.sorted().compactMap { done[$0] } }
@@ -207,6 +235,14 @@ final class HomeModel {
         // Settle on exactly this run's result, so rows from an add-on that was just switched off (or whose
         // catalogs all failed) don't linger. Skipped when superseded by a newer load.
         guard !Task.isCancelled else { return }
+        // Every request failed (no connection): keep the rows already on screen, for the add-ons still in use, instead
+        // of swapping in an empty page. Not marked fresh, so the next visit tries again.
+        if !jobs.isEmpty, fetchFailures == jobs.count, !rows.isEmpty {
+            let wanted = Set(jobs.map { "\($0.0.id)/\($0.1.type)/\($0.1.id)" })
+            rows = await refiltered(rows.filter { wanted.contains($0.id) }, rules: rules)
+            rowsLoaded = true
+            return
+        }
         rows = done.keys.sorted().compactMap { done[$0] }
         rowsLoaded = true
         if !done.isEmpty || jobs.isEmpty { markLoaded("rows", key) }
@@ -410,6 +446,8 @@ struct HeroCarousel: View {
     let items: [MetaPreview]
     @Binding var tint: Color?
     @Environment(\.horizontalSizeClass) private var hSize
+    @Environment(\.pageActive) private var pageActive
+    @Environment(\.scenePhase) private var scenePhase
     @State private var page: String?
     @State private var visible = true
     /// True while a finger is on the carousel, so the auto-advance never fights a swipe in progress.
@@ -418,6 +456,8 @@ struct HeroCarousel: View {
 
     private static let interval = 7.0
     private var wide: Bool { hSize == .regular }
+    /// On screen, in the foreground, and not a hidden page: auto-advance, the zoom and the progress bar all follow it.
+    private var running: Bool { visible && pageActive && scenePhase == .active }
     private var height: CGFloat { wide ? 640 : 600 }
     private var currentID: String { page ?? items.first?.id ?? "" }
     private var index: Int { items.firstIndex(where: { $0.id == currentID }) ?? 0 }
@@ -428,7 +468,7 @@ struct HeroCarousel: View {
         ScrollView(.horizontal) {
             LazyHStack(spacing: 0) {
                 ForEach(items) { item in
-                    HeroPage(item: item, active: item.id == currentID && visible, wide: wide, height: height)
+                    HeroPage(item: item, active: item.id == currentID && running, wide: wide, height: height)
                         .containerRelativeFrame(.horizontal)
                 }
             }
@@ -440,7 +480,7 @@ struct HeroCarousel: View {
         .frame(height: height)
         .overlay(alignment: .bottom) {
             if items.count > 1 {
-                HeroIndicator(count: items.count, index: index, duration: Self.interval, running: visible && !dragging)
+                HeroIndicator(count: items.count, index: index, duration: Self.interval, running: running && !dragging)
                     .padding(.bottom, 12)
             }
         }
@@ -456,8 +496,8 @@ struct HeroCarousel: View {
             if let p = page, !ids.contains(p) { page = ids.first }
         }
         // Auto-advance. The task restarts on every page change (manual swipes included) and pauses off-screen.
-        .task(id: AutoKey(page: currentID, visible: visible, dragging: dragging)) {
-            guard visible, !dragging, items.count > 1 else { return }
+        .task(id: AutoKey(page: currentID, visible: running, dragging: dragging)) {
+            guard running, !dragging, items.count > 1 else { return }
             try? await Task.sleep(for: .seconds(Self.interval))
             guard !Task.isCancelled else { return }
             let next = (index + 1) % items.count

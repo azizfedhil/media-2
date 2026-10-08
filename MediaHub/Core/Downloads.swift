@@ -171,7 +171,8 @@ final class DownloadManager {
     /// source is resolved automatically when its turn comes. Returns false when the stream can't be downloaded.
     @discardableResult
     func enqueue(item: MetaPreview, imdb: String, season: Int?, episode: Int?, episodeTitle: String?,
-                 thumb: URL?, logo: URL?, runtime: Int?, addonID: String? = nil, stream: StreamItem? = nil) -> Bool {
+                 thumb: URL?, logo: URL?, runtime: Int?, addonID: String? = nil, stream: StreamItem? = nil,
+                 persist: Bool = true) -> Bool {
         var url: URL?
         if let stream {
             guard let u = stream.downloadURL else { return false }   // torrents and non-HTTPS never download
@@ -188,7 +189,8 @@ final class DownloadManager {
                                       sourceAddonID: stream == nil ? nil : addonID,
                                       sourceSignature: stream?.signature,
                                       remoteURL: url, headers: stream?.requestHeaders ?? [:]))
-        save(); pump()
+        // A whole season passes `persist: false` and saves once at the end instead of once per episode.
+        if persist { save(); pump() }
         return true
     }
 
@@ -198,8 +200,9 @@ final class DownloadManager {
         for ep in episodes {
             if let d = ep.airDate, !d.isEmpty, d > today { continue }   // not aired yet
             enqueue(item: item, imdb: imdb, season: season, episode: ep.id, episodeTitle: ep.name,
-                    thumb: ep.image ?? item.backdropURL, logo: logo, runtime: ep.runtime)
+                    thumb: ep.image ?? item.backdropURL, logo: logo, runtime: ep.runtime, persist: false)
         }
+        save(); pump()
     }
 
     private static let isoDay: DateFormatter = {
@@ -374,9 +377,18 @@ final class DownloadManager {
 // MARK: - URLSession delegate (runs off the main thread)
 
 private final class SessionDelegate: NSObject, URLSessionDownloadDelegate {
+    /// Last progress fraction passed on, per task. Delegate callbacks arrive on one serial queue, so no lock is needed.
+    private var lastFraction: [Int: Double] = [:]
+
     func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didWriteData _: Int64,
                     totalBytesWritten written: Int64, totalBytesExpectedToWrite expected: Int64) {
         guard let name = downloadTask.taskDescription else { return }
+        // This fires for every chunk received, hundreds of times a second on a fast link, and the manager only
+        // wants a redraw per 1%. Dropping the rest here means they never wake the main actor at all.
+        let fraction = expected > 0 ? Double(written) / Double(expected) : 0
+        let id = downloadTask.taskIdentifier
+        if let last = lastFraction[id], abs(fraction - last) < 0.01 { return }
+        lastFraction[id] = fraction
         Task { @MainActor in DownloadManager.shared.progress(name, written: written, expected: expected) }
     }
 
@@ -402,6 +414,7 @@ private final class SessionDelegate: NSObject, URLSessionDownloadDelegate {
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        lastFraction[task.taskIdentifier] = nil
         guard let error, let name = task.taskDescription else { return }
         if (error as NSError).code == NSURLErrorCancelled { return }
         Task { @MainActor in DownloadManager.shared.failed(name, error.localizedDescription) }

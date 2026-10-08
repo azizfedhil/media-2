@@ -23,6 +23,17 @@ enum WideLayout {
     }
 }
 
+private struct PageActiveKey: EnvironmentKey { static let defaultValue = true }
+extension EnvironmentValues {
+    /// False while a page is kept alive but is not the one on screen. The sidebar layout hides visited pages with
+    /// opacity instead of removing them, so `onAppear` / `onDisappear` never fire for them. Anything that loops or
+    /// animates on its own (hero auto-advance, Ken Burns) reads this and rests while it is false.
+    var pageActive: Bool {
+        get { self[PageActiveKey.self] }
+        set { self[PageActiveKey.self] = newValue }
+    }
+}
+
 private struct WideLayoutKey: EnvironmentKey { static let defaultValue = false }
 extension EnvironmentValues {
     /// True inside the sidebar layout. Views use it to pick bigger posters, skip the avatar button, and so on.
@@ -118,6 +129,7 @@ struct SidebarShell: View {
             ForEach(AppTab.allCases) { t in
                 if visited.contains(t) || tab == t {
                     page(t)
+                        .environment(\.pageActive, shown(t))
                         .opacity(shown(t) ? 1 : 0)
                         .allowsHitTesting(shown(t))
                         .accessibilityHidden(!shown(t))
@@ -294,6 +306,7 @@ struct CollapsingSplit<Hero: View, Pane: View>: View {
     @ViewBuilder var hero: () -> Hero
     @ViewBuilder var pane: (SplitContext) -> Pane
 
+    @Environment(\.pageActive) private var pageActive
     @State private var collapsed = false
     @State private var position = ScrollPosition(edge: .leading)
 
@@ -314,6 +327,8 @@ struct CollapsingSplit<Hero: View, Pane: View>: View {
                                 let p = min(max(-x / heroW, 0), 1)
                                 return content.offset(x: -x * 0.5).opacity(1 - 0.5 * p)
                             }
+                            // Covered by the pane: nothing on the poster panel needs to keep moving.
+                            .environment(\.pageActive, pageActive && !collapsed)
                             .zIndex(0)
                         pane(inset)
                             .frame(width: full, height: geo.size.height)
@@ -387,6 +402,8 @@ struct PaneScroll<Content: View>: View {
 struct WideHeroPanel: View {
     let items: [MetaPreview]
     @Binding var tint: Color?
+    @Environment(\.pageActive) private var pageActive
+    @Environment(\.scenePhase) private var scenePhase
     @State private var page: String?
     @State private var visible = true
 
@@ -394,6 +411,8 @@ struct WideHeroPanel: View {
     private var currentID: String { page ?? items.first?.id ?? "" }
     private var index: Int { items.firstIndex(where: { $0.id == currentID }) ?? 0 }
     private var current: MetaPreview? { items.first(where: { $0.id == currentID }) ?? items.first }
+    /// On screen, in the foreground, and not hidden behind another page or the sliding pane.
+    private var running: Bool { visible && pageActive && scenePhase == .active }
     private struct AutoKey: Hashable { let page: String; let visible: Bool }
 
     var body: some View {
@@ -429,8 +448,8 @@ struct WideHeroPanel: View {
         .onChange(of: items.map(\.id)) { _, ids in
             if let p = page, !ids.contains(p) { page = ids.first }
         }
-        .task(id: AutoKey(page: currentID, visible: visible)) {
-            guard visible, items.count > 1 else { return }
+        .task(id: AutoKey(page: currentID, visible: running)) {
+            guard running, items.count > 1 else { return }
             try? await Task.sleep(for: .seconds(Self.interval))
             guard !Task.isCancelled else { return }
             page = items[(index + 1) % items.count].id

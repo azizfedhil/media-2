@@ -24,6 +24,11 @@ actor TMDBClient {
     /// waits on this lookup twice. Lookups already in flight are shared.
     private var imdbCache: [String: String] = (UserDefaults.standard.dictionary(forKey: "tmdb.imdbIDs") as? [String: String]) ?? [:]
     private var imdbInFlight: [String: Task<String?, Never>] = [:]
+    /// IMDb id -> TMDB id lookups already running. A detail page asks for the same id from half a dozen places at
+    /// once (details, recommendations, trailers, logo, network...); they now share one `/find` request.
+    private var idInFlight: [String: Task<Int?, Error>] = [:]
+    /// IMDb ids TMDB answered "not found" for this launch, so they aren't asked again on every redraw.
+    private var idMisses: Set<String> = []
     private var cachePersistPending = false
     private var networkMisses: Set<String> = []
     private var seasonCache: [String: [EpisodeInfo]] = [:]
@@ -134,9 +139,11 @@ actor TMDBClient {
 
     private func get<T: Decodable>(_ path: String, _ query: [String: String] = [:]) async throws -> T {
         guard hasKey else { throw URLError(.userAuthenticationRequired) }
-        var c = URLComponents(string: "https://api.themoviedb.org/3\(path)")!
+        // Paths embed ids that add-ons supply; an odd one must fail this request, not crash the app.
+        guard var c = URLComponents(string: "https://api.themoviedb.org/3\(path)") else { throw URLError(.badURL) }
         c.queryItems = [URLQueryItem(name: "api_key", value: apiKey)] + query.map { URLQueryItem(name: $0, value: $1) }
-        let (d, r) = try await session.data(from: c.url!)
+        guard let url = c.url else { throw URLError(.badURL) }
+        let (d, r) = try await session.data(from: url)
         guard (r as? HTTPURLResponse)?.statusCode == 200 else { throw URLError(.badServerResponse) }
         let dec = JSONDecoder(); dec.keyDecodingStrategy = .convertFromSnakeCase
         return try dec.decode(T.self, from: d)
@@ -310,7 +317,7 @@ actor TMDBClient {
         guard let p: KeywordPage = try? await get("/search/keyword", ["query": q]),
               let k = p.results.first(where: { $0.name.lowercased() == q }) ?? p.results.first else { return nil }
         keywordCache[q] = k.id
-        UserDefaults.standard.set(keywordCache, forKey: "tmdb.keywordIDs")
+        scheduleCachePersist()
         return k.id
     }
 
@@ -373,11 +380,34 @@ actor TMDBClient {
     private func tmdbID(for id: String, type: String) async throws -> Int {
         if id.hasPrefix("tmdb:"), let n = Int(id.dropFirst(5)) { return n }
         if let hit = idCache[id] { return hit }
-        let f: Find = try await get("/find/\(id)", ["external_source": "imdb_id"])
-        guard let found = (kind(type) == "tv" ? f.tvResults : f.movieResults).first?.id else { throw URLError(.resourceUnavailable) }
-        idCache[id] = found
-        scheduleCachePersist()
-        return found
+        // `/find` only understands IMDb ids. Add-on specific ones (kitsu:, mal:, yt:...) can never resolve, so they
+        // don't cost a request.
+        guard id.hasPrefix("tt") else { throw URLError(.resourceUnavailable) }
+        let kindName = kind(type)
+        let key = kindName + ":" + id
+        if idMisses.contains(key) { throw URLError(.resourceUnavailable) }
+
+        let task: Task<Int?, Error>
+        if let running = idInFlight[key] {
+            task = running
+        } else {
+            task = Task<Int?, Error> {
+                let f: Find = try await self.get("/find/\(id)", ["external_source": "imdb_id"])
+                return (kindName == "tv" ? f.tvResults : f.movieResults).first?.id
+            }
+            idInFlight[key] = task
+        }
+        do {
+            let found = try await task.value
+            idInFlight[key] = nil
+            guard let found else { idMisses.insert(key); throw URLError(.resourceUnavailable) }
+            idCache[id] = found
+            scheduleCachePersist()
+            return found
+        } catch {
+            idInFlight[key] = nil          // a network failure is not remembered: the next ask tries again
+            throw error
+        }
     }
 
     /// Writes the id and network caches at most once every few seconds, however many titles resolve in between.
@@ -386,8 +416,14 @@ actor TMDBClient {
         cachePersistPending = true
         Task {
             try? await Task.sleep(for: .seconds(8))
-            flushCaches()
+            flushPending()
         }
+    }
+
+    /// Writes anything still waiting. Also called when the app leaves the foreground, so a quick exit loses nothing.
+    func flushPending() {
+        guard cachePersistPending else { return }
+        flushCaches()
     }
 
     private func flushCaches() {
@@ -397,6 +433,7 @@ actor TMDBClient {
         if imdbCache.count > 3000 { imdbCache = Dictionary(uniqueKeysWithValues: Array(imdbCache.prefix(2000))) }
         UserDefaults.standard.set(idCache, forKey: "tmdb.idCache")
         UserDefaults.standard.set(imdbCache, forKey: "tmdb.imdbIDs")
+        UserDefaults.standard.set(keywordCache, forKey: "tmdb.keywordIDs")
         UserDefaults.standard.set(networkCache.mapValues { [$0.name, $0.logo?.absoluteString ?? ""] }, forKey: "tmdb.networkCache")
     }
 }

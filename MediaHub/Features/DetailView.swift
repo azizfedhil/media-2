@@ -417,18 +417,22 @@ struct DetailView: View {
 
     private var seasonPills: some View {
         ScrollView(.horizontal) {
-            HStack(spacing: 8) {
-                ForEach(seasonChips) { c in
-                    Button { select(season: c.id) } label: {
-                        Text(c.title).font(.subheadline.weight(.semibold))
-                            .padding(.horizontal, 16).padding(.vertical, 9)
-                            .foregroundStyle(c.id == season ? theme.onAccent : Color.primary)
-                            .glassEffect(c.id == season ? .regular.tint(theme.accent).interactive() : .regular.interactive(),
-                                         in: .capsule)
+            // One glass container for the whole strip: long shows have a pill per season, and separate glass layers
+            // are each sampled and composited on their own.
+            GlassEffectContainer(spacing: 8) {
+                HStack(spacing: 8) {
+                    ForEach(seasonChips) { c in
+                        Button { select(season: c.id) } label: {
+                            Text(c.title).font(.subheadline.weight(.semibold))
+                                .padding(.horizontal, 16).padding(.vertical, 9)
+                                .foregroundStyle(c.id == season ? theme.onAccent : Color.primary)
+                                .glassEffect(c.id == season ? .regular.tint(theme.accent).interactive() : .regular.interactive(),
+                                             in: .capsule)
+                        }
+                        .buttonStyle(.plain)
+                        // Long tap: mark the whole season as watched (or unmark it).
+                        .contextMenu { seasonMenu(c.id) }
                     }
-                    .buttonStyle(.plain)
-                    // Long tap: mark the whole season as watched (or unmark it).
-                    .contextMenu { seasonMenu(c.id) }
                 }
             }
             .padding(.horizontal, 20)
@@ -846,13 +850,16 @@ struct DetailView: View {
     private var sourceSheet: some View {
         NavigationStack {
             List {
-                if let p = pinned, sourceFilter == nil || sourceFilter == p.addon.id {
+                // Worked out once per redraw: `pinned` scans every add-on's streams, and the filter below used to
+                // recompute it for each row.
+                let pin = pinned
+                if let p = pin, sourceFilter == nil || sourceFilter == p.addon.id {
                     Section("Pinned · \(p.addon.manifest.name)") { row(p.addon, p.stream, isPinned: true) }
                 }
                 let visible = SourceFilter.apply(streams, sourceFilter)
                 ForEach(visible, id: \.0.id) { addon, items in
                     Section {
-                        ForEach(items.filter { $0.id != pinned?.stream.id }) { row(addon, $0, isPinned: false) }
+                        ForEach(items.filter { $0.id != pin?.stream.id }) { row(addon, $0, isPinned: false) }
                     } header: { Text(addon.manifest.name) } footer: {
                         VStack(alignment: .leading, spacing: 4) {
                             if addon.id == visible.first?.0.id { Text("Swipe a source to pin it to the top for this show.") }

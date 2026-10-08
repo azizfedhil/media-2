@@ -20,6 +20,8 @@ final class SearchModel {
         var jobs: [(Addon, AddonManifest.CatalogDef)] = []
         for a in addons { for c in a.manifest.catalogs ?? [] where c.isSearchable { jobs.append((a, c)) } }
         jobs = Array(jobs.prefix(6))
+        // TMDB doesn't wait for the add-ons: it starts now and the two finish in parallel.
+        async let tmdbResults = TMDBClient.shared.search(q)
         var byIndex: [Int: [MetaPreview]] = [:]
         await withTaskGroup(of: (Int, [MetaPreview]).self) { group in
             for (i, job) in jobs.enumerated() {
@@ -30,7 +32,7 @@ final class SearchModel {
             }
             for await (i, items) in group { byIndex[i] = items }
         }
-        let tmdb = await TMDBClient.shared.search(q)
+        let tmdb = await tmdbResults
         guard !Task.isCancelled else { return }
 
         var out: [MetaPreview] = []

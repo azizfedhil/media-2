@@ -47,18 +47,12 @@ struct EpisodeCard<Actions: View>: View {
             VStack(alignment: .leading, spacing: 0) {
                 if watched { badge("checkmark.circle.fill", "Watched") }
                 else if upNext { badge(nil, "UP NEXT", fill: theme.accent, text: theme.onAccent) }
-                // New episodes announce themselves until you've watched them.
-                if !watched, let f = ep.freshness {
-                    badge("sparkles", f.label, fill: Color(red: 0.13, green: 0.62, blue: 0.35), text: .white)
-                }
-                if let download { downloadBadge(download, below: watched || upNext || (ep.freshness != nil)) }
+                if let download { downloadBadge(download, below: watched || upNext) }
             }
         }
         .overlay(alignment: .topTrailing) {
             VStack(alignment: .trailing, spacing: 0) {
-                let rated = (ep.rating ?? 0) > 0
                 if let r = ep.rating, r > 0 { ratingBadge(r) }
-                if ep.isTopRated { topRatedBadge(below: rated) }
             }
         }
         .overlay(alignment: .bottomLeading) { text }
@@ -90,8 +84,15 @@ struct EpisodeCard<Actions: View>: View {
 
     private var text: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("EPISODE \(ep.id)").font(.system(size: 12, weight: .semibold)).tracking(0.8)
-                .foregroundStyle(.white.opacity(0.65))
+            HStack(spacing: 6) {
+                Text("EPISODE \(ep.id)").font(.system(size: 12, weight: .semibold)).tracking(0.8)
+                    .foregroundStyle(.white.opacity(0.65))
+                if ep.isTopRated {
+                    Text("·").font(.system(size: 12, weight: .semibold)).foregroundStyle(.white.opacity(0.4))
+                    ShimmerText(text: "TOP RATED", symbol: "star.fill", color: Color(red: 1.0, green: 0.78, blue: 0.2))
+                }
+            }
+            .lineLimit(1)
             Text(ep.name).font(.system(size: 18, weight: .bold)).lineLimit(1)
                 .opacity(upcoming ? 0.7 : 1)
             if let o = ep.overview, !o.isEmpty {
@@ -103,7 +104,18 @@ struct EpisodeCard<Actions: View>: View {
                     Label("Airs on \(airs)", systemImage: "calendar")
                         .font(.system(size: 14, weight: .semibold)).foregroundStyle(.white.opacity(0.9))
                 } else {
-                    Text(runtime ?? " ").font(.system(size: 14, weight: .medium)).foregroundStyle(.white.opacity(0.85))
+                    // New episodes announce themselves in words until you've watched them, like "Airs on" does.
+                    let fresh = watched ? nil : ep.freshness
+                    HStack(spacing: 6) {
+                        if let f = fresh {
+                            ShimmerText(text: f.text, symbol: "sparkles", color: Color(red: 1.0, green: 0.55, blue: 0.5),
+                                        size: 14, weight: .semibold, tracking: 0)
+                            if runtime != nil { Text("·").foregroundStyle(.white.opacity(0.4)) }
+                        }
+                        Text(runtime ?? (fresh == nil ? " " : "")).font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.85))
+                    }
+                    .lineLimit(1)
                 }
             }
             .padding(.top, 6)
@@ -125,16 +137,6 @@ struct EpisodeCard<Actions: View>: View {
         .background(.black.opacity(0.55), in: Capsule())
         .padding(10)
         .allowsHitTesting(false)
-    }
-
-    /// Best rated episode of the season.
-    private func topRatedBadge(below: Bool) -> some View {
-        HStack(spacing: 4) { Image(systemName: "star.fill"); Text("TOP RATED") }
-            .font(.caption2.bold()).foregroundStyle(.black)
-            .padding(.horizontal, 8).padding(.vertical, 4)
-            .background(Color(red: 1.0, green: 0.78, blue: 0.2), in: Capsule())
-            .padding(.trailing, 10).padding(.top, below ? 0 : 10)
-            .allowsHitTesting(false)
     }
 
     /// Saved / saving state. Solid accent once the file is on the device.
@@ -165,5 +167,57 @@ struct EpisodeCard<Actions: View>: View {
         .background(fill, in: Capsule())
         .padding(10)
         .allowsHitTesting(false)
+    }
+}
+
+/// A short label whose colour carries a soft highlight that sweeps across it now and then. One long linear animation
+/// handed to Core Animation (no timeline, no per-frame SwiftUI work), and it holds still under Reduce Motion, in Low
+/// Power Mode or when hot, on a page that isn't showing, and while the app is in the background.
+private struct ShimmerText: View {
+    let text: String
+    var symbol: String? = nil
+    let color: Color
+    var size: CGFloat = 12
+    var weight: Font.Weight = .bold
+    var tracking: CGFloat = 0.8
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.pageActive) private var pageActive
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var sweep = false
+
+    private var animating: Bool { !reduceMotion && !PowerMode.shared.saving && pageActive && scenePhase == .active }
+
+    private var label: some View {
+        HStack(spacing: 4) {
+            if let symbol { Image(systemName: symbol) }
+            Text(text)
+        }
+        .font(.system(size: size, weight: weight)).tracking(tracking)
+    }
+
+    var body: some View {
+        label
+            .foregroundStyle(color)
+            .overlay {
+                if animating {
+                    GeometryReader { g in
+                        LinearGradient(colors: [.clear, .white.opacity(0.95), .clear], startPoint: .leading, endPoint: .trailing)
+                            .frame(width: g.size.width * 0.5)
+                            // Travels well past the label, so most of each cycle is a calm pause between sweeps.
+                            .offset(x: sweep ? g.size.width * 2.5 : -g.size.width * 0.5)
+                    }
+                    .mask { label }
+                    .allowsHitTesting(false)
+                }
+            }
+            .task(id: animating) {
+                var t = Transaction(); t.disablesAnimations = true
+                withTransaction(t) { sweep = false }
+                guard animating else { return }
+                try? await Task.sleep(for: .milliseconds(60))
+                guard !Task.isCancelled else { return }
+                withAnimation(.linear(duration: 3.4).repeatForever(autoreverses: false)) { sweep = true }
+            }
+            .accessibilityLabel(text.capitalized)
     }
 }

@@ -6,7 +6,12 @@ import Foundation
 actor LogoResolver {
     static let shared = LogoResolver()
     private var cache: [String: URL] = [:]
-    private var misses = Set<String>()
+    /// Titles with no logo anywhere, and the time (epoch seconds) until which that answer is trusted. Kept on disk:
+    /// without it every launch re-asked TMDB, TVDB and two image hosts about each logo-less title it showed.
+    private var misses: [String: Double] = [:]
+    private static let missTTL: TimeInterval = 6 * 3600
+    private let missKey = "logo.misses"
+    private var persistPending = false
     /// Lookups already running, so a title asked for by several views at once is resolved (and fetched) only once.
     private var inflight: [String: Task<URL?, Never>] = [:]
     private let storeKey = "logo.cache"
@@ -16,6 +21,10 @@ actor LogoResolver {
     init() {
         if let d = UserDefaults.standard.dictionary(forKey: "logo.cache") as? [String: String] {
             cache = d.compactMapValues { URL(string: $0) }
+        }
+        if let m = UserDefaults.standard.dictionary(forKey: "logo.misses") as? [String: Double] {
+            let now = Date().timeIntervalSince1970
+            misses = m.filter { $0.value > now }
         }
     }
 
@@ -36,15 +45,25 @@ actor LogoResolver {
         guard enabled else { return nil }
         if let url = preferred[item.id] { return url }
         if let hit = cache[item.id] { return hit }
-        if misses.contains(item.id) { return nil }
+        if let until = misses[item.id] {
+            if until > Date().timeIntervalSince1970 { return nil }
+            misses[item.id] = nil
+        }
         if let running = inflight[item.id] { return await running.value }
         let lookup = Task { await find(item) }
         inflight[item.id] = lookup
         let result = await lookup.value
         inflight[item.id] = nil
-        guard let found = result else { misses.insert(item.id); return nil }
+        guard let found = result else {
+            // A lookup that failed because the phone was offline says nothing about the title: try again next time.
+            if NetworkConditions.current.online {
+                misses[item.id] = Date().timeIntervalSince1970 + Self.missTTL
+                schedulePersist()
+            }
+            return nil
+        }
         cache[item.id] = found
-        persist()
+        schedulePersist()
         return found
     }
 
@@ -68,8 +87,24 @@ actor LogoResolver {
         return (resp as? HTTPURLResponse)?.statusCode == 200
     }
 
-    private func persist() {
+    /// Writes at most once every few seconds, however many logos resolve in between (Home resolves dozens at once).
+    private func schedulePersist() {
+        guard !persistPending else { return }
+        persistPending = true
+        Task {
+            try? await Task.sleep(for: .seconds(5))
+            flush()
+        }
+    }
+
+    /// Writes anything still waiting. Also called when the app leaves the foreground.
+    func flush() {
+        guard persistPending else { return }
+        persistPending = false
         if cache.count > 600 { cache = Dictionary(uniqueKeysWithValues: Array(cache.prefix(400))) }
         UserDefaults.standard.set(cache.mapValues(\.absoluteString), forKey: storeKey)
+        let now = Date().timeIntervalSince1970
+        misses = misses.filter { $0.value > now }
+        UserDefaults.standard.set(misses, forKey: missKey)
     }
 }
