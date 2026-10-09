@@ -1192,7 +1192,7 @@ struct PlayerScreen: View {
     private func infoPanel(_ info: PlayerInfo) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             Spacer(minLength: 0)
-            PlayerInfoCard(info: info, onClose: { closeInfo() })
+            PlayerInfoCard(info: info, logo: pausedLogo, onClose: { closeInfo() })
                 .foregroundStyle(.white)
                 .padding(20)
                 .frame(maxWidth: 720)
