@@ -4,7 +4,7 @@ import Observation
 // MARK: - Model
 
 struct DownloadRecord: Codable, Identifiable, Hashable {
-    enum State: String, Codable { case queued, downloading, failed, done }
+    enum State: String, Codable { case queued, downloading, paused, failed, done }
 
     /// "<imdb>|movie" or "<imdb>|<season>:<episode>"
     let id: String
@@ -49,6 +49,13 @@ struct DownloadRecord: Codable, Identifiable, Hashable {
     }
 }
 
+/// Live transfer rate of an in-flight download. Kept out of `DownloadRecord` on purpose: it is meaningless after a
+/// relaunch and must not change the saved index format.
+struct DownloadSpeed: Equatable {
+    var bytesPerSecond: Double
+    var at: Date
+}
+
 // MARK: - HTTPS-only gate
 
 extension StreamItem {
@@ -70,6 +77,8 @@ enum DownloadFiles {
     }
     static var index: URL { directory.appendingPathComponent("index.json") }
     static func url(for fileName: String) -> URL { directory.appendingPathComponent(fileName) }
+    /// Where a paused transfer's resume data is kept, next to the file it will become.
+    static func resumeURL(for fileName: String) -> URL { directory.appendingPathComponent(fileName + ".resume") }
 
     static func prepare() {
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -123,12 +132,17 @@ final class DownloadManager {
     static let shared = DownloadManager()
 
     private(set) var records: [DownloadRecord] = []
+    /// Smoothed download speed per record id, only while that record is downloading.
+    private(set) var speeds: [String: DownloadSpeed] = [:]
     /// Set by the app delegate when iOS relaunches us for finished background transfers.
     @ObservationIgnored var backgroundCompletion: (() -> Void)?
     @ObservationIgnored private var session: URLSession!
     @ObservationIgnored private var store: AddonStore?
     @ObservationIgnored private var pins: PinnedSources?
     @ObservationIgnored private var pumping = false
+    /// Transfers that were started from saved resume data. If one of those fails, the saved bytes were no good
+    /// (link expired, file changed on the server), so it starts over once instead of going straight to "failed".
+    @ObservationIgnored private var resumedNames: Set<String> = []
 
     private init() {
         DownloadFiles.prepare()
@@ -212,7 +226,82 @@ final class DownloadManager {
     func retry(_ id: String) {
         guard let i = records.firstIndex(where: { $0.id == id }), records[i].state == .failed else { return }
         records[i].state = .queued; records[i].error = nil; records[i].progress = 0; records[i].bytes = 0
+        speeds[id] = nil
         save(); pump()
+    }
+
+    // MARK: Pause / resume
+
+    /// Pauses one download (or holds a queued one). A running transfer is cancelled with resume data, so resuming
+    /// continues from the bytes already on disk when the server allows it, and starts over when it doesn't.
+    /// The rest of the queue carries on.
+    func pause(_ id: String) {
+        guard let i = records.firstIndex(where: { $0.id == id }), hold(i) else { return }
+        save(); pump()
+    }
+
+    func resume(_ id: String) {
+        guard let i = records.firstIndex(where: { $0.id == id }), records[i].state == .paused else { return }
+        records[i].state = .queued; records[i].error = nil
+        save(); pump()
+    }
+
+    /// Everything that is downloading or waiting stops; nothing new starts in between.
+    func pauseAll() {
+        // Waiting items first, so the queue can't hand a slot to one of them while the running one is stopping.
+        var changed = false
+        for i in records.indices where records[i].state == .queued { changed = hold(i) || changed }
+        for i in records.indices where records[i].state == .downloading { changed = hold(i) || changed }
+        if changed { save() }
+    }
+
+    func resumeAll() {
+        var changed = false
+        for i in records.indices where records[i].state == .paused {
+            records[i].state = .queued; records[i].error = nil; changed = true
+        }
+        if changed { save(); pump() }
+    }
+
+    var hasPausable: Bool { records.contains { $0.state == .queued || $0.state == .downloading } }
+    var hasPaused: Bool { records.contains { $0.state == .paused } }
+
+    /// Marks one record paused and stops its transfer. Returns false when there was nothing to pause.
+    @discardableResult
+    private func hold(_ i: Int) -> Bool {
+        let id = records[i].id
+        switch records[i].state {
+        case .queued:
+            records[i].state = .paused
+        case .downloading:
+            let name = records[i].fileName
+            records[i].state = .paused
+            speeds[id] = nil
+            session.getAllTasks { [weak self] tasks in
+                let task = tasks.first { $0.taskDescription == name } as? URLSessionDownloadTask
+                guard let task else { Task { @MainActor in self?.pauseSaved(id, nil) }; return }
+                task.cancel(byProducingResumeData: { data in
+                    Task { @MainActor in self?.pauseSaved(id, data) }
+                })
+            }
+        default:
+            return false
+        }
+        return true
+    }
+
+    /// The system hands back resume data once the cancel has landed. No data (the server can't resume) is fine: the
+    /// download then simply starts over when resumed.
+    private func pauseSaved(_ id: String, _ data: Data?) {
+        guard let i = records.firstIndex(where: { $0.id == id }), records[i].state == .paused,
+              let f = records[i].fileName else { return }
+        if let data {
+            try? data.write(to: DownloadFiles.resumeURL(for: f), options: .atomic)
+        } else {
+            // Nothing to continue from, so don't show progress that resuming would throw away.
+            records[i].bytes = 0; records[i].progress = 0
+            save()
+        }
     }
 
     /// Called when the connection comes back: queued items were waiting for it.
@@ -230,7 +319,7 @@ final class DownloadManager {
         guard !gone.isEmpty else { return }
         let names = Set(gone.compactMap(\.fileName))
         records.removeAll(where: match)
-        for r in gone { discardFile(r) }
+        for r in gone { discardFile(r); speeds[r.id] = nil }
         session.getAllTasks { tasks in
             tasks.filter { names.contains($0.taskDescription ?? "") }.forEach { $0.cancel() }
         }
@@ -238,7 +327,10 @@ final class DownloadManager {
     }
 
     private func discardFile(_ r: DownloadRecord) {
-        if let f = r.fileName { try? FileManager.default.removeItem(at: DownloadFiles.url(for: f)) }
+        guard let f = r.fileName else { return }
+        try? FileManager.default.removeItem(at: DownloadFiles.url(for: f))
+        try? FileManager.default.removeItem(at: DownloadFiles.resumeURL(for: f))
+        resumedNames.remove(f)
     }
 
     // MARK: Queue (one transfer at a time)
@@ -261,7 +353,14 @@ final class DownloadManager {
         var r = records[i]
         var ext = "mp4"
 
-        if r.remoteURL == nil {
+        // A paused transfer comes back from its saved resume data (when there is some); everything else is fresh.
+        var resumeData: Data?
+        if let f = r.fileName, let d = try? Data(contentsOf: DownloadFiles.resumeURL(for: f)) {
+            resumeData = d
+            try? FileManager.default.removeItem(at: DownloadFiles.resumeURL(for: f))
+        }
+
+        if resumeData == nil, r.remoteURL == nil {
             // Same source as the rest of this season when there is one.
             let sibling = records.first { $0.imdb == r.imdb && $0.season == r.season && $0.sourceAddonID != nil && $0.id != r.id }
             guard let found = await DownloadResolver.resolve(
@@ -284,47 +383,72 @@ final class DownloadManager {
         ext = String(ext.filter { $0.isLetter || $0.isNumber }.prefix(4))
         if ext.isEmpty { ext = "mp4" }
 
-        // The record may have been deleted while the source was being resolved.
-        guard let j = records.firstIndex(where: { $0.id == id }), let url = r.remoteURL else { return }
-        r.fileName = "\(UUID().uuidString.lowercased()).\(ext)"
-        r.state = .downloading; r.error = nil; r.progress = 0; r.bytes = 0
-        records[j] = r
-        save()
+        // The record may have been deleted, or paused, while the source was being resolved.
+        guard let j = records.firstIndex(where: { $0.id == id }), records[j].state == .queued else { return }
 
-        var req = URLRequest(url: url)
-        for (k, v) in r.headers { req.setValue(v, forHTTPHeaderField: k) }
-        let task = session.downloadTask(with: req)
+        let task: URLSessionDownloadTask
+        if let resumeData, let name = r.fileName {
+            // Keeps its file name, bytes and progress: the bar carries on from where it stopped.
+            task = session.downloadTask(withResumeData: resumeData)
+            resumedNames.insert(name)
+            r.state = .downloading; r.error = nil
+        } else {
+            guard let url = r.remoteURL else { fail(id, "No HTTPS source found"); return }
+            r.fileName = "\(UUID().uuidString.lowercased()).\(ext)"
+            r.state = .downloading; r.error = nil; r.progress = 0; r.bytes = 0
+            var req = URLRequest(url: url)
+            for (k, v) in r.headers { req.setValue(v, forHTTPHeaderField: k) }
+            task = session.downloadTask(with: req)
+        }
+        records[j] = r
+        speeds[id] = nil
+        save()
         task.taskDescription = r.fileName
         task.resume()
     }
 
     // MARK: Session callbacks (hopped onto the main actor by SessionDelegate)
 
-    fileprivate func progress(_ name: String, written: Int64, expected: Int64) {
-        guard let i = records.firstIndex(where: { $0.fileName == name }) else { return }
-        let p = expected > 0 ? Double(written) / Double(expected) : 0
-        // Throttled: a redraw per 1% is plenty for a progress ring.
-        guard abs(p - records[i].progress) >= 0.01 || records[i].bytes == 0 else { return }
-        records[i].bytes = written; records[i].expectedBytes = max(expected, 0); records[i].progress = p
+    /// The delegate already throttles (per 1% or once a second), so every call that reaches here is worth a redraw.
+    /// `speed` is nil when the call was only a progress step and no new speed sample was taken.
+    fileprivate func progress(_ name: String, written: Int64, expected: Int64, speed: Double?) {
+        // A callback that was already in flight when the download was paused must not revive its speed reading.
+        guard let i = records.firstIndex(where: { $0.fileName == name }), records[i].state == .downloading else { return }
+        records[i].bytes = written
+        records[i].expectedBytes = max(expected, 0)
+        records[i].progress = expected > 0 ? Double(written) / Double(expected) : 0
+        if let speed { speeds[records[i].id] = DownloadSpeed(bytesPerSecond: speed, at: .now) }
     }
 
     fileprivate func finished(_ name: String, bytes: Int64) {
         guard let i = records.firstIndex(where: { $0.fileName == name }) else {
             try? FileManager.default.removeItem(at: DownloadFiles.url(for: name)); return   // deleted mid-transfer
         }
+        speeds[records[i].id] = nil
+        resumedNames.remove(name)
         records[i].state = .done; records[i].progress = 1; records[i].bytes = bytes
         records[i].expectedBytes = bytes; records[i].error = nil
         save(); pump()
     }
 
     fileprivate func failed(_ name: String, _ message: String) {
-        guard let r = records.first(where: { $0.fileName == name }) else { return }
-        fail(r.id, message)
+        guard let i = records.firstIndex(where: { $0.fileName == name }) else { return }
+        if resumedNames.contains(name) {
+            // The saved partial download couldn't be picked up: throw it away and start over once, same source.
+            discardFile(records[i])      // also forgets `name` in resumedNames
+            speeds[records[i].id] = nil
+            records[i].state = .queued; records[i].error = nil
+            records[i].fileName = nil; records[i].bytes = 0; records[i].progress = 0
+            save(); pump()
+            return
+        }
+        fail(records[i].id, message)
     }
 
     private func fail(_ id: String, _ message: String) {
         guard let i = records.firstIndex(where: { $0.id == id }) else { return }
         discardFile(records[i])
+        speeds[id] = nil
         records[i].state = .failed; records[i].error = message
         records[i].fileName = nil; records[i].bytes = 0; records[i].progress = 0
         save(); pump()
@@ -343,6 +467,7 @@ final class DownloadManager {
                 for i in self.records.indices where self.records[i].state == .downloading {
                     if let n = self.records[i].fileName, live.contains(n) { continue }
                     self.records[i].state = .queued; self.records[i].progress = 0; self.records[i].bytes = 0
+                    self.speeds[self.records[i].id] = nil
                 }
                 self.sweepOrphans()
                 self.save(); self.pump()
@@ -352,7 +477,8 @@ final class DownloadManager {
 
     /// Files nobody refers to (a crash mid-delete, an abandoned transfer).
     private func sweepOrphans() {
-        let known = Set(records.compactMap(\.fileName)).union(["index.json"])
+        let names = records.compactMap(\.fileName)
+        let known = Set(names).union(names.map { $0 + ".resume" }).union(["index.json"])
         let files = (try? FileManager.default.contentsOfDirectory(atPath: DownloadFiles.directory.path)) ?? []
         for f in files where !known.contains(f) {
             try? FileManager.default.removeItem(at: DownloadFiles.url(for: f))
@@ -377,19 +503,42 @@ final class DownloadManager {
 // MARK: - URLSession delegate (runs off the main thread)
 
 private final class SessionDelegate: NSObject, URLSessionDownloadDelegate {
-    /// Last progress fraction passed on, per task. Delegate callbacks arrive on one serial queue, so no lock is needed.
-    private var lastFraction: [Int: Double] = [:]
+    /// Per-task bookkeeping for throttling and speed. Delegate callbacks arrive on one serial queue, so no lock is needed.
+    private struct Sample {
+        var fraction = -1.0         // last progress fraction passed on (-1: nothing passed on yet)
+        var windowStart: Date       // start of the current speed window
+        var windowBytes: Int64      // total bytes written when that window started
+        var speed: Double?          // exponentially smoothed bytes/second
+    }
+    private var samples: [Int: Sample] = [:]
 
-    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didWriteData _: Int64,
+    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didWriteData chunk: Int64,
                     totalBytesWritten written: Int64, totalBytesExpectedToWrite expected: Int64) {
         guard let name = downloadTask.taskDescription else { return }
-        // This fires for every chunk received, hundreds of times a second on a fast link, and the manager only
-        // wants a redraw per 1%. Dropping the rest here means they never wake the main actor at all.
-        let fraction = expected > 0 ? Double(written) / Double(expected) : 0
+        // This fires for every chunk received, hundreds of times a second on a fast link. Only two things are worth
+        // waking the main actor for: progress moving by 1%, or a fresh speed reading (at most once a second).
+        let now = Date()
         let id = downloadTask.taskIdentifier
-        if let last = lastFraction[id], abs(fraction - last) < 0.01 { return }
-        lastFraction[id] = fraction
-        Task { @MainActor in DownloadManager.shared.progress(name, written: written, expected: expected) }
+        var s = samples[id] ?? Sample(windowStart: now, windowBytes: written - chunk)
+
+        var speedTaken = false
+        let elapsed = now.timeIntervalSince(s.windowStart)
+        if elapsed >= 1 {
+            let instant = Double(max(written - s.windowBytes, 0)) / elapsed
+            // Smoothing keeps the number from jumping around between windows.
+            s.speed = s.speed.map { $0 * 0.7 + instant * 0.3 } ?? instant
+            s.windowStart = now; s.windowBytes = written
+            speedTaken = true
+        }
+
+        let fraction = expected > 0 ? Double(written) / Double(expected) : 0
+        let stepped = abs(fraction - s.fraction) >= 0.01
+        if stepped { s.fraction = fraction }
+        samples[id] = s
+        guard stepped || speedTaken else { return }
+
+        let speed = speedTaken ? s.speed : nil
+        Task { @MainActor in DownloadManager.shared.progress(name, written: written, expected: expected, speed: speed) }
     }
 
     func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
@@ -414,7 +563,7 @@ private final class SessionDelegate: NSObject, URLSessionDownloadDelegate {
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
-        lastFraction[task.taskIdentifier] = nil
+        samples[task.taskIdentifier] = nil
         guard let error, let name = task.taskDescription else { return }
         if (error as NSError).code == NSURLErrorCancelled { return }
         Task { @MainActor in DownloadManager.shared.failed(name, error.localizedDescription) }
