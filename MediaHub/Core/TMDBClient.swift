@@ -325,6 +325,7 @@ actor TMDBClient {
     /// Each result carries its genre names for the card caption (discover only returns genre ids).
     /// `language` (ISO 639-1 original language) narrows the match; with no keywords at all it is the whole theme.
     func themed(keywords: [String], language: String? = nil, limit: Int = 8, rules: ContentRules = .none) async -> [ThemedTitle] {
+        if let language, rules.hidesLanguage(language) { return [] }
         guard hasKey else { return [] }
         var ids: [Int] = []
         for q in keywords { if let id = await keywordID(q) { ids.append(id) } }
