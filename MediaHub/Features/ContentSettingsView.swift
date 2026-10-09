@@ -105,7 +105,7 @@ struct ContentSettingsView: View {
 
     private var categoryFooter: String {
         var text = "Hidden titles are removed from Home, Explore, recommendations and themed collections."
-        if hidesAnimation && tmdbKey.isEmpty {
+        if hidesAnimation && tmdbKey.isEmpty && !TMDBClient.hasProxy {
             text += " Without a TMDB key (Settings → Integrations) anime and cartoons can't be told apart, so all animation is hidden while either is off."
         }
         return text
@@ -122,7 +122,7 @@ struct ContentSettingsView: View {
 
     private var regionFooter: String {
         var text = "Switch off the regions you don't want suggested. They only affect live-action: anime and cartoons are handled below. English-language titles are never hidden by these."
-        if rules.hidesRegions && tmdbKey.isEmpty {
+        if rules.hidesRegions && tmdbKey.isEmpty && !TMDBClient.hasProxy {
             text += " Add a TMDB key (Settings → Integrations): without one, titles from add-on catalogues can't be placed, so only TMDB-sourced rows are filtered."
         }
         return text

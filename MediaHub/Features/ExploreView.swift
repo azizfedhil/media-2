@@ -127,7 +127,7 @@ struct ExploreView: View {
     var body: some View {
         NavigationStack {
             Group {
-                if tmdbKey.isEmpty {
+                if tmdbKey.isEmpty && !TMDBClient.hasProxy {
                     ContentUnavailableView("Explore needs TMDB", systemImage: "safari",
                         description: Text("Add a free TMDB API key in Settings → Integrations to browse trending titles and filter by genre and year."))
                 } else { content }
@@ -138,7 +138,7 @@ struct ExploreView: View {
             .navigationDestination(for: CatalogRow.self) { CatalogGridView(row: $0) }
         }
         .task(id: themesTaskID) {
-            guard !tmdbKey.isEmpty else { return }
+            guard !tmdbKey.isEmpty || TMDBClient.hasProxy else { return }
             let rules = contentPrefs.rules
             async let g: () = model.loadGenres()
             async let t: () = model.loadThemes(rules: rules, enrichWith: store.enrichmentAddon, key: themesTaskID)

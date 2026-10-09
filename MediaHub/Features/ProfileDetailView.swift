@@ -39,7 +39,7 @@ struct ProfileDetailView: View {
                 downloadsCard
                 tiles
                 watchTimeCard
-                if tmdbKey.isEmpty { tmdbNote }
+                if tmdbKey.isEmpty && !TMDBClient.hasProxy { tmdbNote }
                 tasteSection
                 whenCard
             }
@@ -101,7 +101,7 @@ struct ProfileDetailView: View {
     }
 
     private var integrations: [Integration] {
-        [Integration(name: "TMDB", symbol: "film.stack", on: !tmdbKey.isEmpty),
+        [Integration(name: "TMDB", symbol: "film.stack", on: !tmdbKey.isEmpty || TMDBClient.hasProxy),
          Integration(name: "TheTVDB", symbol: "tv", on: !tvdbKey.isEmpty),
          Integration(name: "MDBList", symbol: "list.bullet", on: !mdbKey.isEmpty),
          Integration(name: "Simkl", symbol: "arrow.triangle.2.circlepath", on: simkl.isConnected),
@@ -298,7 +298,7 @@ struct ProfileDetailView: View {
         let shares = stats.genreShares(kind)
         return card("Favourite genres", symbol: "theatermasks.fill") {
             if shares.isEmpty {
-                Text(tmdbKey.isEmpty ? "Needs a TMDB key." : model.loading ? "Working it out…" : "Not enough watched yet.")
+                Text(tmdbKey.isEmpty && !TMDBClient.hasProxy ? "Needs a TMDB key." : model.loading ? "Working it out…" : "Not enough watched yet.")
                     .font(.footnote).foregroundStyle(.secondary)
             } else {
                 bars(shares)

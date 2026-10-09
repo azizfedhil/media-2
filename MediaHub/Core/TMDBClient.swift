@@ -34,8 +34,15 @@ actor TMDBClient {
     private var seasonCache: [String: [EpisodeInfo]] = [:]
     private var genreCache: [String: [Genre]] = [:]
 
+    /// Hosted proxy (Supabase Edge Function) that holds the app's TMDB key server-side, so users don't need their own.
+    /// Both values are safe to ship in the app: the anon key is a public identifier and the TMDB key never leaves the server.
+    static let proxyBase = "https://ilmsadjrawdqxgaxvjfk.supabase.co/functions/v1/tmdb"
+    static let anonKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlsbXNhZGpyYXdkcXhnYXh2amZrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTE1NjUxMTgsImV4cCI6MjEwNzE0MTExOH0.fSoWIHZbOrkA6G8CShILapwcteYQ_Gbo3GVVcEo5hYE"
+    static var hasProxy: Bool { !proxyBase.isEmpty && !anonKey.isEmpty }
+
+    /// The user's own key from Settings. When set, requests go straight to TMDB and the proxy is bypassed.
     nonisolated var apiKey: String { UserDefaults.standard.string(forKey: "tmdb.key") ?? "" }
-    nonisolated var hasKey: Bool { !apiKey.isEmpty }
+    nonisolated var hasKey: Bool { !apiKey.isEmpty || Self.hasProxy }
 
     struct Item: Decodable { let id: Int; let title: String?; let name: String?; let overview: String?
         let posterPath: String?; let backdropPath: String?; let releaseDate: String?; let firstAirDate: String?
@@ -139,11 +146,23 @@ actor TMDBClient {
 
     private func get<T: Decodable>(_ path: String, _ query: [String: String] = [:]) async throws -> T {
         guard hasKey else { throw URLError(.userAuthenticationRequired) }
-        // Paths embed ids that add-ons supply; an odd one must fail this request, not crash the app.
-        guard var c = URLComponents(string: "https://api.themoviedb.org/3\(path)") else { throw URLError(.badURL) }
-        c.queryItems = [URLQueryItem(name: "api_key", value: apiKey)] + query.map { URLQueryItem(name: $0, value: $1) }
-        guard let url = c.url else { throw URLError(.badURL) }
-        let (d, r) = try await session.data(from: url)
+        let own = apiKey
+        var req: URLRequest
+        if !own.isEmpty {
+            // Paths embed ids that add-ons supply; an odd one must fail this request, not crash the app.
+            guard var c = URLComponents(string: "https://api.themoviedb.org/3\(path)") else { throw URLError(.badURL) }
+            c.queryItems = [URLQueryItem(name: "api_key", value: own)] + query.map { URLQueryItem(name: $0, value: $1) }
+            guard let url = c.url else { throw URLError(.badURL) }
+            req = URLRequest(url: url)
+        } else {
+            guard var c = URLComponents(string: Self.proxyBase + path) else { throw URLError(.badURL) }
+            if !query.isEmpty { c.queryItems = query.map { URLQueryItem(name: $0, value: $1) } }
+            guard let url = c.url else { throw URLError(.badURL) }
+            req = URLRequest(url: url)
+            req.setValue("Bearer \(Self.anonKey)", forHTTPHeaderField: "Authorization")
+            req.setValue(Self.anonKey, forHTTPHeaderField: "apikey")
+        }
+        let (d, r) = try await session.data(for: req)
         guard (r as? HTTPURLResponse)?.statusCode == 200 else { throw URLError(.badServerResponse) }
         let dec = JSONDecoder(); dec.keyDecodingStrategy = .convertFromSnakeCase
         return try dec.decode(T.self, from: d)

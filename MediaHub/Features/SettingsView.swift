@@ -35,7 +35,7 @@ struct SettingsView: View {
     @State private var backupNote: String?
 
     private var connected: Int {
-        [!tmdbKey.isEmpty, !tvdbKey.isEmpty, !mdbKey.isEmpty, simkl.isConnected].filter { $0 }.count
+        [!tmdbKey.isEmpty || TMDBClient.hasProxy, !tvdbKey.isEmpty, !mdbKey.isEmpty, simkl.isConnected].filter { $0 }.count
     }
 
     private var addonSummary: String {
@@ -143,7 +143,7 @@ struct SettingsView: View {
                             .onChange(of: landscapeLayout) { _, _ in OrientationLock.set(OrientationLock.appMask) }
                     }
                 } header: { Text("Appearance") } footer: {
-                    Text("Network icons need a TMDB key and make one small request per visible poster. Logos come from TMDB, TheTVDB and Metahub and are cached after the first lookup.\(WideLayout.isPad ? "" : " Landscape layout turns the app sideways into the iPad-style sidebar layout when you rotate your iPhone. Off keeps the app portrait-only.")")
+                    Text("Network icons make one small request per visible poster. Logos come from TMDB, TheTVDB and Metahub and are cached after the first lookup.\(WideLayout.isPad ? "" : " Landscape layout turns the app sideways into the iPad-style sidebar layout when you rotate your iPhone. Off keeps the app portrait-only.")")
                 }
 
                 Section {
@@ -212,6 +212,18 @@ struct SettingsView: View {
                     if let backupNote { Text(backupNote).font(.footnote).foregroundStyle(.secondary) }
                 } header: { Text("Backup") } footer: {
                     Text("The file contains your API keys and add-on URLs, so keep it private. The Simkl login isn't included; reconnect it after importing.")
+                }
+
+                Section {
+                    NavigationLink { AboutView() } label: {
+                        HStack {
+                            Label("About", systemImage: "info.circle.fill")
+                            Spacer()
+                            Text(AboutView.versionString).font(.footnote).foregroundStyle(.secondary)
+                        }
+                    }
+                } footer: {
+                    Text("What Pear. is, and the open-source components and services it uses.")
                 }
             }
             .navigationTitle("Settings")

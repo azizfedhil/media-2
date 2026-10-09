@@ -23,6 +23,7 @@ struct OnboardingView: View {
     @State private var urlText = ""
     @State private var addError: String?
     @State private var adding = false
+    @State private var ownTMDB = false
 
     private var rules: ContentRules { prefs.rules }
 
@@ -95,7 +96,7 @@ struct OnboardingView: View {
         switch step {
         case .welcome: return "Get Started"
         case .done: return "Start Watching"
-        case .keys: return tmdbKey.isEmpty && tvdbKey.isEmpty && mdbKey.isEmpty ? "Skip for now" : "Continue"
+        case .keys: return tmdbKey.isEmpty && !TMDBClient.hasProxy && tvdbKey.isEmpty && mdbKey.isEmpty ? "Skip for now" : "Continue"
         default: return "Continue"
         }
     }
@@ -408,10 +409,16 @@ struct OnboardingView: View {
 
     private var keysPage: some View {
         scroller {
-            header("Connect your services", "Pear uses your own free API keys. They stay on this device, and you can add or change them later in Settings → Integrations.")
-            keyCard(title: "TMDB", badge: "Recommended", symbol: "film.stack",
-                    text: "Trending, Explore, recommendations, episode thumbnails, title logos and skip-intro matching. Without it, most of the app stays empty.",
-                    placeholder: "TMDB API key", binding: $tmdbKey, link: "https://www.themoviedb.org/settings/api", linkTitle: "Get a free key")
+            header("Connect your services", TMDBClient.hasProxy
+                   ? "TMDB is already built in. MDBList and TheTVDB use your own free API keys, which stay on this device. You can add or change any of them later in Settings → Integrations."
+                   : "Pear uses your own free API keys. They stay on this device, and you can add or change them later in Settings → Integrations.")
+            if TMDBClient.hasProxy {
+                tmdbBuiltInCard
+            } else {
+                keyCard(title: "TMDB", badge: "Recommended", symbol: "film.stack",
+                        text: "Trending, Explore, recommendations, episode thumbnails, title logos and skip-intro matching. Without it, most of the app stays empty.",
+                        placeholder: "TMDB API key", binding: $tmdbKey, link: "https://www.themoviedb.org/settings/api", linkTitle: "Get a free key")
+            }
             keyCard(title: "MDBList", badge: nil, symbol: "list.bullet",
                     text: "IMDb, Rotten Tomatoes, Metacritic and Letterboxd ratings, plus your lists on Home.",
                     placeholder: "MDBList API key", binding: $mdbKey, link: "https://mdblist.com/preferences", linkTitle: "Get a key")
@@ -421,6 +428,37 @@ struct OnboardingView: View {
                 SecureField("PIN (subscriber keys only)", text: $tvdbPin)
                     .textInputAutocapitalization(.never).autocorrectionDisabled().submitLabel(.done)
                     .padding(12).background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
+        }
+    }
+
+    /// Own-key switch for the TMDB card. Off by default; on whenever a key is already saved. Switching it off
+    /// clears the key so the built-in one is what actually gets used.
+    private var ownTMDBBinding: Binding<Bool> {
+        Binding(get: { ownTMDB || !tmdbKey.isEmpty },
+                set: { on in ownTMDB = on; if !on { tmdbKey = "" } })
+    }
+
+    private var tmdbBuiltInCard: some View {
+        card {
+            HStack(spacing: 8) {
+                Label("TMDB", systemImage: "film.stack").font(.headline)
+                Text("Built in").font(.system(size: 10, weight: .heavy)).foregroundStyle(theme.onAccent)
+                    .padding(.horizontal, 8).padding(.vertical, 3).background(theme.accent, in: Capsule())
+                Spacer()
+                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+            }
+            Text("You don't need to provide a key. Pear. already includes one, so trending, Explore, recommendations, episode thumbnails, title logos and skip-intro matching work out of the box. If something doesn't load, turn on the switch below and add your own free key.")
+                .font(.footnote).foregroundStyle(.secondary)
+            Toggle("Use my own TMDB key", isOn: ownTMDBBinding)
+                .font(.subheadline.weight(.semibold))
+            if ownTMDBBinding.wrappedValue {
+                SecureField("TMDB API key", text: $tmdbKey)
+                    .textInputAutocapitalization(.never).autocorrectionDisabled().submitLabel(.done)
+                    .padding(12).background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                if let u = URL(string: "https://www.themoviedb.org/settings/api") {
+                    Link("Get a free key", destination: u).font(.subheadline.weight(.semibold))
+                }
             }
         }
     }
@@ -463,7 +501,7 @@ struct OnboardingView: View {
                 .font(.system(size: 28, weight: .bold, design: .rounded)).multilineTextAlignment(.center)
             VStack(alignment: .leading, spacing: 10) {
                 summary("Simkl", simkl.isConnected ? "Connected" : "Not connected", simkl.isConnected)
-                summary("TMDB key", tmdbKey.isEmpty ? "Not added" : "Added", !tmdbKey.isEmpty)
+                summary("TMDB key", tmdbKey.isEmpty ? (TMDBClient.hasProxy ? "Built in" : "Not added") : "Added", !tmdbKey.isEmpty || TMDBClient.hasProxy)
                 summary("MDBList key", mdbKey.isEmpty ? "Not added" : "Added", !mdbKey.isEmpty)
                 summary("TheTVDB key", tvdbKey.isEmpty ? "Not added" : "Added", !tvdbKey.isEmpty)
             }

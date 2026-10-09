@@ -12,11 +12,13 @@ struct IntegrationsView: View {
     var body: some View {
         Form {
             Section {
-                SecureField("TMDB API key", text: $tmdbKey)
+                SecureField(TMDBClient.hasProxy ? "Your own TMDB key (optional)" : "TMDB API key", text: $tmdbKey)
                     .textInputAutocapitalization(.never).autocorrectionDisabled()
-                status(tmdbKey.isEmpty ? nil : "Key set")
+                status(tmdbKey.isEmpty ? (TMDBClient.hasProxy ? "Built in" : nil) : "Using your key")
             } header: { Text("TMDB") } footer: {
-                Text("Metadata, trending, Explore, recommendations, episode thumbnails, title logos and matching skip-intro timestamps. Free key at themoviedb.org/settings/api. This product uses the TMDB API but is not endorsed or certified by TMDB.")
+                Text(TMDBClient.hasProxy
+                     ? "Metadata, trending, Explore, recommendations, episode thumbnails, title logos and matching skip-intro timestamps. A TMDB key is built in, so you don't need one. If TMDB content ever fails to load, add your own free key from themoviedb.org/settings/api. This product uses the TMDB API but is not endorsed or certified by TMDB."
+                     : "Metadata, trending, Explore, recommendations, episode thumbnails, title logos and matching skip-intro timestamps. Free key at themoviedb.org/settings/api. This product uses the TMDB API but is not endorsed or certified by TMDB.")
             }
 
             Section {
