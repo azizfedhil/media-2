@@ -8,6 +8,29 @@ import SwiftUI
 final class LayoutState {
     static let shared = LayoutState()
     var playerOpen = false
+
+    /// How many sheets are up over the pages (see `coversPages()`).
+    private(set) var coverDepth = 0
+    /// True while a sheet sits over the pages. Nothing behind it needs to move: the hero auto-advance, its zoom and
+    /// progress bar, and the shimmer sweeps all rest until it is dismissed, like they do for a page that is off screen.
+    var pagesCovered: Bool { coverDepth > 0 }
+    func cover() { coverDepth += 1 }
+    func uncover() { coverDepth = max(coverDepth - 1, 0) }
+}
+
+private struct CoversPages: ViewModifier {
+    @State private var counted = false
+    func body(content: Content) -> some View {
+        content
+            .onAppear { if !counted { counted = true; LayoutState.shared.cover() } }
+            .onDisappear { if counted { counted = false; LayoutState.shared.uncover() } }
+    }
+}
+
+extension View {
+    /// Put on the root of a sheet that covers the browsing pages. While it is presented, animation behind it rests.
+    /// Apply it outside any NavigationStack inside the sheet: pushing a page there must not count as the sheet leaving.
+    func coversPages() -> some View { modifier(CoversPages()) }
 }
 
 enum WideLayout {
@@ -412,7 +435,7 @@ struct WideHeroPanel: View {
     private var index: Int { items.firstIndex(where: { $0.id == currentID }) ?? 0 }
     private var current: MetaPreview? { items.first(where: { $0.id == currentID }) ?? items.first }
     /// On screen, in the foreground, and not hidden behind another page or the sliding pane.
-    private var running: Bool { visible && pageActive && scenePhase == .active }
+    private var running: Bool { visible && pageActive && scenePhase == .active && !LayoutState.shared.pagesCovered }
     private struct AutoKey: Hashable { let page: String; let visible: Bool }
 
     var body: some View {
