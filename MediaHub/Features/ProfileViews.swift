@@ -185,6 +185,7 @@ struct ProfileSheet: View {
             .navigationDestination(isPresented: $showDownloads) { DownloadsView() }
             .navigationDestination(isPresented: $showSimkl) { SimklLoginPage() }
         }
+        .coversPages()
         .presentationDetents([.medium, .large], selection: $detent)
         .sheet(item: $target) { ProfileEditor(target: $0) }
     }
