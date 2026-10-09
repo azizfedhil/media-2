@@ -23,16 +23,17 @@ struct ContentSettingsView: View {
     var body: some View {
         Form {
             Section {
-                ForEach(ContentCategory.allCases) { c in
-                    Toggle(isOn: shown(c)) {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Label(c.title, systemImage: c.symbol)
-                            Text(c.detail).font(.caption).foregroundStyle(.secondary)
-                        }
-                    }
-                }
+                ForEach(ContentCategory.regions) { categoryToggle($0) }
             } header: {
-                Text("Show these kinds of titles · \(profiles.active.name)")
+                Text("Where it's from · \(profiles.active.name)")
+            } footer: {
+                Text(regionFooter)
+            }
+
+            Section {
+                ForEach(ContentCategory.kinds) { categoryToggle($0) }
+            } header: {
+                Text("Kinds of titles")
             } footer: {
                 Text(categoryFooter)
             }
@@ -105,6 +106,23 @@ struct ContentSettingsView: View {
         var text = "Hidden titles are removed from Home, Explore, recommendations and themed collections."
         if hidesAnimation && tmdbKey.isEmpty {
             text += " Without a TMDB key (Settings → Integrations) anime and cartoons can't be told apart, so all animation is hidden while either is off."
+        }
+        return text
+    }
+
+    private func categoryToggle(_ c: ContentCategory) -> some View {
+        Toggle(isOn: shown(c)) {
+            VStack(alignment: .leading, spacing: 3) {
+                Label(c.title, systemImage: c.symbol)
+                Text(c.detail).font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var regionFooter: String {
+        var text = "Switch off the regions you don't want suggested. They only affect live-action: anime and cartoons are handled below. English-language titles are never hidden by these."
+        if rules.hidesRegions && tmdbKey.isEmpty {
+            text += " Add a TMDB key (Settings → Integrations): without one, titles from add-on catalogues can't be placed, so only TMDB-sourced rows are filtered."
         }
         return text
     }
