@@ -3,8 +3,18 @@ import Foundation
 /// A kind of title the user can switch off (Settings -> Content & catalogues).
 /// Most are plain TMDB genres. Anime and Cartoons are both "Animation" on TMDB, so they are told apart by where the
 /// title comes from: Japanese animation is anime, everything else animated is a cartoon (see `TitleTraits`).
+/// The region categories (Asian, Indian & South Asian, Other foreign-language) are decided by origin alone and only
+/// ever apply to live-action titles: animation is governed by Anime and Cartoons. They don't overlap, so each
+/// non-English live-action title belongs to exactly one of them.
 enum ContentCategory: String, CaseIterable, Identifiable, Sendable {
     case anime, cartoons, kids, documentary, reality, talkNews, soap, horror, romance
+    case asian, indian, foreign, music, tvMovies
+
+    /// Decided by where a title comes from (language / country), not by its genres.
+    static let regions: [ContentCategory] = [.asian, .indian, .foreign]
+    /// Everything else, in the order the settings screen lists it.
+    static let kinds: [ContentCategory] = allCases.filter { !regions.contains($0) }
+    var isRegion: Bool { Self.regions.contains(self) }
 
     var id: String { rawValue }
 
@@ -19,6 +29,11 @@ enum ContentCategory: String, CaseIterable, Identifiable, Sendable {
         case .soap: return "Soap operas"
         case .horror: return "Horror"
         case .romance: return "Romance"
+        case .asian: return "Asian film & TV"
+        case .indian: return "Indian & South Asian"
+        case .foreign: return "Other foreign-language"
+        case .music: return "Music & musicals"
+        case .tvMovies: return "TV movies"
         }
     }
 
@@ -33,6 +48,11 @@ enum ContentCategory: String, CaseIterable, Identifiable, Sendable {
         case .soap: return "Soap operas and telenovelas."
         case .horror: return "Horror films and series."
         case .romance: return "Romance films and series."
+        case .asian: return "Live-action from Japan, Korea, China, Taiwan, Hong Kong and Southeast Asia (K-dramas, C-dramas, J-dramas). Anime has its own switch."
+        case .indian: return "Bollywood and South Indian cinema, plus other South Asian film and TV."
+        case .foreign: return "Live-action not made in English or in Asia: European, Latin American, Turkish, Middle Eastern, African."
+        case .music: return "Concerts, music documentaries, biopics and musicals."
+        case .tvMovies: return "Made-for-TV films."
         }
     }
 
@@ -47,13 +67,18 @@ enum ContentCategory: String, CaseIterable, Identifiable, Sendable {
         case .soap: return "theatermasks.fill"
         case .horror: return "eye.fill"
         case .romance: return "heart.fill"
+        case .asian: return "globe.asia.australia.fill"
+        case .indian: return "globe.central.south.asia.fill"
+        case .foreign: return "globe.europe.africa.fill"
+        case .music: return "music.note"
+        case .tvMovies: return "tv.fill"
         }
     }
 
-    /// TMDB genre ids that put a title in this category. nil for Anime and Cartoons, which depend on origin too.
+    /// TMDB genre ids that put a title in this category. nil for Anime, Cartoons and the regions, which depend on origin.
     var genreIDs: Set<Int>? {
         switch self {
-        case .anime, .cartoons: return nil
+        case .anime, .cartoons, .asian, .indian, .foreign: return nil
         case .kids: return [10762, 10751]        // Kids (TV), Family
         case .documentary: return [99]
         case .reality: return [10764]
@@ -61,6 +86,8 @@ enum ContentCategory: String, CaseIterable, Identifiable, Sendable {
         case .soap: return [10766]
         case .horror: return [27]
         case .romance: return [10749]
+        case .music: return [10402]
+        case .tvMovies: return [10770]
         }
     }
 
@@ -79,6 +106,28 @@ struct TitleTraits: Codable, Hashable, Sendable {
     /// Anime vs. other animation can only be decided once the origin is known.
     var hasOrigin: Bool { language != nil || !countries.isEmpty }
     var isJapanese: Bool { language == "ja" || countries.contains("JP") }
+
+    /// Which region a live-action title belongs to, or nil for English-language titles (and anything we can't place).
+    /// The language decides when it is known; the country only when there is no language, so an English-language
+    /// film shot in Japan isn't "Asian".
+    var region: ContentCategory? {
+        if let l = language?.lowercased(), !l.isEmpty, l != "xx" {
+            if Region.eastAsianLanguages.contains(l) { return .asian }
+            if Region.southAsianLanguages.contains(l) { return .indian }
+            return l == "en" ? nil : .foreign
+        }
+        if countries.contains(where: Region.eastAsianCountries.contains) { return .asian }
+        if countries.contains(where: Region.southAsianCountries.contains) { return .indian }
+        return nil
+    }
+}
+
+/// Origin tables for the region categories (ISO 639-1 languages, ISO 3166-1 countries).
+enum Region {
+    static let eastAsianLanguages: Set<String> = ["ja", "ko", "zh", "cn", "th", "vi", "id", "ms", "tl", "fil", "km", "lo", "my", "mn"]
+    static let southAsianLanguages: Set<String> = ["hi", "ta", "te", "ml", "kn", "bn", "mr", "pa", "gu", "ur", "or", "as", "ne", "si"]
+    static let eastAsianCountries: Set<String> = ["JP", "KR", "CN", "TW", "HK", "MO", "TH", "VN", "ID", "MY", "PH", "SG", "KH", "LA", "MM", "MN"]
+    static let southAsianCountries: Set<String> = ["IN", "PK", "BD", "LK", "NP"]
 }
 
 /// Add-ons list genres by name ("Reality-TV"). Maps the ones the filter cares about to their TMDB ids.
@@ -122,6 +171,17 @@ struct ContentRules: Hashable, Sendable {
     static let none = ContentRules()
 
     var hasFilters: Bool { !hiddenCategories.isEmpty }
+
+    /// Some region (Asian, Indian & South Asian, Other foreign-language) is switched off.
+    var hidesRegions: Bool { hiddenCategories.contains { $0.isRegion } }
+
+    /// True when a theme row built from titles in this original language could only ever show hidden titles
+    /// ("K-Drama Fever" with Asian titles off), so it needn't be fetched at all.
+    func hidesLanguage(_ language: String) -> Bool {
+        guard hidesRegions else { return false }
+        let t = TitleTraits(genres: [], language: language, countries: [])
+        return t.region.map { hiddenCategories.contains($0) } ?? false
+    }
 
     /// Something is switched off (a category, a row or search filtering). Catalogues the user added don't count:
     /// "Show everything again" must not take those away.
@@ -199,10 +259,18 @@ struct ContentRules: Hashable, Sendable {
         for c in hiddenCategories {
             if let ids = c.genreIDs, !t.genres.isDisjoint(with: ids) { return .hide }
         }
-        guard t.isAnimation, hiddenCategories.contains(.anime) || hiddenCategories.contains(.cartoons) else { return .keep }
+        // Animation is anime or a cartoon, whatever its region.
+        if t.isAnimation {
+            guard hiddenCategories.contains(.anime) || hiddenCategories.contains(.cartoons) else { return .keep }
+            guard t.hasOrigin else { return .undecided }
+            let kind: ContentCategory = t.isJapanese ? .anime : .cartoons
+            return hiddenCategories.contains(kind) ? .hide : .keep
+        }
+        // Live-action: hidden when its region is switched off.
+        guard hidesRegions else { return .keep }
         guard t.hasOrigin else { return .undecided }
-        let kind: ContentCategory = t.isJapanese ? .anime : .cartoons
-        return hiddenCategories.contains(kind) ? .hide : .keep
+        if let r = t.region, hiddenCategories.contains(r) { return .hide }
+        return .keep
     }
 
     /// Verdict when a lookup isn't possible (no TMDB key, offline, unknown id). Animation of unknown origin goes when
