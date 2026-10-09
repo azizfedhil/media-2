@@ -457,7 +457,7 @@ struct HeroCarousel: View {
     private static let interval = 7.0
     private var wide: Bool { hSize == .regular }
     /// On screen, in the foreground, and not a hidden page: auto-advance, the zoom and the progress bar all follow it.
-    private var running: Bool { visible && pageActive && scenePhase == .active }
+    private var running: Bool { visible && pageActive && scenePhase == .active && !LayoutState.shared.pagesCovered }
     private var height: CGFloat { wide ? 640 : 600 }
     private var currentID: String { page ?? items.first?.id ?? "" }
     private var index: Int { items.firstIndex(where: { $0.id == currentID }) ?? 0 }
