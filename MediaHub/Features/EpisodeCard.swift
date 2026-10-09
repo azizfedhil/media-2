@@ -145,6 +145,7 @@ struct EpisodeCard<Actions: View>: View {
         switch d.state {
         case .done: symbol = "arrow.down.circle.fill"; label = "Downloaded"
         case .downloading: symbol = "arrow.down.circle"; label = "\(Int(d.progress * 100))%"
+        case .paused: symbol = "pause.circle"; label = "Paused"
         case .queued: symbol = "clock"; label = "Queued"
         case .failed: symbol = "exclamationmark.triangle.fill"; label = "Failed"
         }
@@ -185,7 +186,9 @@ private struct ShimmerText: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var sweep = false
 
-    private var animating: Bool { !reduceMotion && !PowerMode.shared.saving && pageActive && scenePhase == .active }
+    private var animating: Bool {
+        !reduceMotion && !PowerMode.shared.saving && pageActive && scenePhase == .active && !LayoutState.shared.pagesCovered
+    }
 
     private var label: some View {
         HStack(spacing: 4) {
