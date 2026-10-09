@@ -19,9 +19,18 @@ final class AddonStore {
     private let key = "addon.manifestURLs"
     private static let disabledKey = "addon.disabled"
     private static let pickerKey = "addon.catalogPicker"
-    /// Saved add-on URLs that couldn't be fetched at launch (offline, server down). They aren't shown, but
-    /// they are written back on every save so reordering or adding an add-on never drops them from storage.
-    @ObservationIgnored private var unreachable: [String] = []
+    /// Every saved add-on URL, in order: installed, not-yet-loaded and unreachable ones alike. This (not `addons`) is
+    /// what gets written to storage, so a half-finished launch restore can never overwrite the saved list.
+    private(set) var known: [String] = []
+    /// True while the launch restore is still fetching manifests.
+    private(set) var isRestoring = true
+    @ObservationIgnored private var restoreTask: Task<Void, Never>?
+    /// Saved add-ons whose manifest couldn't be fetched (offline, server asleep). Retried by `retryUnreachable()`.
+    var unreachable: [String] {
+        if isRestoring { return [] }
+        let loaded = Set(addons.map { $0.manifestURL.absoluteString })
+        return known.filter { !loaded.contains($0) }
+    }
     // Public metadata-only add-on, so Home isn't empty on first launch.
     private static let defaults = ["https://v3-cinemeta.strem.io/manifest.json"]
 
@@ -29,7 +38,8 @@ final class AddonStore {
         disabledIDs = Self.loadDisabled()
         pickerIDs = Self.loadPickers()
         let saved = UserDefaults.standard.stringArray(forKey: key) ?? Self.defaults
-        Task { await restore(saved) }
+        known = saved
+        restoreTask = Task { await restore(saved) }
     }
 
     private static func loadDisabled() -> Set<String> {
@@ -67,16 +77,20 @@ final class AddonStore {
     /// Reorders the installed add-ons (drag in Settings -> Add-ons).
     func move(from source: IndexSet, to destination: Int) {
         addons.move(fromOffsets: source, toOffset: destination)
+        // Installed ones take the new order; unreachable ones stay saved, after them.
+        let order = addons.map { $0.manifestURL.absoluteString }
+        known = order + known.filter { !order.contains($0) }
         persist()
     }
 
     func add(_ input: String) async throws {
+        await restoreTask?.value   // never save while the launch restore is mid-flight
         let url = try Addon.normalize(input)
         guard !addons.contains(where: { $0.manifestURL == url }) else { return }
-        let manifest = try await AddonClient.shared.manifest(at: url)
-        // Added by hand now, so it's no longer an "unreachable" leftover (avoids saving it twice).
-        unreachable.removeAll { $0 == url.absoluteString }
+        let manifest = try await AddonClient.shared.manifest(at: url, fresh: true)
+        if !known.contains(url.absoluteString) { known.append(url.absoluteString) }
         addons.append(Addon(manifestURL: url, manifest: manifest))
+        sortToKnown()
         persist()
     }
 
@@ -84,13 +98,14 @@ final class AddonStore {
     func reload(_ addon: Addon) async throws {
         await AddonClient.shared.clearCache()
         let m = try await AddonClient.shared.manifest(at: addon.manifestURL, fresh: true)
-        guard let i = addons.firstIndex(where: { $0.id == addon.id }) else { return }
+        guard let i = addons.firstIndex(where: { $0.id == addon.id }) else { throw URLError(.resourceUnavailable) }
         addons[i] = Addon(manifestURL: addon.manifestURL, manifest: m)
         revision += 1
     }
 
     /// Reloads every add-on. Returns how many failed (those keep their old manifest).
     func reloadAll() async -> Int {
+        await restoreTask?.value
         await AddonClient.shared.clearCache()
         var failed = 0
         for a in addons {
@@ -99,21 +114,46 @@ final class AddonStore {
                 addons[i] = Addon(manifestURL: a.manifestURL, manifest: m)
             } else { failed += 1 }
         }
+        // Add-ons that never loaded aren't in `addons`, so the loop above can't reach them: retry them too.
+        await retryUnreachable()
+        failed += unreachable.count
         revision += 1
         return failed
+    }
+
+    /// Tries again for saved add-ons that couldn't be fetched earlier. Call when the app returns to the foreground
+    /// or the connection comes back. Without this, an add-on that missed launch stays hidden until a restart.
+    func retryUnreachable() async {
+        await restoreTask?.value
+        let pending = unreachable
+        guard !pending.isEmpty else { return }
+        var got = false
+        for s in pending {
+            guard let url = try? Addon.normalize(s),
+                  let m = try? await AddonClient.shared.manifest(at: url, fresh: true),
+                  !addons.contains(where: { $0.manifestURL == url }) else { continue }
+            addons.append(Addon(manifestURL: url, manifest: m)); got = true
+        }
+        if got { sortToKnown(); revision += 1 }
     }
 
     /// Re-reads the saved add-on list (after a settings import).
     func reloadFromDefaults() async {
         disabledIDs = Self.loadDisabled()
         pickerIDs = Self.loadPickers()
-        await restore(UserDefaults.standard.stringArray(forKey: key) ?? Self.defaults)
+        await restoreTask?.value
+        let saved = UserDefaults.standard.stringArray(forKey: key) ?? Self.defaults
+        known = saved
+        addons = []
+        restoreTask = Task { await restore(saved) }
+        await restoreTask?.value
         revision += 1
     }
 
     func remove(at offsets: IndexSet) {
         let gone = offsets.map { addons[$0].id }
         addons.remove(atOffsets: offsets)
+        known.removeAll { gone.contains($0) }
         disabledIDs.subtract(gone)
         pickerIDs.subtract(gone)
         persist()
@@ -123,26 +163,36 @@ final class AddonStore {
 
     // TODO: move to Keychain — debrid add-on URLs embed API keys.
     private func persist() {
-        UserDefaults.standard.set(addons.map(\.manifestURL.absoluteString) + unreachable, forKey: key)
+        UserDefaults.standard.set(known, forKey: key)
     }
 
     private func persistDisabled() {
         UserDefaults.standard.set(disabledIDs.sorted(), forKey: Self.disabledKey)
     }
 
+    private func sortToKnown() {
+        let pos = Dictionary(known.enumerated().map { ($1, $0) }, uniquingKeysWith: { a, _ in a })
+        addons.sort { (pos[$0.manifestURL.absoluteString] ?? .max) < (pos[$1.manifestURL.absoluteString] ?? .max) }
+    }
+
+    /// Fetches every saved manifest. Add-ons appear as each one answers; a failure only leaves that one out
+    /// (it stays in `known`, so it is still saved and `retryUnreachable()` can bring it back).
     private func restore(_ urls: [String]) async {
-        var found: [Int: Addon] = [:]
-        await withTaskGroup(of: (Int, Addon?).self) { group in
-            for (i, s) in urls.enumerated() {
+        isRestoring = true
+        defer { isRestoring = false }
+        await withTaskGroup(of: Addon?.self) { group in
+            for s in urls {
                 group.addTask {
                     guard let url = try? Addon.normalize(s),
-                          let m = try? await AddonClient.shared.manifest(at: url) else { return (i, nil) }
-                    return (i, Addon(manifestURL: url, manifest: m))
+                          let m = try? await AddonClient.shared.manifest(at: url) else { return nil }
+                    return Addon(manifestURL: url, manifest: m)
                 }
             }
-            for await (i, a) in group { found[i] = a }
+            for await a in group {
+                guard let a, known.contains(a.id), !addons.contains(where: { $0.id == a.id }) else { continue }   // skips ones removed meanwhile
+                addons.append(a)
+                sortToKnown()
+            }
         }
-        addons = found.keys.sorted().compactMap { found[$0] }
-        unreachable = urls.indices.filter { found[$0] == nil }.map { urls[$0] }
     }
 }
