@@ -788,11 +788,6 @@ private struct ContinueCard: View {
                     .frame(width: width)
                     .overlay { StillImage(url: thumb, size: width) }
                     .overlay { LinearGradient(colors: [.clear, .black.opacity(0.5)], startPoint: .center, endPoint: .bottom) }
-                    .overlay {
-                        Image(systemName: "play.fill").font(.system(size: 16, weight: .bold)).foregroundStyle(.white)
-                            .frame(width: 42, height: 42).background(.black.opacity(0.38), in: Circle())
-                            .overlay(Circle().strokeBorder(.white.opacity(0.25), lineWidth: 0.5))
-                    }
                     .overlay(alignment: .topTrailing) {
                         Text(Fmt.clock(entry.position)).font(.system(size: 11, weight: .bold)).monospacedDigit()
                             .foregroundStyle(.white).padding(.horizontal, 7).padding(.vertical, 3)
@@ -844,11 +839,6 @@ private struct UpNextCard: View {
                     .frame(width: width)
                     .overlay { StillImage(url: entry.thumb, size: width) }
                     .overlay { LinearGradient(colors: [.clear, .black.opacity(0.5)], startPoint: .center, endPoint: .bottom) }
-                    .overlay {
-                        Image(systemName: "play.fill").font(.system(size: 16, weight: .bold)).foregroundStyle(.white)
-                            .frame(width: 42, height: 42).background(.black.opacity(0.38), in: Circle())
-                            .overlay(Circle().strokeBorder(.white.opacity(0.25), lineWidth: 0.5))
-                    }
                     .overlay(alignment: .topLeading) {
                         Text("UP NEXT").font(.system(size: 10, weight: .heavy)).tracking(0.8).foregroundStyle(theme.onAccent)
                             .padding(.horizontal, 8).padding(.vertical, 4)
