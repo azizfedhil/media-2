@@ -38,6 +38,8 @@ struct PlayerInfo {
 /// then the synopsis. No background of its own: the player puts it on its glass card.
 struct PlayerInfoCard: View {
     let info: PlayerInfo
+    /// The show / movie logo, drawn under the thumbnail. nil until one is found (or when there is none).
+    var logo: UIImage? = nil
     let onClose: () -> Void
 
     private static let thumbWidth: CGFloat = 230
@@ -53,15 +55,34 @@ struct PlayerInfoCard: View {
     var body: some View {
         Group {
             if stacked {
-                VStack(alignment: .leading, spacing: 14) { thumbnail; details }
+                VStack(alignment: .leading, spacing: 14) { thumbColumn; details }
             } else {
-                HStack(alignment: .top, spacing: 18) { thumbnail; details }
+                HStack(alignment: .top, spacing: 18) { thumbColumn; details }
             }
         }
         .onGeometryChange(for: Bool.self) { $0.size.width < Self.stackBelow } action: { stacked = $0 }
     }
 
     // MARK: Thumbnail
+
+    /// The still with the title's logo underneath it.
+    private var thumbColumn: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            thumbnail
+            titleLogo
+        }
+        .frame(maxWidth: stacked ? .infinity : Self.thumbWidth, alignment: .leading)
+    }
+
+    @ViewBuilder private var titleLogo: some View {
+        if let logo {
+            Image(uiImage: logo).resizable().scaledToFit()
+                .frame(maxWidth: stacked ? 220 : Self.thumbWidth, maxHeight: 44, alignment: .leading)
+                .shadow(color: .black.opacity(0.45), radius: 6)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityHidden(true)
+        }
+    }
 
     @ViewBuilder private var thumbnail: some View {
         if info.image != nil {
