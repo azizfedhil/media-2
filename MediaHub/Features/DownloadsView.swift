@@ -4,6 +4,30 @@ extension DownloadFiles {
     static func sizeString(_ bytes: Int64) -> String {
         ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
     }
+
+    /// "3.2 MB/s"
+    static func speedString(_ bytesPerSecond: Double) -> String {
+        ByteCountFormatter.string(fromByteCount: Int64(bytesPerSecond), countStyle: .file) + "/s"
+    }
+}
+
+/// Live transfer rate of one download. Shows nothing until the first reading arrives, and re-checks every couple of
+/// seconds so a transfer that stops sending data reads "Stalled" instead of freezing on its last number.
+struct DownloadSpeedText: View {
+    @Environment(DownloadManager.self) private var downloads
+    let id: String
+    /// Text placed in front of the speed (e.g. " · ") so nothing dangles while there is no reading yet.
+    var prefix = ""
+
+    var body: some View {
+        if let s = downloads.speeds[id] {
+            TimelineView(.periodic(from: .now, by: 2)) { ctx in
+                let stalled = ctx.date.timeIntervalSince(s.at) > 5 || s.bytesPerSecond < 1
+                Text(prefix + (stalled ? "Stalled" : DownloadFiles.speedString(s.bytesPerSecond)))
+                    .monospacedDigit()
+            }
+        }
+    }
 }
 
 /// Everything saved on this device, grouped by show / movie (and by season inside a show), with the storage it uses.
@@ -103,6 +127,12 @@ struct DownloadsView: View {
                 }
             }
             .padding(.vertical, 4)
+            if downloads.hasPausable {
+                Button("Pause All", systemImage: "pause.circle") { downloads.pauseAll() }
+            }
+            if downloads.hasPaused {
+                Button("Resume All", systemImage: "play.circle") { downloads.resumeAll() }
+            }
             Button("Delete All Downloads", systemImage: "trash", role: .destructive) {
                 pending = Pending(title: "Delete all downloads?", button: "Delete \(count) item\(count == 1 ? "" : "s")",
                                   message: "Frees \(DownloadFiles.sizeString(used)). Anything still downloading is cancelled.",
@@ -167,36 +197,70 @@ struct DownloadsView: View {
     }
 
     private func row(_ r: DownloadRecord) -> some View {
-        Button {
-            if r.state == .done { play(r) } else if r.state == .failed { downloads.retry(r.id) }
-        } label: {
-            HStack(spacing: 12) {
-                RemoteImage(url: r.thumb ?? r.item.backdropURL, size: 120).frame(width: 96, height: 54)
-                    .background(Color.white.opacity(0.08))
-                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                    .overlay {
-                        if r.state == .done {
-                            Image(systemName: "play.fill").font(.caption).foregroundStyle(.white.opacity(0.9)).shadow(radius: 3)
-                        }
-                    }
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(title(r)).font(.subheadline.weight(.semibold)).lineLimit(2).multilineTextAlignment(.leading)
-                    status(r)
+        HStack(spacing: 4) {
+            Button {
+                switch r.state {
+                case .done: play(r)
+                case .failed: downloads.retry(r.id)
+                case .paused: downloads.resume(r.id)
+                case .queued, .downloading: break
                 }
-                Spacer(minLength: 0)
+            } label: {
+                rowLabel(r)
             }
-            .contentShape(Rectangle())
+            .buttonStyle(.plain)
+            transferControl(r)
         }
-        .buttonStyle(.plain)
         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
             Button(r.state == .done ? "Delete" : "Remove", systemImage: "trash", role: .destructive) { downloads.delete(r.id) }
         }
         .contextMenu {
             if r.state == .done { Button("Play", systemImage: "play.fill") { play(r) } }
             if r.state == .failed { Button("Retry", systemImage: "arrow.clockwise") { downloads.retry(r.id) } }
+            if r.state == .queued || r.state == .downloading { Button("Pause", systemImage: "pause.fill") { downloads.pause(r.id) } }
+            if r.state == .paused { Button("Resume", systemImage: "play.fill") { downloads.resume(r.id) } }
             Button(r.state == .done ? "Delete Download" : "Cancel Download",
                    systemImage: r.state == .done ? "trash" : "xmark.circle", role: .destructive) { downloads.delete(r.id) }
         }
+    }
+
+    /// Pause / resume button at the end of a row that is still transferring (or waiting, or paused).
+    @ViewBuilder private func transferControl(_ r: DownloadRecord) -> some View {
+        switch r.state {
+        case .queued, .downloading:
+            Button { downloads.pause(r.id) } label: { controlIcon("pause.circle.fill") }
+                .buttonStyle(.plain).accessibilityLabel("Pause download")
+        case .paused:
+            Button { downloads.resume(r.id) } label: { controlIcon("play.circle.fill") }
+                .buttonStyle(.plain).accessibilityLabel("Resume download")
+        case .done, .failed:
+            EmptyView()
+        }
+    }
+
+    private func controlIcon(_ name: String) -> some View {
+        Image(systemName: name).font(.title2).symbolRenderingMode(.hierarchical)
+            .foregroundStyle(theme.accent).frame(width: 44, height: 44).contentShape(Rectangle())
+    }
+
+    private func rowLabel(_ r: DownloadRecord) -> some View {
+        HStack(spacing: 12) {
+            RemoteImage(url: r.thumb ?? r.item.backdropURL, size: 120).frame(width: 96, height: 54)
+                .background(Color.white.opacity(0.08))
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay {
+                    if r.state == .done {
+                        Image(systemName: "play.fill").font(.caption).foregroundStyle(.white.opacity(0.9)).shadow(radius: 3)
+                    }
+                }
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title(r)).font(.subheadline.weight(.semibold)).lineLimit(2).multilineTextAlignment(.leading)
+                status(r)
+            }
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
     }
 
     @ViewBuilder private func status(_ r: DownloadRecord) -> some View {
@@ -207,10 +271,24 @@ struct DownloadsView: View {
         case .downloading:
             VStack(alignment: .leading, spacing: 4) {
                 ProgressView(value: r.progress).tint(theme.accent)
-                Text(r.expectedBytes > 0
-                     ? "\(Int(r.progress * 100))% · \(DownloadFiles.sizeString(r.bytes)) of \(DownloadFiles.sizeString(r.expectedBytes))"
-                     : "\(Int(r.progress * 100))%")
+                HStack(spacing: 8) {
+                    Text(r.expectedBytes > 0
+                         ? "\(Int(r.progress * 100))% · \(DownloadFiles.sizeString(r.bytes)) of \(DownloadFiles.sizeString(r.expectedBytes))"
+                         : DownloadFiles.sizeString(r.bytes))
+                    Spacer(minLength: 0)
+                    DownloadSpeedText(id: r.id)
+                }
+                .font(.caption).monospacedDigit().foregroundStyle(.secondary)
+                .lineLimit(1).minimumScaleFactor(0.8)
+            }
+        case .paused:
+            VStack(alignment: .leading, spacing: 4) {
+                if r.progress > 0 { ProgressView(value: r.progress).tint(Color.secondary) }
+                Text(r.progress > 0 && r.expectedBytes > 0
+                     ? "Paused · \(Int(r.progress * 100))% · \(DownloadFiles.sizeString(r.bytes)) of \(DownloadFiles.sizeString(r.expectedBytes))"
+                     : "Paused · tap to resume")
                     .font(.caption).monospacedDigit().foregroundStyle(.secondary)
+                    .lineLimit(1).minimumScaleFactor(0.8)
             }
         case .queued:
             Text(connectivity.isOnline == false ? "Waiting for connection" : "Waiting…")
