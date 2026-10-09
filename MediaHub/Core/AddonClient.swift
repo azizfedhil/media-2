@@ -32,7 +32,10 @@ actor AddonClient {
     private func streamData(_ url: URL) async throws -> Data {
         try await withThrowingTaskGroup(of: Data.self) { group in
             group.addTask {
-                let (d, resp) = try await self.streamSession.data(from: url)
+                // Never from the HTTP cache: a cached empty / failed answer would hide an add-on until the cache expires.
+                var req = URLRequest(url: url)
+                req.cachePolicy = .reloadIgnoringLocalCacheData
+                let (d, resp) = try await self.streamSession.data(for: req)
                 guard (resp as? HTTPURLResponse)?.statusCode == 200 else { throw URLError(.badServerResponse) }
                 return d
             }
@@ -54,8 +57,19 @@ actor AddonClient {
         return d
     }
 
+    /// Retries twice on a failed fetch (cold-starting hosts, a network that isn't up yet at launch), and refetches
+    /// once ignoring the cache if a cached copy doesn't decode.
     func manifest(at url: URL, fresh: Bool = false) async throws -> AddonManifest {
-        try JSONDecoder().decode(AddonManifest.self, from: try await data(url, fresh: fresh))
+        var lastError: Error = URLError(.unknown)
+        for attempt in 0..<3 {
+            if attempt > 0 { try await Task.sleep(for: .seconds(Double(attempt) * 1.5)) }
+            do {
+                let d = try await data(url, fresh: fresh || attempt > 0)
+                return try JSONDecoder().decode(AddonManifest.self, from: d)
+            } catch is CancellationError { throw CancellationError()
+            } catch { lastError = error }
+        }
+        throw lastError
     }
 
     /// Drops every cached catalog / manifest response, so the next fetch goes to the network.
