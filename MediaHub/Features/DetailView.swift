@@ -586,6 +586,10 @@ struct DetailView: View {
             case .done:
                 Button("Delete Download", systemImage: "trash", role: .destructive) { downloads.delete(r.id) }
             case .queued, .downloading:
+                Button("Pause Download", systemImage: "pause.circle") { downloads.pause(r.id) }
+                Button("Cancel Download", systemImage: "xmark.circle", role: .destructive) { downloads.delete(r.id) }
+            case .paused:
+                Button("Resume Download", systemImage: "play.circle") { downloads.resume(r.id) }
                 Button("Cancel Download", systemImage: "xmark.circle", role: .destructive) { downloads.delete(r.id) }
             case .failed:
                 Button("Retry Download", systemImage: "arrow.clockwise") { downloads.retry(r.id) }
@@ -652,11 +656,16 @@ struct DetailView: View {
         switch r.state {
         case .done: text = "Downloaded · \(size)"; symbol = "arrow.down.circle.fill"
         case .downloading: text = "Downloading \(Int(r.progress * 100))%"; symbol = "arrow.down.circle"
+        case .paused: text = r.progress > 0 ? "Paused \(Int(r.progress * 100))%" : "Paused"; symbol = "pause.circle"
         case .queued: text = "Waiting to download"; symbol = "clock"
         case .failed: text = r.error ?? "Download failed"; symbol = "exclamationmark.triangle.fill"
         }
-        return Label(text, systemImage: symbol).font(.footnote.weight(.medium))
-            .foregroundStyle(r.state == .done ? theme.accent : Color.secondary)
+        return HStack(spacing: 0) {
+            Label(text, systemImage: symbol)
+            if r.state == .downloading { DownloadSpeedText(id: r.id, prefix: " · ") }
+        }
+        .font(.footnote.weight(.medium))
+        .foregroundStyle(r.state == .done ? theme.accent : Color.secondary)
     }
 
     // MARK: Trailers
