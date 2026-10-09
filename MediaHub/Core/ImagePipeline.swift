@@ -246,13 +246,13 @@ struct RemoteImage: View {
 
 /// Soft highlight sweeping across a placeholder while its image loads.
 /// Driven by the wall clock, so every placeholder on screen sweeps in step, at 30 fps (a slow highlight doesn't need
-/// more). Static under Reduce Motion and in Low Power Mode.
+/// more). Static under Reduce Motion, in Low Power Mode and while a sheet covers the page.
 struct Shimmer: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         Group {
-            if reduceMotion || PowerMode.shared.saving {
+            if reduceMotion || PowerMode.shared.saving || LayoutState.shared.pagesCovered {
                 Color.white.opacity(0.04)
             } else {
                 TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { tl in
