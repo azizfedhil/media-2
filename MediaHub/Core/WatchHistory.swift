@@ -21,6 +21,9 @@ final class WatchHistory {
         var wE: Int? = nil
         var done: Bool? = nil      // movies: explicitly watched / unwatched
         var alias: String? = nil   // the title's other id (tt… vs tmdb:…)
+        // Up Next dismissed while the watched marker was at hS·hE. It comes back once a later episode is finished.
+        var hS: Int? = nil
+        var hE: Int? = nil
         var id: String { item.id }
         func matches(_ x: String) -> Bool { item.id == x || alias == x }
 
@@ -43,7 +46,11 @@ final class WatchHistory {
             return p.count == 2 ? (p[0], p[1]) : nil
         }
         /// Eligible for "Up Next": a finished series episode whose numbers we can read.
-        var isUpNextCandidate: Bool { item.type == "series" && watchedThrough != nil && !isInProgress }
+        var isUpNextCandidate: Bool {
+            guard item.type == "series", let w = watchedThrough, !isInProgress else { return false }
+            if let s = hS, let e = hE, (s, e) == (w.season, w.episode) { return false }
+            return true
+        }
     }
     private(set) var entries: [Entry] = []
     /// Everything that dropped off `entries` (the list is capped at 30 for Continue Watching) or was removed from it.
@@ -125,6 +132,7 @@ final class WatchHistory {
                       season: season, episode: episode, episodeTitle: episodeTitle, thumb: thumb)
         e.alias = old?.alias
         e.done = old?.done
+        e.hS = old?.hS; e.hE = old?.hE
         var wt = old?.watchedThrough
         if e.isFinished {
             if item.type == "series" {
@@ -189,6 +197,13 @@ final class WatchHistory {
         persist()
     }
 
+    /// Hides the Up Next card for a show until another episode is finished. The watched marker is untouched.
+    func dismissUpNext(_ id: String) {
+        guard let i = index(of: id), let w = entries[i].watchedThrough else { return }
+        entries[i].hS = w.season; entries[i].hE = w.episode
+        persist()
+    }
+
     // MARK: Mark as watched (used by long-press menus on posters, seasons and episodes)
 
     /// Marks a title watched. Series go through `markThrough`; a movie becomes a finished entry.
@@ -210,6 +225,7 @@ final class WatchHistory {
     func unmarkWatched(_ id: String) {
         guard let i = index(of: id) else { return }
         entries[i].wS = 0; entries[i].wE = 0; entries[i].done = false
+        entries[i].hS = nil; entries[i].hE = nil
         if entries[i].isFinished { entries[i].position = 0 }
         persist()
     }

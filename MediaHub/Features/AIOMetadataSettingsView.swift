@@ -8,6 +8,7 @@ struct AIOMetadataSettingsView: View {
     @Environment(AddonStore.self) private var store
     @Environment(ContentPrefs.self) private var prefs
     @Environment(ProfileStore.self) private var profiles
+    @Environment(SimklStore.self) private var simkl
     @Environment(\.openURL) private var openURL
     @State private var query = ""
     @State private var urlText = ""
@@ -89,7 +90,7 @@ struct AIOMetadataSettingsView: View {
     private func header(for addon: Addon, on: Int) -> String {
         var s = addon.manifest.name
         if !store.isEnabled(addon) { s += " (add-on is off)" }
-        return s + " · \(on) on Home · \(profiles.active.name)"
+        return s + " · \(on) on Home · \(simkl.name(for: profiles.active))"
     }
 
     // MARK: Catalogues

@@ -6,6 +6,7 @@ import SwiftUI
 struct ProfileAvatar: View {
     let profile: Profile
     var size: CGFloat = 30
+    @Environment(SimklStore.self) private var simkl
 
     var body: some View {
         let base = Color(hex: profile.colorHex) ?? .purple
@@ -20,9 +21,31 @@ struct ProfileAvatar: View {
                     .font(.system(size: size * 0.44, weight: .bold))
                     .foregroundStyle(base.contrastingForeground)
             }
+            if let url = simkl.avatarURL(for: profile) { AvatarPhoto(url: url, size: size) }
         }
         .frame(width: size, height: size)
         .accessibilityHidden(true)
+    }
+}
+
+/// A profile picture from the web (the Simkl account's). Transparent until it loads, so the icon underneath shows meanwhile.
+private struct AvatarPhoto: View {
+    let url: URL
+    let size: CGFloat
+    @Environment(\.displayScale) private var scale
+    @State private var image: UIImage?
+
+    var body: some View {
+        let shown = ImageMemory.get(url, maxPixel: size * scale) ?? image
+        ZStack {
+            if let shown { Image(uiImage: shown).resizable().scaledToFill() }
+        }
+        .frame(width: size, height: size)
+        .clipShape(Circle())
+        .task(id: url) {
+            if ImageMemory.get(url, maxPixel: size * scale) != nil { return }
+            image = await ImagePipeline.shared.image(for: url, maxPixel: size * scale)
+        }
     }
 }
 
@@ -36,6 +59,7 @@ struct ProfileAvatar: View {
 struct ProfileToolbar: ViewModifier {
     var logo = false
     @Environment(ProfileStore.self) private var profiles
+    @Environment(SimklStore.self) private var simkl
     @State private var showing = false
     /// 0 at the top of the page, 1 once scrolled `fadeDistance` points. Drives the Home header directly.
     @State private var progress: CGFloat = 0
@@ -58,7 +82,7 @@ struct ProfileToolbar: ViewModifier {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { showing = true } label: { ProfileAvatar(profile: profiles.active, size: 30) }
                         .accessibilityLabel("Profile")
-                        .accessibilityValue(profiles.active.name)
+                        .accessibilityValue(simkl.name(for: profiles.active))
                 }
             }
             .sheet(isPresented: $showing) { ProfileSheet() }
@@ -97,7 +121,7 @@ struct ProfileToolbar: ViewModifier {
             .padding(.trailing, 16)
             .allowsHitTesting(onScreen && progress < 0.5)
             .accessibilityLabel("Profile")
-            .accessibilityValue(profiles.active.name)
+            .accessibilityValue(simkl.name(for: profiles.active))
         }
         .frame(height: Self.barHeight)
         .padding(.top, Self.statusBar)
@@ -196,7 +220,7 @@ struct ProfileSheet: View {
             HStack(spacing: 12) {
                 ProfileAvatar(profile: profiles.active, size: 44)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("View \(profiles.active.name)'s profile").font(.headline)
+                    Text("View \(simkl.name(for: profiles.active))'s profile").font(.headline)
                     Text("Stats, integrations and taste").font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -276,12 +300,12 @@ struct ProfileSheet: View {
                     }
                     .padding(4)
                     .overlay { if active && !managing { Circle().strokeBorder(theme.accent, lineWidth: 3) } }
-                Text(p.name).font(.subheadline.weight(.semibold)).lineLimit(1)
+                Text(simkl.name(for: p)).font(.subheadline.weight(.semibold)).lineLimit(1)
             }
             .frame(maxWidth: .infinity)
         }
         .buttonStyle(PressableStyle())
-        .accessibilityLabel(p.name)
+        .accessibilityLabel(simkl.name(for: p))
         .accessibilityHint(managing ? "Edit profile" : "Switch to this profile")
         .accessibilityAddTraits(active ? .isSelected : [])
     }
@@ -304,6 +328,8 @@ struct ProfileSheet: View {
 // MARK: - Editor
 
 struct ProfileEditor: View {
+    @Environment(SimklStore.self) private var simkl
+    @State private var useSimkl = false
     let target: ProfileTarget
     @Environment(\.dismiss) private var dismiss
     @Environment(ProfileStore.self) private var profiles
@@ -328,6 +354,7 @@ struct ProfileEditor: View {
             _name = State(initialValue: p.name)
             _colorHex = State(initialValue: p.colorHex)
             _symbol = State(initialValue: p.symbol)
+            _useSimkl = State(initialValue: p.simklIdentity == true)
         }
     }
 
@@ -337,7 +364,8 @@ struct ProfileEditor: View {
     }
     private var trimmed: String { name.trimmingCharacters(in: .whitespacesAndNewlines) }
     private var draft: Profile {
-        Profile(id: "preview", name: trimmed.isEmpty ? "?" : trimmed, colorHex: colorHex, symbol: symbol)
+        Profile(id: "preview", name: trimmed.isEmpty ? "?" : trimmed, colorHex: colorHex, symbol: symbol,
+                simklIdentity: useSimkl && simkl.account != nil ? true : nil)
     }
     private let grid = [GridItem(.adaptive(minimum: 44), spacing: 12)]
 
@@ -349,6 +377,18 @@ struct ProfileEditor: View {
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 6)
                         .listRowBackground(Color.clear)
+                }
+                if simkl.isConnected, let a = simkl.account {
+                    Section {
+                        Toggle(isOn: $useSimkl) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Use my Simkl name and picture")
+                                Text(a.name).font(.footnote).foregroundStyle(.secondary)
+                            }
+                        }
+                    } footer: {
+                        Text("Shows your Simkl account's name and photo for this profile. Disconnecting Simkl brings back the name and icon below.")
+                    }
                 }
                 Section("Name") {
                     TextField("Name", text: $name)
@@ -431,9 +471,11 @@ struct ProfileEditor: View {
     private func save() {
         if var p = existing {
             p.name = name; p.colorHex = colorHex; p.symbol = symbol
+            p.simklIdentity = useSimkl ? true : nil
             profiles.update(p)
-        } else {
-            profiles.add(name: name, colorHex: colorHex, symbol: symbol)
+        } else if var p = profiles.add(name: name, colorHex: colorHex, symbol: symbol), useSimkl {
+            p.simklIdentity = true
+            profiles.update(p)
         }
         dismiss()
     }

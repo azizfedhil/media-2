@@ -118,6 +118,7 @@ struct SidebarShell: View {
 
     @Environment(ThemeStore.self) private var theme
     @Environment(ProfileStore.self) private var profiles
+    @Environment(SimklStore.self) private var simkl
     @Environment(AddonStore.self) private var store
     @Environment(ContentPrefs.self) private var contentPrefs
     @State private var visited: Set<AppTab> = [.home]
@@ -201,7 +202,7 @@ struct SidebarShell: View {
             HStack(spacing: 10) {
                 ProfileAvatar(profile: profiles.active, size: 34)
                 if !compact {
-                    Text(profiles.active.name).font(.system(size: 16, weight: .semibold)).lineLimit(1)
+                    Text(simkl.name(for: profiles.active)).font(.system(size: 16, weight: .semibold)).lineLimit(1)
                     Spacer(minLength: 4)
                     TimelineView(.everyMinute) { ctx in
                         Text(ctx.date.formatted(date: .omitted, time: .shortened))
@@ -215,7 +216,7 @@ struct SidebarShell: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Profile")
-        .accessibilityValue(profiles.active.name)
+        .accessibilityValue(simkl.name(for: profiles.active))
     }
 
     private func navRow(_ t: AppTab) -> some View {

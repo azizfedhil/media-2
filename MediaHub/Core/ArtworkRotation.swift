@@ -32,6 +32,11 @@ final class ArtworkRotation {
     @ObservationIgnored var period: Period = .daily
     private(set) var epoch: Int
 
+    /// Titles whose poster is held still: id -> TMDB file path of the kept poster (\"\" = the default one).
+    /// Observed, so every poster of the title updates the moment it is pinned or released.
+    private(set) var pinned: [String: String] = UserDefaults.standard.dictionary(forKey: ArtworkRotation.pinnedKey) as? [String: String] ?? [:]
+    static let pinnedKey = "artwork.pinned"
+
     @ObservationIgnored private let sessionSeed = Int.random(in: 0..<10_000)
     /// Picks are remembered for the epoch, so a title never changes artwork mid-day even if more alternates are
     /// discovered meanwhile ("" = keep the default).
@@ -49,6 +54,29 @@ final class ArtworkRotation {
         epoch = e
         pickMemo.removeAll(keepingCapacity: true)
         probeMemo.removeAll(keepingCapacity: true)
+    }
+
+    // MARK: Keep current poster
+
+    func isPinned(_ id: String) -> Bool { pinned[id] != nil }
+
+    /// Stops the daily rotation of this title's poster at whatever it shows right now.
+    func pinPoster(_ item: MetaPreview) {
+        let base = item.posterURL
+        var keep = ""
+        // Keep what is actually on screen: today's alternate only if it is being shown (not held back by the network).
+        if let path = pick(id: item.id, role: .poster, base: base, epoch: epoch),
+           let url = TMDBImage.url(path: path, role: .poster, pixelWidth: 500), url != base, isAvailable(url) {
+            keep = path
+        }
+        pinned[item.id] = keep
+        UserDefaults.standard.set(pinned, forKey: Self.pinnedKey)
+    }
+
+    func unpin(_ id: String) {
+        guard pinned[id] != nil else { return }
+        pinned[id] = nil
+        UserDefaults.standard.set(pinned, forKey: Self.pinnedKey)
     }
 
     // MARK: Choices
@@ -93,6 +121,7 @@ final class ArtworkRotation {
     }
 
     private func pick(id: String, role: ArtworkRole, base: URL?, epoch: Int) -> String? {
+        if role == .poster, let kept = pinned[id] { return kept.isEmpty ? nil : kept }
         let key = "\(id)|\(role.rawValue)|\(epoch)"
         if let hit = pickMemo[key] { return hit.isEmpty ? nil : hit }
         let basePath = base.flatMap { $0.host == "image.tmdb.org" ? "/" + $0.lastPathComponent : nil }

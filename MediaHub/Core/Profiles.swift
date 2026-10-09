@@ -9,6 +9,8 @@ struct Profile: Codable, Identifiable, Hashable, Sendable {
     var colorHex: String
     /// SF Symbol shown in the avatar. Empty = the first letter of the name.
     var symbol: String = ""
+    /// Show the connected Simkl account's name and picture instead of the name and icon above. Optional so older saves decode.
+    var simklIdentity: Bool? = nil
 
     /// The first profile. It keeps the pre-profiles storage keys, so history saved by older builds carries over.
     static let defaultID = "default"

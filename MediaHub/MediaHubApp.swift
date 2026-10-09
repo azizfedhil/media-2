@@ -128,6 +128,8 @@ struct MediaHubApp: App {
     @State private var contentPrefs = ContentPrefs()
     @State private var downloads = DownloadManager.shared
     @State private var connectivity = Connectivity.shared
+    /// First launch only: the setup flow (see `Onboarding`).
+    @State private var showOnboarding = Onboarding.needed
 
     init() {
         // Builds the "pear." animation outlines in the background so the intro starts on its first frame.
@@ -137,6 +139,7 @@ struct MediaHubApp: App {
     var body: some Scene {
         WindowGroup {
             RootView()
+                .fullScreenCover(isPresented: $showOnboarding) { OnboardingView { showOnboarding = false } }
                 .environment(store).environment(history).environment(simkl).environment(pins).environment(theme)
                 .environment(profiles).environment(library).environment(watchLog).environment(libraryPrefs)
                 .environment(contentPrefs).environment(downloads).environment(connectivity)
@@ -211,7 +214,7 @@ struct RootView: View {
         // No connection at launch: start on the Downloads page (no slide-in animation, so it is simply the first screen).
         .task {
             let online = await connectivity.ready()
-            guard !online else { return }
+            guard !online, !Onboarding.isPending else { return }
             var t = Transaction(); t.disablesAnimations = true
             withTransaction(t) { offlineMode = true }
         }

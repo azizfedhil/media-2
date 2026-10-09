@@ -19,8 +19,11 @@ final class P2PManager {
     nonisolated static let placeholderURL = URL(string: "p2p://pending")!
     /// Posted (main queue) whenever a running engine is torn down. userInfo["reason"] is a StopReason raw value.
     static let didStop = Notification.Name("P2PManagerDidStop")
-    /// A paused stream keeps the engine this long (instant resume); after that everything is torn down.
-    static let idleTimeout: Duration = .seconds(90)
+    /// A paused stream keeps the engine this long (instant resume, buffered pieces kept); after that everything is torn down.
+    /// A paused engine is nearly free: the pacer throttles the swarm to a trickle once the read-ahead window is full,
+    /// so a long hold costs little, while a teardown throws away the buffer and forces a cold start. Shorter under
+    /// Low Power Mode / thermal pressure.
+    nonisolated static var idleTimeout: Duration { powerSaving ? .seconds(5 * 60) : .seconds(15 * 60) }
     /// After an audio interruption (call, Siri, alarm) begins: much shorter, since it may last minutes.
     static let interruptionGrace: Duration = .seconds(15)
 

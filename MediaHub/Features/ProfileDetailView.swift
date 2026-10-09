@@ -59,7 +59,7 @@ struct ProfileDetailView: View {
     private var header: some View {
         VStack(spacing: 10) {
             ProfileAvatar(profile: profiles.active, size: 96)
-            Text(profiles.active.name).font(.title2.bold())
+            Text(simkl.name(for: profiles.active)).font(.title2.bold())
             Text(headerSubtitle).font(.footnote).foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity)

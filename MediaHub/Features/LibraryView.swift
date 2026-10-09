@@ -79,7 +79,7 @@ struct LibraryView: View {
     }
 
     private var subtitle: String {
-        prefs.usesSimkl(simkl) ? "Synced with Simkl" : "\(profiles.active.name) · On this device"
+        prefs.usesSimkl(simkl) ? "Synced with Simkl" : "\(simkl.name(for: profiles.active)) · On this device"
     }
 
     // MARK: View
@@ -119,7 +119,7 @@ struct LibraryView: View {
                             description: Text("Titles you add on Simkl show up here.")) }
                     } else {
                         ContentUnavailableView("Your library is empty", systemImage: "books.vertical",
-                            description: Text("Tap Add to Watchlist on any title to save it to \(profiles.active.name)'s library. Connect Simkl in Settings to sync across devices."))
+                            description: Text("Tap Add to Watchlist on any title to save it to \(simkl.name(for: profiles.active))'s library. Connect Simkl in Settings to sync across devices."))
                     }
                 }
             }

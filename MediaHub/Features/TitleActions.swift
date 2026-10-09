@@ -46,6 +46,8 @@ enum TitleActions {
 /// The long-press ("dropdown") menu shown on any poster: watched state, list membership, and Details.
 struct PosterContextMenu: View {
     let item: MetaPreview
+    /// Offer "Keep Current Poster". Off on cards that don't show rotating artwork (Continue Watching).
+    var artwork = true
     @Environment(WatchHistory.self) private var history
     @Environment(LocalLibrary.self) private var library
 
@@ -66,6 +68,14 @@ struct PosterContextMenu: View {
         } label: {
             Label(inList ? "Remove from Library" : "Add to Library",
                   systemImage: inList ? "bookmark.slash" : "bookmark")
+        }
+        if artwork {
+            let kept = ArtworkRotation.shared.isPinned(item.id)
+            Button {
+                if kept { ArtworkRotation.shared.unpin(item.id) } else { ArtworkRotation.shared.pinPoster(item) }
+            } label: {
+                Label(kept ? "Resume Poster Rotation" : "Keep Current Poster", systemImage: kept ? "pin.slash" : "pin")
+            }
         }
         NavigationLink(value: item) {
             Label("Details", systemImage: "info.circle")

@@ -96,6 +96,18 @@ private enum SimklError: LocalizedError {
 }
 
 /// Episodes watched / in total for one Simkl show.
+/// The connected account's public identity, from `POST /users/settings`.
+struct SimklAccount: Codable, Equatable, Sendable {
+    var name: String
+    var avatar: String?
+    var avatarURL: URL? { avatar.flatMap { $0.isEmpty ? nil : URL(string: $0) } }
+}
+
+private struct SettingsResponse: Decodable {
+    struct User: Decodable { let name: String?; let avatar: String? }
+    let user: User?
+}
+
 struct SimklEpisodeCount: Sendable { let watched: Int; let total: Int }
 
 private enum PollResult { case tokens(TokenResponse), pending, slowDown, failed(String), transient }
@@ -115,6 +127,8 @@ final class SimklStore {
     /// Per-title episode counts from Simkl (id = IMDb or "tmdb:<id>", same as the library items). Feeds the profile statistics.
     private(set) var episodeCounts: [String: SimklEpisodeCount] = [:]
     private(set) var isSyncing = false
+    private(set) var account: SimklAccount? = SimklStore.loadAccount()
+    @ObservationIgnored private var accountFetched = false
     private(set) var pin: DeviceAuthorization?
     private(set) var loginError: String?
     private(set) var loginStatus: String?
@@ -132,7 +146,32 @@ final class SimklStore {
 
     init() {
         if token != nil, let c = Self.loadCache() { cache = c; apply(c.entries) }   // Library shows instantly at launch
+        if token != nil { Task { await refreshAccount() } }
     }
+
+    // MARK: Account (name + picture)
+
+    private static let accountKey = "simkl.account"
+    private static func loadAccount() -> SimklAccount? {
+        UserDefaults.standard.data(forKey: accountKey).flatMap { try? JSONDecoder().decode(SimklAccount.self, from: $0) }
+    }
+
+    /// One small request per launch (and right after login). The name and picture are cached for the next launch.
+    func refreshAccount(force: Bool = false) async {
+        guard isConnected, force || !accountFetched else { return }
+        if let until = rateLimitedUntil, until > .now { return }
+        accountFetched = true
+        guard let r: SettingsResponse = try? await sendAuthed({ request("/users/settings", method: "POST", body: [:]) }),
+              let name = r.user?.name?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty else { accountFetched = false; return }
+        let a = SimklAccount(name: name, avatar: r.user?.avatar)
+        guard a != account else { return }
+        account = a
+        UserDefaults.standard.set(try? JSONEncoder().encode(a), forKey: Self.accountKey)
+    }
+
+    /// The name to show for `p`: the Simkl account's when the profile opted in, else its own.
+    func name(for p: Profile) -> String { p.simklIdentity == true ? (account?.name ?? p.name) : p.name }
+    func avatarURL(for p: Profile) -> URL? { p.simklIdentity == true ? account?.avatarURL : nil }
 
     var isConnected: Bool { token != nil }
 
@@ -353,6 +392,7 @@ final class SimklStore {
     private func storeTokens(_ t: TokenResponse) {
         token = t.accessToken
         Keychain.set(t.accessToken, "simkl.token")
+        Task { await refreshAccount(force: true) }      // picks up the name + picture right after login
         if let r = t.refreshToken, !r.isEmpty { refreshToken = r; Keychain.set(r, "simkl.refresh") }
         guard t.expiresIn != nil || t.refreshToken != nil else {
             tokenExpiry = nil; UserDefaults.standard.removeObject(forKey: Self.expiryKey); return
@@ -407,6 +447,8 @@ final class SimklStore {
         Keychain.remove("simkl.token"); Keychain.remove("simkl.refresh")
         UserDefaults.standard.removeObject(forKey: Self.expiryKey)
         UserDefaults.standard.removeObject(forKey: Self.tokenClientKey)
+        account = nil; accountFetched = false
+        UserDefaults.standard.removeObject(forKey: Self.accountKey)
         cache = nil; lastSync = nil
         try? FileManager.default.removeItem(at: Self.cacheURL)
     }

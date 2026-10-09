@@ -6,6 +6,7 @@ struct ContentSettingsView: View {
     @Environment(ContentPrefs.self) private var prefs
     @Environment(AddonStore.self) private var store
     @Environment(ProfileStore.self) private var profiles
+    @Environment(SimklStore.self) private var simkl
     @AppStorage("tmdb.key") private var tmdbKey = ""
 
     private var rules: ContentRules { prefs.rules }
@@ -25,7 +26,7 @@ struct ContentSettingsView: View {
             Section {
                 ForEach(ContentCategory.regions) { categoryToggle($0) }
             } header: {
-                Text("Where it's from · \(profiles.active.name)")
+                Text("Where it's from · \(simkl.name(for: profiles.active))")
             } footer: {
                 Text(regionFooter)
             }

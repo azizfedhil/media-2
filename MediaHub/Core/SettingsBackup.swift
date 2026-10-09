@@ -15,7 +15,7 @@ enum SettingsBackup {
         "ui.accent", "ui.networkBadges", "ui.titleLogos", "ui.landscapeLayout", "player.glass", "player.autoplayNext",
         "player.pip", "player.pillPinned", "player.pillOrder",
         "skip.enabled", "skip.fallbackSeconds", "sub.lang", "sub.style", "subs.online", "subs.baseURL", "library.collapsed",
-        "profiles.list", "profiles.active", "pinned.sources",
+        "profiles.list", "profiles.active", "pinned.sources", "artwork.pinned",
     ]
     /// Per-profile settings (each profile's hidden categories and rows): "content.prefs" plus ".<profile id>" variants.
     /// Always included, unlike the data below, because they are settings.

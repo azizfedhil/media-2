@@ -84,13 +84,13 @@ struct SettingsView: View {
                             Text(contentSummary).font(.footnote).foregroundStyle(.secondary)
                         }
                     }
-                } header: { Text("Content · \(profiles.active.name)") } footer: {
+                } header: { Text("Content · \(simkl.name(for: profiles.active))") } footer: {
                     Text("Hide anime, cartoons and other kinds of titles, or switch off individual Home rows. Chosen per profile.")
                 }
 
                 Section {
                     LibrarySourceControls()
-                } header: { Text("Library · \(profiles.active.name)") } footer: {
+                } header: { Text("Library · \(simkl.name(for: profiles.active))") } footer: {
                     Text("Chosen per profile. A library on this device keeps its own watch history and watch time and never contacts Simkl. Syncing merges both libraries without deleting anything on either side.")
                 }
 

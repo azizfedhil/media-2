@@ -813,7 +813,7 @@ private struct ContinueCard: View {
                 withAnimation { history.remove(entry.id) }
             }
             Divider()
-            PosterContextMenu(item: entry.item)
+            PosterContextMenu(item: entry.item, artwork: false)
         }
     }
 
@@ -832,6 +832,7 @@ private struct ContinueCard: View {
 
 private struct UpNextCard: View {
     let entry: UpNextItem
+    @Environment(WatchHistory.self) private var history
     @Environment(ThemeStore.self) private var theme
     private let width: CGFloat = 270
 
@@ -862,6 +863,13 @@ private struct UpNextCard: View {
             }
         }
         .buttonStyle(PressableStyle())
+        .contextMenu {
+            Button("Remove from Continue Watching", systemImage: "xmark.circle", role: .destructive) {
+                withAnimation { history.dismissUpNext(entry.item.id) }
+            }
+            Divider()
+            PosterContextMenu(item: entry.item, artwork: false)
+        }
     }
 }
 
