@@ -280,7 +280,7 @@ struct HomeView: View {
     private var addonTaskID: [String] {
         let ids: [String] = store.enabledAddons.map { $0.id }
         let rules = contentPrefs.rules
-        let extra: [String] = [String(store.revision), rules.addonRowKey, rules.categoryKey, pickerKey]
+        let extra: [String] = [String(store.revision), String(MediaServerStore.shared.revision), rules.addonRowKey, rules.categoryKey, pickerKey]
         return ids + extra
     }
     private var pickerKey: String { store.pickerIDs.sorted().joined(separator: ",") }

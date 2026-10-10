@@ -3,6 +3,7 @@ import SwiftUI
 /// Every external service in one place: API keys, the Simkl login, and what each one is used for.
 struct IntegrationsView: View {
     @Environment(SimklStore.self) private var simkl
+    @Environment(MediaServerStore.self) private var servers
     @AppStorage("mdblist.key") private var mdbKey = ""
     @AppStorage("tvdb.key") private var tvdbKey = ""
     @AppStorage("tvdb.pin") private var tvdbPin = ""
@@ -41,6 +42,18 @@ struct IntegrationsView: View {
             }
 
             simklSection
+
+            Section {
+                NavigationLink { MediaServersView() } label: {
+                    HStack {
+                        Label("Media servers", systemImage: "server.rack")
+                        Spacer()
+                        if !servers.accounts.isEmpty { Text("\(servers.accounts.count)").foregroundStyle(.secondary) }
+                    }
+                }
+            } header: { Text("Jellyfin & Plex") } footer: {
+                Text("Play what is already in your own libraries. Matching titles appear as sources on their detail page, and recently added titles can show on Home and in search.")
+            }
 
             Section {
                 Toggle("Skip intro, recap and credits", isOn: $skipEnabled)

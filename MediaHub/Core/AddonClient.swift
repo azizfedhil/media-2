@@ -77,6 +77,10 @@ actor AddonClient {
 
     /// `skip` pages through add-ons that declare it; `search` queries add-ons that declare it.
     func catalog(addon: Addon, catalog: AddonManifest.CatalogDef, skip: Int = 0, search: String? = nil) async throws -> [MetaPreview] {
+        // A Jellyfin / Plex server is answered by its backend, not over the add-on protocol.
+        if let server = MediaServerRegistry.shared.backend(for: addon) {
+            return try await server.catalog(type: catalog.type, id: catalog.id, skip: skip, search: search)
+        }
         var extras: [String] = []
         if let q = search?.trimmingCharacters(in: .whitespacesAndNewlines), !q.isEmpty {
             let safe = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-._~"))
@@ -146,6 +150,10 @@ actor AddonClient {
                 await withTaskGroup(of: (Addon, [StreamItem])?.self) { group in
                     for addon in addons where addon.provides("stream", type: type, id: id) {
                         group.addTask {
+                            if let server = MediaServerRegistry.shared.backend(for: addon) {
+                                let found = await server.streams(type: type, id: id)
+                                return found.isEmpty ? nil : (addon, found)
+                            }
                             let url = addon.baseURL.appendingPathComponent("stream/\(type)/\(id).json")
                             guard let d = try? await self.streamData(url),
                                   let s = try? StreamItem.decodeList(d) else { return nil }

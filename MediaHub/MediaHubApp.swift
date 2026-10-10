@@ -128,6 +128,7 @@ struct MediaHubApp: App {
     @State private var contentPrefs = ContentPrefs()
     @State private var downloads = DownloadManager.shared
     @State private var connectivity = Connectivity.shared
+    @State private var mediaServers = MediaServerStore.shared
     /// First launch only: the setup flow (see `Onboarding`).
     @State private var showOnboarding = Onboarding.needed
 
@@ -142,7 +143,7 @@ struct MediaHubApp: App {
                 .fullScreenCover(isPresented: $showOnboarding) { OnboardingView { showOnboarding = false } }
                 .environment(store).environment(history).environment(simkl).environment(pins).environment(theme)
                 .environment(profiles).environment(library).environment(watchLog).environment(libraryPrefs)
-                .environment(contentPrefs).environment(downloads).environment(connectivity)
+                .environment(contentPrefs).environment(downloads).environment(connectivity).environment(mediaServers)
                 .preferredColorScheme(Theme.forceDark ? .dark : nil)
                 .pearLaunchScreen()
         }
@@ -224,6 +225,7 @@ struct RootView: View {
             P2PManager.shared.scenePhaseChanged(p)
             if p == .active {
                 ArtworkRotation.shared.refresh()          // the only place the day's artwork can change
+                MediaServerStore.shared.warm()
                 Task { await refreshLibrary() }
             } else {
                 watchLog.flush()

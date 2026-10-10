@@ -896,7 +896,7 @@ struct DetailView: View {
                 if loadingStreams && streams.isEmpty { ProgressView() }
                 else if !loadingStreams && streams.isEmpty {
                     ContentUnavailableView("No sources", systemImage: "play.slash",
-                        description: Text("Add a stream add-on in Settings."))
+                        description: Text("Add a stream add-on or connect a media server in Settings."))
                 }
             }
             .navigationTitle(downloadTarget != nil ? "Download from…" : "Sources")

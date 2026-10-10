@@ -146,7 +146,7 @@ struct ProfileDetailView: View {
                 }
             }
             HStack {
-                Text("\(on) of \(list.count) active · \(addons.enabledAddons.count) add-on\(addons.enabledAddons.count == 1 ? "" : "s")")
+                Text("\(on) of \(list.count) active · \(addons.enabledInstalledAddons.count) add-on\(addons.enabledInstalledAddons.count == 1 ? "" : "s")")
                     .font(.footnote).foregroundStyle(.secondary)
                 Spacer()
                 NavigationLink { IntegrationsView() } label: { Text("Manage").font(.footnote.weight(.semibold)) }

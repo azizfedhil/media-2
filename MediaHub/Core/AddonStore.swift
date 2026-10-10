@@ -8,8 +8,11 @@ final class AddonStore {
     /// Ids of installed add-ons the user switched off. They stay installed and keep their place in the
     /// order, but are skipped everywhere add-ons are used (Home, search, sources, downloads).
     private(set) var disabledIDs: Set<String> = []
-    /// Add-ons currently in use: installed and switched on, in the user's order.
-    var enabledAddons: [Addon] { addons.filter { !disabledIDs.contains($0.id) } }
+    /// Installed add-ons that are switched on, in the user's order. Media servers are not included.
+    var enabledInstalledAddons: [Addon] { addons.filter { !disabledIDs.contains($0.id) } }
+    /// Everything sources, search and Home draw from: the signed-in Jellyfin / Plex servers first (a title in your own
+    /// library is offered before any other source), then the installed add-ons that are switched on.
+    var enabledAddons: [Addon] { MediaServerStore.shared.addons + enabledInstalledAddons }
     /// Ids of add-ons whose catalogues the user picks one by one instead of getting them all on Home. AIOMetadata is
     /// recognised on its own (`Addon.isAIOMetadata`); this holds the ones switched on by hand, for a copy hosted
     /// under another name.
