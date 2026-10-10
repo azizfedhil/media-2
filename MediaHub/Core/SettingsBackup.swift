@@ -85,3 +85,31 @@ struct BackupDocument: FileDocument {
     init(configuration: ReadConfiguration) throws { data = configuration.file.regularFileContents ?? Data() }
     func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper { FileWrapper(regularFileWithContents: data) }
 }
+
+/// Opens the system file picker in "copy" mode: the chosen file is copied into the app's own temporary folder, so
+/// reading it needs no security-scoped access. SwiftUI's `fileImporter` hands back a scoped URL instead, which
+/// fails in sideloaded or containerised installs (LiveContainer) where the app can't claim that access.
+enum BackupPicker {
+    private static var holder: PickerDelegate?
+
+    private final class PickerDelegate: NSObject, UIDocumentPickerDelegate {
+        let done: (URL?) -> Void
+        init(_ done: @escaping (URL?) -> Void) { self.done = done }
+        func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) { finish(urls.first) }
+        func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) { finish(nil) }
+        private func finish(_ url: URL?) { BackupPicker.holder = nil; done(url) }
+    }
+
+    /// `done` gets the copied file, or nil when the picker was cancelled or couldn't be shown.
+    static func present(_ done: @escaping (URL?) -> Void) {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        let scene = scenes.first { $0.activationState == .foregroundActive } ?? scenes.first
+        guard var top = scene?.keyWindow?.rootViewController ?? scene?.windows.first?.rootViewController else { done(nil); return }
+        while let next = top.presentedViewController { top = next }
+        let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.propertyList, .xml, .data], asCopy: true)
+        let delegate = PickerDelegate(done)
+        holder = delegate
+        picker.delegate = delegate
+        top.present(picker, animated: true)
+    }
+}

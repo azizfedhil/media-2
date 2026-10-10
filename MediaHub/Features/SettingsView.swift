@@ -31,7 +31,6 @@ struct SettingsView: View {
     @State private var includeData = false
     @State private var exportDoc: BackupDocument?
     @State private var showExporter = false
-    @State private var showImporter = false
     @State private var backupNote: String?
 
     private var connected: Int {
@@ -203,15 +202,14 @@ struct SettingsView: View {
                                       contentType: .propertyList, defaultFilename: "Pear-Settings") { r in
                             if case .failure = r { backupNote = "Export failed." } else { backupNote = "Settings exported." }
                         }
-                    Button { showImporter = true } label: { Label("Import settings", systemImage: "square.and.arrow.down") }
-                        // Any file can be picked (a backup that was renamed or re-saved isn't greyed out);
-                        // the content is checked when it is read.
-                        .fileImporter(isPresented: $showImporter, allowedContentTypes: [.propertyList, .xml, .data]) { r in
-                            importSettings(r)
-                        }
+                    // Any file can be picked (a backup that was renamed or re-saved isn't greyed out); the content is
+                    // checked when it is read. The picker copies the file first, which also works in sideloaded installs.
+                    Button { pickBackup() } label: { Label("Import settings", systemImage: "square.and.arrow.down") }
+                    Button { copyBackup() } label: { Label("Copy settings to clipboard", systemImage: "doc.on.doc") }
+                    Button { pasteBackup() } label: { Label("Paste settings from clipboard", systemImage: "doc.on.clipboard") }
                     if let backupNote { Text(backupNote).font(.footnote).foregroundStyle(.secondary) }
                 } header: { Text("Backup") } footer: {
-                    Text("The file contains your API keys and add-on URLs, so keep it private. The Simkl login isn't included; reconnect it after importing.")
+                    Text("The file contains your API keys and add-on URLs, so keep it private. The clipboard options are a fallback if the file picker won't open a backup: the copied text includes your keys too, and is removed from the clipboard after 5 minutes. The Simkl login isn't included; reconnect it after importing.")
                 }
 
                 Section {
@@ -247,6 +245,31 @@ struct SettingsView: View {
         } catch { backupNote = "Export failed." }
     }
 
+    private func pickBackup() {
+        BackupPicker.present { url in
+            guard let url else { return }
+            importSettings(.success(url))
+        }
+    }
+
+    private func copyBackup() {
+        do {
+            let data = try SettingsBackup.export(includeData: includeData)
+            guard let text = String(data: data, encoding: .utf8) else { backupNote = "Copy failed."; return }
+            UIPasteboard.general.setItems([[UTType.plainText.identifier: text]],
+                                          options: [.expirationDate: Date().addingTimeInterval(300)])
+            backupNote = "Settings copied. Paste them on the other install within 5 minutes."
+        } catch { backupNote = "Copy failed." }
+    }
+
+    private func pasteBackup() {
+        guard let text = UIPasteboard.general.string, let data = text.data(using: .utf8), !text.isEmpty else {
+            backupNote = "The clipboard has no settings text."
+            return
+        }
+        applyBackup(data)
+    }
+
     private func importSettings(_ result: Result<URL, Error>) {
         let url: URL
         switch result {
@@ -261,8 +284,17 @@ struct SettingsView: View {
         }
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        let data: Data
+        do { data = try SettingsBackup.read(url) } catch {
+            backupNote = "Couldn't open that file: \(error.localizedDescription)"
+            return
+        }
+        applyBackup(data)
+    }
+
+    private func applyBackup(_ data: Data) {
         do {
-            let n = try SettingsBackup.restore(try SettingsBackup.read(url))
+            let n = try SettingsBackup.restore(data)
             theme.reload(); profiles.reload(); history.reload(); library.reload(); watchLog.reload(); pins.reload(); libraryPrefs.reload()
             contentPrefs.reload()
             Task { await store.reloadFromDefaults() }
