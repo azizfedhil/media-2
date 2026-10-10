@@ -12,6 +12,15 @@ Torrentio torrent streams play through an embedded Rust engine (`p2p-core/`, lib
 - CI builds `Vendor/P2PCore.xcframework` before `xcodegen` (see `.github/workflows/build.yml`). Locally: `cd p2p-core && make xcframework`.
 - Swift side lives in `MediaHub/P2P/`. Engine only exists while a P2P stream is playing; idle/background/memory/network changes tear it down.
 
+## Jellyfin & Plex
+Settings -> Integrations -> Media servers. Sign in to a Jellyfin server (password or Quick Connect) and/or a Plex account (Plex's own login page; every server on the account is offered).
+- **Sources:** a title that is in the library shows up in the Sources list, in the player's source switcher and for next-episode, ahead of every add-on. Files are played as they are (direct play through the same player engine), one source per version of the file. Titles are matched by IMDb id; a title without one in Jellyfin / Plex isn't found.
+- **Home and Search:** each server adds "New" rows for movies and series (touch and hold the server in Media servers to hide them) and takes part in search.
+- **How it plugs in** (`MediaHub/Servers/`): each enabled server is a synthetic add-on (`Addon.server`, `pear-server://<id>/manifest.json`, never fetched). `AddonClient.catalog` and `streamUpdates` hand its requests to a `MediaServerBackend` (`JellyfinBackend`, `PlexBackend`), so pins, filters, the player and Home need no special cases. `MediaServerStore` keeps accounts in UserDefaults and tokens in the Keychain; neither is in a settings backup.
+- **Plex** lists the whole library once (500 titles a request) the first time it is needed and keeps that for 15 minutes; matching, "New" and search run on it. Episodes are fetched per show when one is opened. The server's other connections (LAN, remote, relay) are tried in turn if the saved one stops answering.
+- **Not done:** progress isn't reported back to Jellyfin / Plex (watch state stays in Pear and Simkl), no transcoding, no external subtitle tracks from the server, and downloads still need an https link.
+- `NSLocalNetworkUsageDescription` is set in `project.yml`; iOS asks for local-network access the first time a LAN server is reached.
+
 ## Picture in Picture
 The pill in the player has a PiP button (native AVPlayer path only; hidden for software-decoded AV1 / VP9). Leaving the app while a video plays opens the window automatically. Code: `MediaHub/Features/PlayerPiP.swift`.
 

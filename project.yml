@@ -28,6 +28,8 @@ targets:
       properties:
         # Needed for Picture in Picture and audio when the app is backgrounded.
         UIBackgroundModes: [audio]
+        # Jellyfin / Plex servers on the home network (iOS asks the first time one is reached over Wi-Fi).
+        NSLocalNetworkUsageDescription: "Pear connects to your Jellyfin or Plex server on your home network."
         CFBundleDisplayName: "Pear."
         # Version comes from MARKETING_VERSION / CURRENT_PROJECT_VERSION below (XcodeGen would otherwise write 1.0 / 1).
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
