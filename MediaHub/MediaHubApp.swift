@@ -191,7 +191,7 @@ struct RootView: View {
                     Tab("Settings", systemImage: "gearshape.fill", value: AppTab.settings) { SettingsView() }
                     Tab(value: AppTab.search, role: .search) { SearchView() }
                 }
-                .tabBarMinimizeBehavior(.onScrollDown)
+                .pearMinimizeTabBarOnScroll()
             }
         }
         .onGeometryChange(for: CGSize.self) { $0.size } action: { size = $0; updateWide() }

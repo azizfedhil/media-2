@@ -473,8 +473,7 @@ private struct GlassCircle: ViewModifier {
     var tint: Color? = nil
     @ViewBuilder func body(content: Content) -> some View {
         if on {
-            if let tint { content.glassEffect(.regular.tint(tint.opacity(0.55)), in: .circle) }
-            else { content.glassEffect(.regular, in: .circle) }
+            content.pearGlass(in: Circle(), tint: tint?.opacity(0.55))
         } else {
             content.background(tint?.opacity(0.75) ?? Color.black.opacity(0.4), in: Circle())
         }
@@ -484,7 +483,7 @@ private struct GlassCircle: ViewModifier {
 private struct GlassCapsule: ViewModifier {
     let on: Bool
     @ViewBuilder func body(content: Content) -> some View {
-        if on { content.glassEffect(.regular, in: .capsule) }
+        if on { content.pearGlass(in: Capsule()) }
         else { content.background(.black.opacity(0.55), in: Capsule()) }
     }
 }
@@ -493,7 +492,7 @@ private struct GlassCard: ViewModifier {
     let on: Bool
     var radius: CGFloat = 26
     @ViewBuilder func body(content: Content) -> some View {
-        if on { content.glassEffect(.regular, in: .rect(cornerRadius: radius)) }
+        if on { content.pearGlass(in: RoundedRectangle(cornerRadius: radius, style: .continuous)) }
         else { content.background(.black.opacity(0.88), in: RoundedRectangle(cornerRadius: radius, style: .continuous)) }
     }
 }
@@ -1568,11 +1567,11 @@ struct PlayerScreen: View {
                 Button("Open in VLC") { open("vlc-x-callback://x-callback-url/stream?url=") }
                 Button("Open in Infuse") { open("infuse://x-callback-url/play?url=") }
             }
-            .buttonStyle(.glass)
+            .pearGlassButton()
         }
         .padding(24)
         .frame(maxWidth: 360)
-        .glassEffect(.regular, in: .rect(cornerRadius: 24))
+        .pearGlass(in: RoundedRectangle(cornerRadius: 24, style: .continuous))
         .padding(20)
     }
 

@@ -281,7 +281,7 @@ struct DetailView: View {
                     .font(.headline).frame(maxWidth: .infinity)
                     .foregroundStyle(theme.onAccent)
             }
-            .buttonStyle(.glassProminent).controlSize(.large)
+            .pearGlassButton(prominent: true).controlSize(.large)
             .contextMenu { downloadMenu(season: isSeries ? season : nil, episode: isSeries ? episode : nil) }
             listButton
             watchedButton
@@ -419,15 +419,14 @@ struct DetailView: View {
         ScrollView(.horizontal) {
             // One glass container for the whole strip: long shows have a pill per season, and separate glass layers
             // are each sampled and composited on their own.
-            GlassEffectContainer(spacing: 8) {
+            PearGlassGroup(spacing: 8) {
                 HStack(spacing: 8) {
                     ForEach(seasonChips) { c in
                         Button { select(season: c.id) } label: {
                             Text(c.title).font(.subheadline.weight(.semibold))
                                 .padding(.horizontal, 16).padding(.vertical, 9)
                                 .foregroundStyle(c.id == season ? theme.onAccent : Color.primary)
-                                .glassEffect(c.id == season ? .regular.tint(theme.accent).interactive() : .regular.interactive(),
-                                             in: .capsule)
+                                .pearGlass(in: Capsule(), tint: c.id == season ? theme.accent : nil, interactive: true)
                         }
                         .buttonStyle(.plain)
                         // Long tap: mark the whole season as watched (or unmark it).

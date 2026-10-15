@@ -108,7 +108,7 @@ struct CatalogGridView: View {
         }
         .scrollIndicators(.hidden)
         .navigationTitle(row.title)
-        .navigationSubtitle("\(model.items.count) titles")
+        .pearNavigationSubtitle("\(model.items.count) titles")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {

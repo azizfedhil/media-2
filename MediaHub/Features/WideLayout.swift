@@ -391,7 +391,7 @@ struct CollapsingSplit<Hero: View, Pane: View>: View {
         } label: {
             Image(systemName: "chevron.right").font(.system(size: 14, weight: .bold))
                 .frame(width: 34, height: 34)
-                .glassEffect(.regular.interactive(), in: .circle)
+                .pearGlass(in: Circle(), interactive: true)
         }
         .buttonStyle(.plain)
         .padding(.leading, 8)

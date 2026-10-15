@@ -2,7 +2,7 @@ name: MediaHub
 options:
   bundleIdPrefix: com.mediahub
   deploymentTarget:
-    iOS: "26.0"
+    iOS: "18.0"
 settings:
   base:
     SWIFT_VERSION: "5.0"

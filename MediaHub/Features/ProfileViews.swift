@@ -115,7 +115,7 @@ struct ProfileToolbar: ViewModifier {
             Button { showing = true } label: {
                 ProfileAvatar(profile: profiles.active, size: 32)
                     .frame(width: 46, height: 46)
-                    .glassEffect(.regular.interactive(), in: .circle)
+                    .pearGlass(in: Circle(), interactive: true)
             }
             .buttonStyle(.plain)
             .padding(.trailing, 16)
@@ -196,7 +196,7 @@ struct ProfileSheet: View {
                     Button(managing ? "Done Editing" : "Manage Profiles") {
                         withAnimation(.snappy) { managing.toggle() }
                     }
-                    .buttonStyle(.glass)
+                    .pearGlassButton()
                 }
                 .padding(20)
             }
@@ -315,7 +315,7 @@ struct ProfileSheet: View {
             VStack(spacing: 9) {
                 Image(systemName: "plus").font(.title.weight(.semibold))
                     .frame(width: 76, height: 76)
-                    .glassEffect(.regular.interactive(), in: .circle)
+                    .pearGlass(in: Circle(), interactive: true)
                     .padding(4)
                 Text("Add Profile").font(.subheadline.weight(.semibold)).foregroundStyle(.secondary).lineLimit(1)
             }
