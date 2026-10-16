@@ -104,5 +104,6 @@ final class ProfileStore {
 
     private func save() {
         UserDefaults.standard.set(try? JSONEncoder().encode(profiles), forKey: ProfileKeys.list)
+        PairSync.shared.localChanged([.profile])
     }
 }

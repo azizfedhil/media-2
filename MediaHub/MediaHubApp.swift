@@ -166,6 +166,8 @@ struct RootView: View {
     @Environment(Connectivity.self) private var connectivity
     /// True when the app launched without a connection: shows the Downloads page instead of the (empty) online tabs.
     @State private var offlineMode = false
+    /// Watch party: the guest's player and a title to open from a suggestion (see PartyRouter).
+    @Bindable private var router = PartyRouter.shared
     @Environment(\.horizontalSizeClass) private var hSize
     @AppStorage(WideLayout.phoneKey) private var phoneLandscape = false
     @State private var layoutState = LayoutState.shared
@@ -191,7 +193,7 @@ struct RootView: View {
                     Tab("Settings", systemImage: "gearshape.fill", value: AppTab.settings) { SettingsView() }
                     Tab(value: AppTab.search, role: .search) { SearchView() }
                 }
-                .pearMinimizeTabBarOnScroll()
+                .tabBarMinimizeBehavior(.onScrollDown)
             }
         }
         .onGeometryChange(for: CGSize.self) { $0.size } action: { size = $0; updateWide() }
@@ -211,6 +213,19 @@ struct RootView: View {
         }
         .sensoryFeedback(.selection, trigger: profiles.activeID)
         .task { await refreshLibrary() }
+        // Pear.pair: the Simkl state decides whether the library is synced, then the sync starts if an account is signed in.
+        .task {
+            let simklStore = simkl
+            PairSync.shared.simklConnected = { simklStore.isConnected }
+            PairSync.shared.startIfSignedIn()
+        }
+        // A pull changed this device's data: the stores read it again.
+        .onReceive(NotificationCenter.default.publisher(for: PairSync.remoteApplied)) { _ in
+            profiles.reload()
+            history.reload()
+            library.reload()
+            libraryPrefs.reload()
+        }
         .task { downloads.configure(store: addonStore, pins: pinnedSources) }
         // No connection at launch: start on the Downloads page (no slide-in animation, so it is simply the first screen).
         .task {
@@ -220,10 +235,19 @@ struct RootView: View {
             withTransaction(t) { offlineMode = true }
         }
         .fullScreenCover(isPresented: $offlineMode) { OfflineHome { offlineMode = false } }
+        .fullScreenCover(isPresented: $router.guestPlayerOpen) {
+            PlayerScreen(request: PartyRouter.placeholderRequest(), provider: nil,
+                         onClose: { router.guestPlayerOpen = false }, partyGuest: true)
+        }
+        .sheet(item: $router.openTitle) { item in
+            NavigationStack { DetailView(item: item) }
+        }
         .onChange(of: connectivity.isOnline) { _, on in if on == true { downloads.networkReturned() } }
         .onChange(of: phase) { _, p in
             P2PManager.shared.scenePhaseChanged(p)
             if p == .active {
+                PartySession.shared.reconnectNow()
+                PairSync.shared.foreground()
                 ArtworkRotation.shared.refresh()          // the only place the day's artwork can change
                 MediaServerStore.shared.warm()
                 Task { await refreshLibrary() }

@@ -30,10 +30,10 @@ struct OfflineHome: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
             Spacer(minLength: 0)
-            if online { Button("Open Pear", action: exit).pearGlassButton(prominent: true) }
+            if online { Button("Open Pear", action: exit).buttonStyle(.glassProminent) }
         }
         .padding(14)
-        .pearGlass(in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .glassEffect(.regular, in: .rect(cornerRadius: 22))
         .padding(.horizontal, 16).padding(.bottom, 8)
     }
 }

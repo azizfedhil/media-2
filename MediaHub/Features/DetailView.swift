@@ -56,6 +56,7 @@ struct DetailView: View {
     @State private var seasonsExpanded = false
     @State private var trailers: [TMDBClient.Video] = []
     @State private var openTrailer: TMDBClient.Video?
+    @State private var showParty = false
 
     private var isSeries: Bool { item.type == "series" }
 
@@ -108,6 +109,13 @@ struct DetailView: View {
         }
         .ignoresSafeArea(edges: .top)
         .toolbarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button { showParty = true } label: { Image(systemName: "person.2") }
+                    .accessibilityLabel("Watch party")
+            }
+        }
+        .sheet(isPresented: $showParty) { PartySheet(suggest: item) }
         .sheet(isPresented: $showSources, onDismiss: { downloadTarget = nil; startPendingPlayback() }) { sourceSheet }
         // Presented from the page itself (not from inside the sources sheet): the sheet closes first,
         // then the player opens. This keeps dismissing the player reliable.
@@ -281,7 +289,7 @@ struct DetailView: View {
                     .font(.headline).frame(maxWidth: .infinity)
                     .foregroundStyle(theme.onAccent)
             }
-            .pearGlassButton(prominent: true).controlSize(.large)
+            .buttonStyle(.glassProminent).controlSize(.large)
             .contextMenu { downloadMenu(season: isSeries ? season : nil, episode: isSeries ? episode : nil) }
             listButton
             watchedButton
@@ -419,14 +427,15 @@ struct DetailView: View {
         ScrollView(.horizontal) {
             // One glass container for the whole strip: long shows have a pill per season, and separate glass layers
             // are each sampled and composited on their own.
-            PearGlassGroup(spacing: 8) {
+            GlassEffectContainer(spacing: 8) {
                 HStack(spacing: 8) {
                     ForEach(seasonChips) { c in
                         Button { select(season: c.id) } label: {
                             Text(c.title).font(.subheadline.weight(.semibold))
                                 .padding(.horizontal, 16).padding(.vertical, 9)
                                 .foregroundStyle(c.id == season ? theme.onAccent : Color.primary)
-                                .pearGlass(in: Capsule(), tint: c.id == season ? theme.accent : nil, interactive: true)
+                                .glassEffect(c.id == season ? .regular.tint(theme.accent).interactive() : .regular.interactive(),
+                                             in: .capsule)
                         }
                         .buttonStyle(.plain)
                         // Long tap: mark the whole season as watched (or unmark it).

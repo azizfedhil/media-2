@@ -156,6 +156,8 @@ final class WatchHistory {
         }
         trim()
         persist()
+        // A finished save (close, switch, mark) pushes the position at once.
+        PairSync.shared.progressSaved(titleID: item.id, immediate: true)
     }
 
     /// Keeps the list near 30, but never pushes out a show that is in progress or has a watched marker.
@@ -183,6 +185,8 @@ final class WatchHistory {
         list.removeAll { $0.matches(item.id) }
         list.insert(e, at: 0)
         if let d = try? JSONEncoder().encode(list) { UserDefaults.standard.set(d, forKey: storeKey) }
+        // The 15-second checkpoint follows the 60-second cadence, not an immediate push.
+        PairSync.shared.progressSaved(titleID: item.id, immediate: false)
     }
 
     /// Hides a title from Continue Watching. Its progress still counts in the profile statistics,
@@ -271,9 +275,11 @@ final class WatchHistory {
 
     private func persist() {
         if let d = try? JSONEncoder().encode(entries) { UserDefaults.standard.set(d, forKey: storeKey) }
+        PairSync.shared.localChanged([.history])
     }
     private func persistArchive() {
         if let d = try? JSONEncoder().encode(archive) { UserDefaults.standard.set(d, forKey: archiveKey) }
+        PairSync.shared.localChanged([.history])
     }
 }
 

@@ -56,6 +56,8 @@ final class PlayerModel {
     @ObservationIgnored private var addedOnline: [String: Int] = [:]
     /// Playback speed, 0.5...2.0 in continuous steps. The engine clamps it again to what the active backend supports.
     private(set) var rate: Double = 1.0
+    /// Set only while this device hosts a watch party: seeks and speed changes reach the room through it (Party/).
+    @ObservationIgnored weak var transportObserver: PlayerTransportObserver?
     private(set) var engine: AetherEngine?
     /// Last request handed to start(), and whether P2PManager tore the engine down behind our back (idle, background, memory, network, call).
     @ObservationIgnored private var lastRequest: PlayRequest?
@@ -400,6 +402,7 @@ final class PlayerModel {
     func setRate(_ r: Double) {
         let v = min(max(r, 0.5), 2.0)
         rate = abs(v - 1) < 0.025 ? 1 : (v * 100).rounded() / 100
+        transportObserver?.playerDidSetRate(rate)
         rateTask?.cancel()
         // Setting a rate on a paused player could start it, so a paused change waits for the next `.playing`.
         guard isPlaying else { rateStale = true; return }
@@ -449,6 +452,7 @@ final class PlayerModel {
     private func commitSeek() async {
         guard let t = pendingTarget else { seekInFlight = false; return }
         pendingTarget = nil
+        transportObserver?.playerDidSeek(to: t)
         if p2pDropped { seekInFlight = false; resumeAfterDrop(at: t); return }
         await engine?.seek(to: t)
         if pendingTarget == nil { seekInFlight = false }
@@ -473,7 +477,8 @@ private struct GlassCircle: ViewModifier {
     var tint: Color? = nil
     @ViewBuilder func body(content: Content) -> some View {
         if on {
-            content.pearGlass(in: Circle(), tint: tint?.opacity(0.55))
+            if let tint { content.glassEffect(.regular.tint(tint.opacity(0.55)), in: .circle) }
+            else { content.glassEffect(.regular, in: .circle) }
         } else {
             content.background(tint?.opacity(0.75) ?? Color.black.opacity(0.4), in: Circle())
         }
@@ -483,7 +488,7 @@ private struct GlassCircle: ViewModifier {
 private struct GlassCapsule: ViewModifier {
     let on: Bool
     @ViewBuilder func body(content: Content) -> some View {
-        if on { content.pearGlass(in: Capsule()) }
+        if on { content.glassEffect(.regular, in: .capsule) }
         else { content.background(.black.opacity(0.55), in: Capsule()) }
     }
 }
@@ -492,7 +497,7 @@ private struct GlassCard: ViewModifier {
     let on: Bool
     var radius: CGFloat = 26
     @ViewBuilder func body(content: Content) -> some View {
-        if on { content.pearGlass(in: RoundedRectangle(cornerRadius: radius, style: .continuous)) }
+        if on { content.glassEffect(.regular, in: .rect(cornerRadius: radius)) }
         else { content.background(.black.opacity(0.88), in: RoundedRectangle(cornerRadius: radius, style: .continuous)) }
     }
 }
@@ -502,6 +507,8 @@ private struct GlassCard: ViewModifier {
 struct PlayerScreen: View {
     let provider: EpisodeProvider?
     let onClose: () -> Void
+    /// The guest's party player: its source is the room's, and the room drives it (Party/).
+    let partyGuest: Bool
     @Environment(WatchHistory.self) private var history
     @Environment(LocalLibrary.self) private var library
     @Environment(WatchLog.self) private var watchLog
@@ -509,6 +516,7 @@ struct PlayerScreen: View {
     @Environment(LibraryPrefs.self) private var libraryPrefs
     @Environment(ThemeStore.self) private var theme
     @Environment(AddonStore.self) private var store
+    @Environment(PinnedSources.self) private var pins
     @Environment(\.openURL) private var openURL
     @Environment(\.scenePhase) private var scenePhase
     @AppStorage(SubtitleStyle.storageKey) private var subJSON = ""
@@ -561,15 +569,23 @@ struct PlayerScreen: View {
     @State private var info: PlayerInfo?
     /// Subtitle look, decoded once per change instead of on every redraw of the player.
     @State private var subStyle = SubtitleStyle()
+    /// Watch party: whether the panel is open, the "Your source" line a guest sees, and why a room's source did not resolve.
+    @State private var showParty = false
+    @State private var partyChip: String?
+    @State private var partyReason: String?
+    /// Host: drives the room from this player. Guest: follows the room. At most one is set.
+    @State private var hostAdapter: PartyHostAdapter?
+    @State private var guestAdapter: PartyGuestAdapter?
 
     /// Liquid Glass over live video is re-sampled every frame, so Low Power Mode uses the flat look.
     /// A hot phone does not: the glass stays on regardless of thermal state.
     private var glass: Bool { glassPref && !PowerMode.shared.lowPower }
 
-    init(request: PlayRequest, provider: EpisodeProvider? = nil, onClose: @escaping () -> Void) {
+    init(request: PlayRequest, provider: EpisodeProvider? = nil, onClose: @escaping () -> Void, partyGuest: Bool = false) {
         _current = State(initialValue: request)
         self.provider = provider
         self.onClose = onClose
+        self.partyGuest = partyGuest
     }
 
     var body: some View {
@@ -586,14 +602,16 @@ struct PlayerScreen: View {
             if model.showSpinner && model.error == nil && !showControls && !showEpisodes && !launching {
                 ProgressView().controlSize(.large).tint(.white)
             }
-            if launching && model.error == nil { launchOverlay.transition(.opacity) }
-            if model.error != nil || (showControls && !launching) { controls.transition(.opacity) }
-            if !showEpisodes && !showSubtitles && !showSources && !showSpeed && !showInfo && model.error == nil { skipLayer }
+            if partyWaiting { partyWaitingCard.transition(.opacity) }
+            if launching && model.error == nil && !partyWaiting { launchOverlay.transition(.opacity) }
+            if (model.error != nil || (showControls && !launching)) && !partyWaiting { controls.transition(.opacity) }
+            if !showEpisodes && !showSubtitles && !showSources && !showSpeed && !showInfo && !showParty && !partyGuest && model.error == nil { skipLayer }
             if showEpisodes, let provider { episodePanel(provider).transition(.move(edge: .bottom).combined(with: .opacity)) }
             if showSubtitles { subtitlePanel.transition(.move(edge: .trailing).combined(with: .opacity)) }
             if showSources { sourcesPanel.transition(.move(edge: .trailing).combined(with: .opacity)) }
             if showSpeed { speedLayer.transition(.move(edge: .bottom).combined(with: .opacity)) }
             if showInfo, let info { infoPanel(info).transition(.move(edge: .bottom).combined(with: .opacity)) }
+            if showParty, party.code != nil { partyPanel.transition(.move(edge: .trailing).combined(with: .opacity)) }
             if let e = model.error { errorCard(e) }
             if let n = notice { toast(n) }
         }
@@ -637,7 +655,11 @@ struct PlayerScreen: View {
             if paused && !showInfo { withAnimation(.easeInOut(duration: 0.2)) { showControls = true } }
             // The 15 s tick skips paused time, and a paused player can sit in the background until iOS ends the app,
             // so pausing is when the resume point gets banked.
-            if paused { save(isFinal: false) }
+            if paused {
+                save(isFinal: false)
+                // A pause pushes the position at once (cloud/CLOUD_API.md §4), not on the 60-second cadence.
+                PairSync.shared.progressSaved(titleID: current.item.id, immediate: true)
+            }
             updateIdleTimer()
         }
         // Same for leaving the app while playing (PiP, background audio): the system may end it without notice.
@@ -650,7 +672,7 @@ struct PlayerScreen: View {
             if !shown { volumeTask?.cancel(); pillTask?.cancel(); showVolume = false; pillExpanded = false }
         }
         // Another panel takes over: the pill goes back to its icons.
-        .onChange(of: showEpisodes || showSubtitles || showSources || showSpeed || showInfo) { _, open in
+        .onChange(of: showEpisodes || showSubtitles || showSources || showSpeed || showInfo || showParty) { _, open in
             if open { volumeTask?.cancel(); pillTask?.cancel(); showVolume = false; pillExpanded = false }
         }
         // Hardware buttons (or the mute tap) while the pill is open count as adjusting: the 3 s countdown restarts.
@@ -673,6 +695,7 @@ struct PlayerScreen: View {
             pip.teardown()
             OrientationLock.set(OrientationLock.appMask)   // back to what the rest of the app allows
             // Normal exit goes through close(); this covers any other way the screen can go away.
+            detachParty()
             if !closing { finalizeCurrent(); model.shutdown() }
         }
     }
@@ -704,7 +727,11 @@ struct PlayerScreen: View {
             .ignoresSafeArea().allowsHitTesting(false)
 
             VStack(spacing: 0) {
-                HStack { circleButton("xmark", size: 42, icon: 16) { close() }; Spacer() }
+                HStack(spacing: 10) {
+                    circleButton("xmark", size: 42, icon: 16) { close() }
+                    if party.code != nil { circleButton("person.2.fill", size: 42, icon: 16) { openParty() } }
+                    Spacer()
+                }
                 Spacer()
                 transport
                 Spacer()
@@ -715,16 +742,44 @@ struct PlayerScreen: View {
         .foregroundStyle(.white)
     }
 
+    /// A guest has no skip or pause of their own: the outer buttons are blank and the middle one asks the host.
     private var transport: some View {
-        HStack(spacing: 38) {
-            circleButton("gobackward.10", size: 50, icon: 21) { model.skip(by: -10); scheduleHide() }
-            ZStack {
-                circleButton(model.isPlaying ? "pause.fill" : "play.fill", size: 68, icon: 28) { model.togglePlay(); scheduleHide() }
+        VStack(spacing: 12) {
+            HStack(spacing: 38) {
+                if partyGuest {
+                    Color.clear.frame(width: 50, height: 50)
+                } else {
+                    circleButton("gobackward.10", size: 50, icon: 21) { model.skip(by: -10); scheduleHide() }
+                }
+                ZStack {
+                    circleButton(transportIsPlaying ? "pause.fill" : "play.fill", size: 68, icon: 28) {
+                        if partyGuest { askHostToggle() } else { model.togglePlay(); scheduleHide() }
+                    }
                     .opacity(model.showSpinner ? 0.3 : 1)
-                if model.showSpinner { ProgressView().controlSize(.large).tint(.white).allowsHitTesting(false) }
+                    if model.showSpinner { ProgressView().controlSize(.large).tint(.white).allowsHitTesting(false) }
+                }
+                if partyGuest {
+                    Color.clear.frame(width: 50, height: 50)
+                } else {
+                    circleButton("goforward.10", size: 50, icon: 21) { model.skip(by: 10); scheduleHide() }
+                }
             }
-            circleButton("goforward.10", size: 50, icon: 21) { model.skip(by: 10); scheduleHide() }
+            if partyGuest {
+                Text(transportIsPlaying ? "Ask host to pause" : "Ask host to play")
+                    .font(.footnote.weight(.semibold)).foregroundStyle(.white.opacity(0.8))
+            }
         }
+    }
+
+    /// What the play button shows. A guest sees the room's state, not the local engine's.
+    private var transportIsPlaying: Bool {
+        partyGuest ? (party.state?.playing ?? model.isPlaying) : model.isPlaying
+    }
+
+    /// Guest: asks the host to play or pause. The room decides, and everyone follows.
+    private func askHostToggle() {
+        if transportIsPlaying { party.askHostToPause() } else { party.askHostToPlay() }
+        scheduleHide()
     }
 
     /// Bottom stack: title and episode line on the left, icon buttons on the right, both directly above the glass
@@ -732,6 +787,7 @@ struct PlayerScreen: View {
     private var bottomBar: some View {
         VStack(alignment: .leading, spacing: 10) {
             if pausedDim { pausedInfo }
+            if partyGuest { guestSourceLine }
             ViewThatFits(in: .horizontal) {
                 HStack(alignment: .bottom, spacing: 16) { titleBlock; iconRow }
                 VStack(alignment: .leading, spacing: 12) {
@@ -742,6 +798,8 @@ struct PlayerScreen: View {
             SeekBar(playhead: model.playhead, glass: glass,
                     onScrubStart: { hideTask?.cancel() },
                     onCommit: { t in Task { await model.seek(to: t); scheduleHide() } })
+                .allowsHitTesting(!partyGuest)
+                .opacity(partyGuest ? 0.5 : 1)
         }
     }
 
@@ -797,12 +855,13 @@ struct PlayerScreen: View {
     /// Whether an item applies to what is playing right now (no episodes without a provider, no audio menu with one track...).
     private func pillHas(_ item: PillItem) -> Bool {
         switch item {
-        case .speed, .sources, .volume: return true
+        case .speed: return !partyGuest
+        case .sources, .volume: return true
         case .episodes: return provider != nil
         case .pip: return pip.isAvailable || pip.isActive
         case .subtitles: return !model.subtitleTracks.isEmpty || OpenSubtitlesClient.shared.enabled
         case .audio: return model.audioTracks.count > 1
-        case .next: return nextEp != nil
+        case .next: return nextEp != nil && !partyGuest
         }
     }
 
@@ -1027,6 +1086,7 @@ struct PlayerScreen: View {
     private func loadAux() async {
         nextEp = nil; segments = []; segmentsLoaded = false
         let req = current
+        guard !req.imdb.isEmpty else { return }   // the guest's placeholder, before the room's title arrives
         async let found = IntroClient.shared.segments(item: req.item, imdb: req.imdb, season: req.season, episode: req.episode)
         if let provider, req.season != nil { nextEp = await provider.next(req) }
         let segs = await found
@@ -1445,6 +1505,8 @@ struct PlayerScreen: View {
                                logo: current.logo, thumb: current.thumb,
                                sourceAddonID: addon.id, sourceSignature: s.signature, p2p: t.p2p)
         current = next
+        hostAdapter?.loadSource(from: next, resumeAt: resume)
+        if partyGuest { partyChip = PartySourceResolver.chipText(addon: addon, stream: s) }
         withAnimation(.snappy(duration: 0.3)) { showSources = false; showControls = true }
         Task {
             await model.start(next, resume: resume, replacing: true)
@@ -1489,6 +1551,7 @@ struct PlayerScreen: View {
             guard let next else { flash("No playable source found for that episode"); return }
             finalizeCurrent()                 // save + scrobble the episode we are leaving
             current = next
+            hostAdapter?.loadSource(from: next, resumeAt: resumePoint(for: next))
             scrobbled = false
             withAnimation(.snappy(duration: 0.3)) { showEpisodes = false; showControls = true }
             await model.start(next, resume: resumePoint(for: next), replacing: true)
@@ -1520,7 +1583,7 @@ struct PlayerScreen: View {
 
     /// Paused with the controls up and nothing else open.
     private var pausedDim: Bool {
-        model.isPaused && model.error == nil && showControls && !showEpisodes && !showSubtitles && !showSources && !showSpeed && !showInfo
+        model.isPaused && model.error == nil && showControls && !showEpisodes && !showSubtitles && !showSources && !showSpeed && !showInfo && !showParty
     }
 
     /// Dims the frozen frame with one flat gradient. A real blur would have to snapshot the video surface and
@@ -1549,6 +1612,7 @@ struct PlayerScreen: View {
     /// Logo is per show, so it is fetched once and kept across episode changes. Downsampled and cached by ImagePipeline.
     private func loadPausedLogo() async {
         pausedLogo = nil
+        guard !current.item.id.isEmpty else { return }
         let item = current.item
         var url = current.logo
         if url == nil { url = await LogoResolver.shared.logo(for: item) }
@@ -1567,11 +1631,11 @@ struct PlayerScreen: View {
                 Button("Open in VLC") { open("vlc-x-callback://x-callback-url/stream?url=") }
                 Button("Open in Infuse") { open("infuse://x-callback-url/play?url=") }
             }
-            .pearGlassButton()
+            .buttonStyle(.glass)
         }
         .padding(24)
         .frame(maxWidth: 360)
-        .pearGlass(in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .glassEffect(.regular, in: .rect(cornerRadius: 24))
         .padding(20)
     }
 
@@ -1579,8 +1643,155 @@ struct PlayerScreen: View {
 
     private func begin() async {
         model.configure(defaultSubtitleLanguage: subLang == "off" ? nil : subLang)
+        attachParty()
+        // A guest's source comes from the room (see loadRoomSource), so the player waits for that here.
+        if partyGuest { return }
+        hostAdapter?.loadSource(from: current, resumeAt: resumePoint(for: current))
         await model.start(current, resume: resumePoint(for: current))
         scheduleHide()
+    }
+
+    // MARK: Watch party
+
+    private var party: PartySession { PartySession.shared }
+
+    /// A guest follows the room. The host drives it, but only while this device is hosting a party.
+    private func attachParty() {
+        if partyGuest {
+            let guest = PartyGuestAdapter(model: model)
+            guest.loadSource = { source, at in await self.loadRoomSource(source, at: at) }
+            guest.attach()
+            guestAdapter = guest
+        } else if party.code != nil && party.isHost {
+            let host = PartyHostAdapter(model: model)
+            host.attach()
+            hostAdapter = host
+        }
+    }
+
+    /// Lets go of the party when the player goes away. A host who closes the player pauses the room; the party stays open.
+    private func detachParty() {
+        hostAdapter?.leavePlayer()
+        hostAdapter = nil
+        guestAdapter?.loadSource = nil
+        guestAdapter?.detach()
+        guestAdapter = nil
+    }
+
+    /// Opens the room's source through this device's own add-ons, at the room's position. False when nothing plays here.
+    private func loadRoomSource(_ source: PartySource, at position: Double) async -> Bool {
+        switch await PartySourceResolver.resolve(source, addons: store.enabledAddons, pins: pins) {
+        case .unplayable(let reason):
+            partyReason = reason
+            return false
+        case .found(let request, let chip):
+            partyReason = nil
+            partyChip = chip
+            save()
+            let replacing = model.engine != nil
+            current = request
+            scrobbled = false
+            await model.start(request, resume: position, replacing: replacing, exact: true)
+            scheduleHide()
+            return true
+        }
+    }
+
+    /// A guest's "Your source" line: which add-on's stream is playing. Tapping it opens the sources, and the room's position is kept.
+    @ViewBuilder private var guestSourceLine: some View {
+        if let chip = partyChip {
+            Button { openSources() } label: {
+                Label("Your source: \(chip)", systemImage: "rectangle.stack")
+                    .font(.footnote.weight(.semibold)).lineLimit(1)
+                    .padding(.horizontal, 12).padding(.vertical, 7)
+                    .background(.black.opacity(0.35), in: Capsule())
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    /// A guest with nothing to play yet: the room has no title, the title is opening, or no source exists on this device.
+    private var partyWaiting: Bool {
+        guard partyGuest, model.error == nil else { return false }
+        if case .ended = party.phase { return true }
+        if model.isPlaying { return false }
+        if party.state?.source == nil { return true }
+        return guestAdapter?.sourceStatus == .unavailable
+    }
+
+    private var partyWaitingText: String {
+        if case .connecting = party.phase { return "Joining the party…" }
+        if case .reconnecting = party.phase { return "Reconnecting to the party…" }
+        if guestAdapter?.sourceStatus == .resolving { return "Opening the host's title…" }
+        return "Host is choosing…"
+    }
+
+    private var partyWaitingCard: some View {
+        VStack(spacing: 14) {
+            if case .ended = party.phase {
+                Image(systemName: "person.2.slash").font(.largeTitle)
+                Text(party.notice ?? "The party has ended.").font(.headline).multilineTextAlignment(.center)
+            } else if guestAdapter?.sourceStatus == .unavailable {
+                Image(systemName: "questionmark.folder").font(.largeTitle).foregroundStyle(.yellow)
+                Text("No source on your device").font(.headline)
+                Text(partyReason ?? "Nothing playable for this title here.")
+                    .font(.footnote).multilineTextAlignment(.center).foregroundStyle(.white.opacity(0.7))
+                HStack(spacing: 12) {
+                    Button("Pick a source") { openSources() }.buttonStyle(.borderedProminent)
+                    Button("Try again") { guestAdapter?.retrySource() }.buttonStyle(.bordered)
+                }
+            } else {
+                ProgressView().controlSize(.large).tint(.white)
+                Text(partyWaitingText).font(.headline)
+            }
+            Button("Leave party") { close() }.buttonStyle(.bordered)
+        }
+        .foregroundStyle(.white)
+        .padding(24)
+        .frame(maxWidth: 360)
+        .background(.black.opacity(0.88), in: RoundedRectangle(cornerRadius: 26, style: .continuous))
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.black.ignoresSafeArea())
+    }
+
+    private var partyPanel: some View {
+        HStack(spacing: 0) {
+            Spacer(minLength: 0)
+            PartyRoomPanel(adapter: hostAdapter, glass: glass,
+                           onWatch: { watchSuggestion($0) },
+                           onLeave: { leaveParty() },
+                           onClose: { closeParty() })
+                .padding(.vertical, 10).padding(.trailing, 10)
+        }
+    }
+
+    private func openParty() {
+        hideTask?.cancel()
+        withAnimation(.snappy(duration: 0.3)) {
+            showParty = true; showSources = false; showSubtitles = false; showEpisodes = false; showSpeed = false; showInfo = false
+            showControls = true
+        }
+    }
+
+    private func closeParty() {
+        withAnimation(.snappy(duration: 0.3)) { showParty = false }
+        scheduleHide()
+    }
+
+    /// A guest leaves the party and closes the player. The host ends the party for everyone.
+    private func leaveParty() {
+        if partyGuest { party.leave(); close() } else { party.end(); closeParty() }
+    }
+
+    /// The host picked a suggestion: the player closes (the room pauses while the host chooses) and that title's page opens.
+    private func watchSuggestion(_ item: MetaPreview) {
+        hostAdapter?.leavePlayer()
+        hostAdapter = nil
+        close()
+        Task {
+            try? await Task.sleep(for: .milliseconds(700))
+            PartyRouter.shared.openTitle = item
+        }
     }
 
     private func resumePoint(for r: PlayRequest) -> Double? {
@@ -1590,6 +1801,7 @@ struct PlayerScreen: View {
 
     private func tapBackground() {
         if showEpisodes { closeEpisodes(); return }
+        if showParty { closeParty(); return }
         if showSubtitles { closeSubtitles(); return }
         if showSources { closeSources(); return }
         if showSpeed { closeSpeed(); return }
@@ -1605,7 +1817,7 @@ struct PlayerScreen: View {
         guard model.isPlaying, !pip.isActive else { return }
         hideTask = Task {
             try? await Task.sleep(for: .seconds(3.5))
-            guard !Task.isCancelled, !model.playhead.scrubbing, !showEpisodes, !showSubtitles, !showSources, !showSpeed, !showVolume, !pillExpanded, !showInfo else { return }
+            guard !Task.isCancelled, !model.playhead.scrubbing, !showEpisodes, !showSubtitles, !showSources, !showSpeed, !showVolume, !pillExpanded, !showInfo, !showParty else { return }
             withAnimation(.easeInOut(duration: 0.25)) { showControls = false }
         }
     }
@@ -1656,6 +1868,7 @@ struct PlayerScreen: View {
     private func close() {
         guard !closing else { return }
         closing = true
+        if partyGuest { party.leave() }
         finalizeCurrent()
         let m = model
         onClose()

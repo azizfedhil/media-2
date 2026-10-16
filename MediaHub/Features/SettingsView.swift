@@ -52,6 +52,26 @@ struct SettingsView: View {
         NavigationStack {
             Form {
                 Section {
+                    NavigationLink { PairSettingsView() } label: {
+                        HStack {
+                            Label("Pear.pair", systemImage: "arrow.triangle.2.circlepath")
+                            Spacer()
+                            Text(PairSync.shared.isSignedIn ? "On" : "Off").font(.footnote).foregroundStyle(.secondary)
+                        }
+                    }
+                } footer: {
+                    Text("Keeps your profiles, watch history and library in step across your devices. Devices join with a code, and the account is a recovery key you keep.")
+                }
+
+                Section {
+                    NavigationLink { PartyView() } label: {
+                        Label("Watch party", systemImage: "person.2")
+                    }
+                } footer: {
+                    Text("Watch together. Each person plays the title with their own add-ons, and nobody's stream is sent.")
+                }
+
+                Section {
                     NavigationLink { IntegrationsView() } label: {
                         HStack {
                             Label("Integrations", systemImage: "puzzlepiece.extension.fill")

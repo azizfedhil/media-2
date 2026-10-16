@@ -116,6 +116,7 @@ final class LocalLibrary {
 
     private func persist() {
         if let d = try? JSONEncoder().encode(entries) { UserDefaults.standard.set(d, forKey: storeKey) }
+        PairSync.shared.localChanged([.library])
     }
 
     private static func read(_ key: String) -> [Entry] {

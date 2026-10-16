@@ -341,7 +341,7 @@ struct HomeView: View {
         .ignoresSafeArea(edges: .top)
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
-        .pearHideTopScrollEdge()
+        .scrollEdgeEffectHidden(true, for: .top)
         .profileToolbar(logo: true)
         .scrollIndicators(.hidden)
         .refreshable { await refresh() }

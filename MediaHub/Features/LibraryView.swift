@@ -133,7 +133,7 @@ struct LibraryView: View {
             .navigationDestination(for: MetaPreview.self) { DetailView(item: $0) }
             .navigationDestination(for: CatalogRow.self) { CatalogGridView(row: $0) }
             .navigationTitle("Library")
-            .pearNavigationSubtitle(subtitle)
+            .navigationSubtitle(subtitle)
             .navigationBarTitleDisplayMode(.large)
             .profileToolbar()
             .toolbar {
@@ -149,7 +149,7 @@ struct LibraryView: View {
     private func chips(_ secs: [LibSection], active: String) -> some View {
         let total = secs.reduce(0) { $0 + $1.items.count }
         return ScrollView(.horizontal) {
-            PearGlassGroup(spacing: 8) {
+            GlassEffectContainer(spacing: 8) {
                 HStack(spacing: 8) {
                     chip(id: "all", title: "All", symbol: "square.grid.2x2.fill", count: total, active: active)
                     ForEach(secs) { chip(id: $0.id, title: $0.title, symbol: $0.symbol, count: $0.items.count, active: active) }
@@ -171,7 +171,7 @@ struct LibraryView: View {
             }
             .foregroundStyle(on ? theme.onAccent : Color.primary)
             .padding(.horizontal, 14).padding(.vertical, 9)
-            .pearGlass(in: Capsule(), tint: on ? theme.accent : nil, interactive: true)
+            .glassEffect(on ? .regular.tint(theme.accent).interactive() : .regular.interactive(), in: .capsule)
         }
         .buttonStyle(.plain)
         .accessibilityLabel("\(title), \(count) titles")

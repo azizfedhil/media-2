@@ -82,10 +82,10 @@ struct OnboardingView: View {
             HStack(spacing: 12) {
                 if step != .welcome && step != .done {
                     Button { move(-1) } label: { Text("Back").frame(maxWidth: 110) }
-                        .pearGlassButton().controlSize(.large)
+                        .buttonStyle(.glass).controlSize(.large)
                 }
                 Button { next() } label: { Text(primaryTitle).font(.headline).frame(maxWidth: .infinity) }
-                    .pearGlassButton(prominent: true).controlSize(.large)
+                    .buttonStyle(.glassProminent).controlSize(.large)
                     .disabled(step == .profile && !canContinueProfile)
             }
         }

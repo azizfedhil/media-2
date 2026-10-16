@@ -2,11 +2,15 @@
 
 **Your whole watch life in one native iOS app.**
 
-Pear. brings your library, your watch history, your Stremio add-ons, your Jellyfin and Plex servers and an optional peer-to-peer engine into a single app. It plays everything in a hardware-accelerated native player, wrapped in a Liquid Glass interface on iOS 26, and a matching material design on iOS 18 and 25, that goes easy on your battery.
+Pear. brings your library, your watch history, your Stremio add-ons, your Jellyfin and Plex servers and an optional peer-to-peer engine into a single app. It plays everything in a hardware-accelerated native player, wrapped in an iOS 26 Liquid Glass interface that goes easy on your battery.
 
 It's pure SwiftUI: no web views, no cross-platform shell. It runs on iPhone and iPad, and each profile gets its own history, library and content rules.
 
 > Pear. doesn't host, provide or index any media. Sources come only from the add-ons, servers and links you add yourself. Everything is saved per profile and stays on your device unless you connect a service.
+
+## A note on AI assistance
+The app was created with the assistance of AI tools. They helped throughout the development. However the ideas and directions and decisions behind the app were human made, and the app went through multiple tests to confirm that it is up to standards. 
+
 
 ## Screenshots
 
@@ -31,7 +35,7 @@ It's pure SwiftUI: no web views, no cross-platform shell. It runs on iPhone and 
 
 | | |
 |---|---|
-| **Native iOS** | Swift and SwiftUI for iOS 18 and later, on iPhone and iPad |
+| **Native iOS** | Swift and SwiftUI built for iOS 26, on iPhone and iPad |
 | **Native player on AetherEngine** | FFmpeg demuxing with VideoToolbox hardware decoding. MKV and nearly every audio codec at native-player battery cost |
 | **Liquid Glass interface** | System glass on the profile button, navigation and player controls, with a full-bleed hero and collapsing title pages |
 | **Battery-aware and smooth** | Animations stop when a page is hidden, and go static in Low Power Mode or when the phone runs hot |
@@ -70,7 +74,7 @@ Subtitles come from the file or from OpenSubtitles, with no account or API key. 
 
 ### Liquid Glass interface
 
-On iOS 26 the profile avatar, navigation and player controls use system Liquid Glass. On iOS 18 and 25 they use system materials instead. Title pages have a collapsing hero with parallax, and the title shows as a clear logo when one exists. Episode cards are tinted from the colour of their own still. Pick an accent colour and the whole app follows it live. If a device ever struggles, glass controls can be switched off in one toggle.
+The interface is built for iOS 26. The profile avatar, navigation and player controls use system glass. Title pages have a collapsing hero with parallax, and the title shows as a clear logo when one exists. Episode cards are tinted from the colour of their own still. Pick an accent colour and the whole app follows it live. If a device ever struggles, glass controls can be switched off in one toggle.
 
 On iPad you get a sidebar layout with your profile, the main destinations and your add-on catalogues, and every page keeps its own navigation stack and scroll position. iPhone can use the same layout in landscape if you opt in.
 
@@ -214,14 +218,14 @@ xcodegen
 open MediaHub.xcodeproj
 ```
 
-Run it on an iOS 18 or later simulator or device. Build with Xcode 26 or later, since the Liquid Glass APIs need its SDK. For an unsigned IPA, run the manual **Build IPA** workflow from the GitHub Actions tab. It builds the Rust core with a Cargo cache, runs XcodeGen, builds Release and uploads `MediaHub.ipa`.
+Run it on an iOS 26 simulator or device. For an unsigned IPA, run the manual **Build IPA** workflow from the GitHub Actions tab. It builds the Rust core with a Cargo cache, runs XcodeGen, builds Release and uploads `MediaHub.ipa`.
 
 | | |
 |---|---|
 | Display name | Pear. |
 | Bundle ID | `com.mediahub.pear` |
 | Version | 0.1.0 (build 1) |
-| Deployment target | iOS 18.0 |
+| Deployment target | iOS 26.0 |
 | Devices | iPhone and iPad |
 
 ## Code layout
