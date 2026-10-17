@@ -216,7 +216,11 @@ struct RootView: View {
         // Pear.pair: the Simkl state decides whether the library is synced, then the sync starts if an account is signed in.
         .task {
             let simklStore = simkl
+            let watchLogStore = watchLog
             PairSync.shared.simklConnected = { simklStore.isConnected }
+            // The watch log's unsaved seconds go in before a merge, and the live log reads storage again after one.
+            PairSync.shared.flushWatchLog = { watchLogStore.flush() }
+            PairSync.shared.watchLogStored = { watchLogStore.reloadKeepingUnsaved() }
             PairSync.shared.startIfSignedIn()
         }
         // A pull changed this device's data: the stores read it again.
@@ -225,6 +229,16 @@ struct RootView: View {
             history.reload()
             library.reload()
             libraryPrefs.reload()
+            watchLog.reloadKeepingUnsaved()
+            contentPrefs.reload()
+        }
+        // A pull wrote shared settings. The stores that keep them in memory read them again; the rest read UserDefaults
+        // or @AppStorage directly and update by themselves.
+        .onReceive(NotificationCenter.default.publisher(for: PairSync.settingsApplied)) { note in
+            let keys = (note.userInfo?["keys"] as? Set<String>) ?? []
+            if keys.contains(where: { $0.hasPrefix("content.prefs") }) { contentPrefs.reload() }
+            if keys.contains(where: { $0.hasPrefix("addon.") }) { Task { await addonStore.reloadFromDefaults() } }
+            if keys.contains(where: { $0.hasPrefix("ui.") }) { theme.reload() }
         }
         .task { downloads.configure(store: addonStore, pins: pinnedSources) }
         // No connection at launch: start on the Downloads page (no slide-in animation, so it is simply the first screen).
@@ -270,7 +284,7 @@ struct RootView: View {
     /// Simkl is the library, nothing at all for a purely local library. Both paths are throttled to once per 15 minutes.
     private func refreshLibrary() async {
         guard simkl.isConnected else { return }
-        if libraryPrefs.autoSync {
+        if libraryPrefs.autoSync && libraryPrefs.source(simkl) != .pair {
             await libraryPrefs.sync(simkl: simkl, library: library, history: history, force: false)
         } else if libraryPrefs.usesSimkl(simkl) {
             await simkl.sync()

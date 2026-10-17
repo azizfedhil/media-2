@@ -1,8 +1,8 @@
 import Foundation
 
-/// The four kinds of synced record (cloud/CLOUD_API.md §2.2). The raw value is the wire name.
+/// The kinds of synced record (cloud/CLOUD_API.md §2.2). The raw value is the wire name.
 enum SyncKind: String, Sendable {
-    case profile, history, library, progress
+    case profile, history, library, progress, settings, watchlog
 }
 
 /// Limits and cadences. The same numbers as SyncRules in Kotlin (cloud/CLOUD_API.md §4 and the follow-up file).
@@ -19,6 +19,12 @@ enum SyncRules {
     static let retryMaxSeconds: Double = 600
     static let historyLiveCap = 30
     static let maxPages = 1_000
+    /// The profile id of the account-wide settings records (ACCOUNT_SCOPE in Kotlin).
+    static let accountScope = "_account"
+    /// A profile's watch log goes out at most this often.
+    static let watchLogEveryMs: Double = 5 * 60_000
+    /// A watch-log hour above this is invalid: two hours plus one tick's overshoot (MAX_HOUR_SECONDS in Kotlin).
+    static let maxHourSeconds = 2 * 3_600 + 120
     /// Fields of a history entry that move with playback. They travel as `progress`, so they are left out of the change check.
     static let playbackFields: Set<String> = ["position", "duration", "updated"]
 }

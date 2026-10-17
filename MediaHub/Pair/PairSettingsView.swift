@@ -18,6 +18,8 @@ struct PairSettingsView: View {
     @State private var devices: [PairDevice] = []
     @State private var confirmSignOut = false
     @State private var confirmDelete = false
+    /// The "Sync settings" switch. The same key is read by PairSync.syncSettingsOn.
+    @AppStorage("pair.syncSettings") private var syncSettings = false
 
     private var deviceName: String { UIDevice.current.name }
 
@@ -36,6 +38,7 @@ struct PairSettingsView: View {
         .navigationBarTitleDisplayMode(.inline)
         .disabled(busy)
         .task { await reloadDevices() }
+        .onChange(of: syncSettings) { _, on in sync.setSyncSettings(on) }
         .sheet(isPresented: $showJoinSheet, onDismiss: openChoiceIfJoined) {
             JoinWithCodeSheet(joined: $joinedNeedsChoice)
         }
@@ -108,6 +111,12 @@ struct PairSettingsView: View {
             Button("Sync now") { sync.syncNow() }
         } header: {
             Text("This device")
+        }
+
+        Section {
+            Toggle("Sync settings", isOn: $syncSettings)
+        } footer: {
+            Text("Add-ons, API keys, subtitles, playback and appearance. Add-on addresses and API keys are stored on the Pear.pair server and are not end-to-end encrypted.")
         }
 
         Section {

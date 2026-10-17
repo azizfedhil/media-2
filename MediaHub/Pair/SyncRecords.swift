@@ -164,14 +164,91 @@ enum LocalStore {
         return LocalSet(records: records, complete: stored.complete)
     }
 
-    /// Whether the profile's library is Simkl: the rule of LibraryPrefs.usesSimkl. A connected Simkl is the library unless
-    /// the profile chose Local. Read from storage, because the profile may not be the loaded one.
-    static func usesSimkl(profile: String, connected: Bool) -> Bool {
-        guard connected else { return false }
-        struct Choice: Decodable { let choice: LibrarySource? }
-        guard let data = UserDefaults.standard.data(forKey: ProfileKeys.scoped("library.prefs", profile)),
-              let stored = try? JSONDecoder().decode(Choice.self, from: data) else { return true }
-        return (stored.choice ?? .simkl) == .simkl
+    /// One profile's watch log as stored, by day. `complete` is false when the stored value cannot be read.
+    static func watchLog(_ profile: String) -> (days: [String: [Int]], complete: Bool) {
+        guard let data = UserDefaults.standard.data(forKey: ProfileKeys.scoped("watch.log", profile)) else { return ([:], true) }
+        guard let days = try? JSONDecoder().decode([String: [Int]].self, from: data) else { return ([:], false) }
+        return (days, true)
+    }
+
+    /// The watch log as records, one per month (`yyyy-MM`). Incomplete on purpose: a month missing here is not a delete,
+    /// so no tombstone is ever sent for it (as in Kotlin).
+    static func watchLogRecords(_ profile: String) -> LocalSet {
+        var byMonth: [String: [String: [Int]]] = [:]
+        for (day, hours) in watchLog(profile).days {
+            byMonth[String(day.prefix(7)), default: [:]][day] = hours
+        }
+        var records: [String: LocalRecord] = [:]
+        for (month, days) in byMonth {
+            let body = watchLogBody(days)
+            records[RecordKey.make(profile, .watchlog, month)] = LocalRecord(
+                profile: profile, kind: .watchlog, key: month, intrinsicAt: nil,
+                body: body, fingerprint: Fingerprint.json(body))
+        }
+        return LocalSet(records: records, complete: false)
+    }
+
+    /// One month's record body: `{"d": {day: [24 whole numbers]}}`. Its fingerprint is the sorted JSON, so equal days give
+    /// equal fingerprints on every device.
+    static func watchLogBody(_ days: [String: [Int]]) -> [String: Any] {
+        ["d": days]
+    }
+
+    /// Reads one pulled month. A day is kept when its key is a date and its 24 values are whole numbers from 0 to
+    /// `SyncRules.maxHourSeconds`. Any other day is left out, and only that day. Nil when the record has no `d` object.
+    static func decodeWatchLogMonth(_ data: [String: Any]) -> [String: [Int]]? {
+        guard let days = data["d"] as? [String: Any] else { return nil }
+        var out: [String: [Int]] = [:]
+        for (day, value) in days {
+            guard day.range(of: #"^\d{4}-\d{2}-\d{2}$"#, options: .regularExpression) != nil,
+                  let values = value as? [Any], values.count == 24 else { continue }
+            let hours: [Int] = values.compactMap { (element: Any) -> Int? in
+                guard let number = element as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID(),
+                      let hour = Int(exactly: number.doubleValue),
+                      (0...SyncRules.maxHourSeconds).contains(hour) else { return nil }
+                return hour
+            }
+            if hours.count == 24 { out[day] = hours }
+        }
+        return out
+    }
+
+    /// Two logs as one: for each day, the larger count of each hour, with a day missing on one side counting as zeros. The
+    /// result does not depend on the order of `a` and `b`, and merging a log with itself changes nothing.
+    static func mergeWatchLogs(_ a: [String: [Int]], _ b: [String: [Int]]) -> [String: [Int]] {
+        var out: [String: [Int]] = [:]
+        for day in Set(a.keys).union(b.keys) {
+            let x = a[day] ?? []
+            let y = b[day] ?? []
+            out[day] = (0..<24).map { hour in max(hourValue(x, hour), hourValue(y, hour)) }
+        }
+        return trimWatchLog(out)
+    }
+
+    private static func hourValue(_ hours: [Int], _ hour: Int) -> Int {
+        hour < hours.count ? hours[hour] : 0
+    }
+
+    /// Keeps the newest 400 days once a log holds more than 430. A smaller log comes back as it is (as WatchLog.flush does).
+    static func trimWatchLog(_ days: [String: [Int]]) -> [String: [Int]] {
+        guard days.count > 430 else { return days }
+        let keep = Set(days.keys.sorted().suffix(400))
+        return days.filter { keep.contains($0.key) }
+    }
+
+    /// Whether the profile's library is synced over Pear.pair: the rule of Kotlin's `syncsLibraryOverPair`. A library the
+    /// person kept on "This device" is left out, and a Pear.pair library is synced. Before any choice, or on Simkl, it is
+    /// synced only while Simkl is not connected. Read from storage, because the profile may not be the loaded one.
+    static func syncsLibrary(profile: String, simklConnected: Bool) -> Bool {
+        // The choice is read as text, so a value this build does not know never fails the whole read.
+        struct Choice: Decodable { let choice: String? }
+        let stored = UserDefaults.standard.data(forKey: ProfileKeys.scoped("library.prefs", profile))
+            .flatMap { try? JSONDecoder().decode(Choice.self, from: $0) }
+        switch (stored?.choice) ?? "" {
+        case "local": return false
+        case "pair": return true
+        default: return !simklConnected
+        }
     }
 }
 

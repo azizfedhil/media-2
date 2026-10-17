@@ -2,11 +2,13 @@ import Foundation
 import Observation
 
 /// Where a profile's library lives.
-/// - `.local`: the library kept on this device (plan to watch / watched, plus Watching from the profile's own
-///   history and watch-time tracking). Nothing is sent to Simkl: no scrobbling, no list changes, no background sync.
+/// - `.local` ("This device"): the library kept on this device (plan to watch / watched, plus Watching from the profile's
+///   own history and watch-time tracking). It is not synced to other devices, and nothing is sent to Simkl.
+/// - `.pair` ("Pear.pair"): the same local library, kept in step across the paired devices through the Pear.pair
+///   `library` records. Simkl is only an optional one-way import into it. Nothing is ever sent to Simkl.
 /// - `.simkl`: Simkl's lists are the library, and playback is scrobbled to Simkl.
 enum LibrarySource: String, Codable, CaseIterable, Identifiable, Sendable {
-    case local, simkl
+    case local, pair, simkl
     var id: String { rawValue }
 }
 
@@ -62,9 +64,13 @@ final class LibraryPrefs {
 
     /// The library in use right now. Simkl only counts while it is connected; before the first explicit choice,
     /// a connected Simkl is the library (what the app always did) and everyone else uses the local one.
+    /// Pear.pair is used whether or not Simkl is connected.
     func source(_ simkl: SimklStore) -> LibrarySource {
-        guard simkl.isConnected else { return .local }
-        return stored.choice ?? .simkl
+        switch stored.choice {
+        case .pair: return .pair
+        case .local: return .local
+        case .simkl, .none: return simkl.isConnected ? .simkl : .local
+        }
     }
 
     func usesSimkl(_ simkl: SimklStore) -> Bool { source(simkl) == .simkl }
@@ -77,6 +83,8 @@ final class LibraryPrefs {
         guard stored.choice != source else { return }
         stored.choice = source
         save()
+        // Starts or stops the library's Pear.pair sync, depending on the new choice.
+        PairSync.shared.localChanged([.library], profile: profileID)
     }
 
     func setAutoSync(_ on: Bool) {
@@ -95,7 +103,8 @@ final class LibraryPrefs {
     ///   and is not brought back.
     /// Unless `force`, it does nothing within 15 minutes of the last sync.
     func sync(simkl: SimklStore, library: LocalLibrary, history: WatchHistory, force: Bool) async {
-        guard simkl.isConnected, !isSyncing else { return }
+        // A Pear.pair library never merges with Simkl two ways: nothing is sent to Simkl from it.
+        guard simkl.isConnected, !isSyncing, source(simkl) != .pair else { return }
         if !force, let last = stored.lastSync, Date().timeIntervalSince(last) < 900 { return }
         isSyncing = true
         defer { isSyncing = false }
@@ -136,6 +145,42 @@ final class LibraryPrefs {
         if failed { report = "Couldn't send to Simkl. Received \(plan.pulls.count); try again in a moment." }
         else if sent == 0 && plan.pulls.isEmpty { report = "Already in sync." }
         else { report = "Received \(plan.pulls.count) · Sent \(sent)" }
+    }
+
+    /// One-way import from Simkl, for a profile whose library is on Pear.pair: the titles missing here are added here.
+    /// Nothing is sent to Simkl, and nothing here is changed or removed. Unless `force`, it does nothing within 15 minutes
+    /// of the last sync.
+    func importFromSimkl(simkl: SimklStore, library: LocalLibrary, history: WatchHistory, force: Bool) async {
+        guard simkl.isConnected, !isSyncing else { return }
+        if !force, let last = stored.lastSync, Date().timeIntervalSince(last) < 900 { return }
+        isSyncing = true
+        defer { isSyncing = false }
+        report = nil
+
+        while simkl.isSyncing { try? await Task.sleep(for: .milliseconds(250)) }
+        await simkl.sync(force: true)
+        if let problem = simkl.syncError { report = problem; return }
+
+        let rows = simkl.library
+        let local = library.entries
+        let entries = history.entries
+        let known = stored.synced
+        let since = stored.lastSync
+        let plan = await Task.detached(priority: .utility) {
+            LibrarySync.plan(simklRows: rows, local: local, history: entries, synced: known, since: since)
+        }.value
+
+        // Only titles missing here: a title already in this library keeps its status.
+        let here = Set(local.flatMap { entry in [entry.item.id] + [entry.alias].compactMap { $0 } })
+        let missing = plan.pulls.filter { !here.contains($0.item.id) }
+        library.apply(missing.map { ($0.item, $0.status) })
+
+        // Nothing is sent, so the titles planned for Simkl are not marked as on both sides.
+        stored.synced = plan.synced.subtracting(plan.pushedIDs)
+        stored.lastSync = Date()
+        save()
+
+        report = missing.isEmpty ? "Nothing new to import from Simkl." : "Imported \(missing.count) from Simkl"
     }
 
     // MARK: Storage

@@ -10,12 +10,28 @@ final class WatchLog {
     @ObservationIgnored private var profileID = ProfileKeys.activeID
     @ObservationIgnored private var dirty = false
     @ObservationIgnored private var lastSave = Date.distantPast
+    /// Seconds recorded since the last save, per day. They are part of `days` but not yet in storage.
+    @ObservationIgnored private var unsaved: [String: [Int]] = [:]
     private var storeKey: String { ProfileKeys.scoped("watch.log", profileID) }
 
     init() { days = Self.read(storeKey) }
 
     /// After a settings import: storage is the truth, so unsaved in-memory data is dropped, not written over it.
-    func reload() { dirty = false; profileID = ProfileKeys.activeID; days = Self.read(storeKey) }
+    func reload() { dirty = false; unsaved = [:]; profileID = ProfileKeys.activeID; days = Self.read(storeKey) }
+
+    /// Re-reads storage after a pull, and adds back the seconds recorded since the last save. A pull can arrive while the
+    /// player runs, so those seconds are kept. The stored log is the base, because a pull may have merged other devices'
+    /// months into it. Calling it again gives the same result: nothing is added twice.
+    func reloadKeepingUnsaved() {
+        var merged = Self.read(storeKey)
+        for (day, seconds) in unsaved {
+            var hours = merged[day] ?? []
+            while hours.count < 24 { hours.append(0) }
+            for hour in 0..<24 { hours[hour] += seconds[hour] }
+            merged[day] = hours
+        }
+        days = merged
+    }
 
     func load(profile id: String) {
         guard id != profileID else { return }
@@ -32,9 +48,14 @@ final class WatchLog {
         let cal = Calendar.current
         let c = cal.dateComponents([.year, .month, .day, .hour], from: date)
         let key = Self.dayKey(c)
+        let hour = min(max(c.hour ?? 0, 0), 23)
+        let add = Int(seconds.rounded())
         var hours = days[key] ?? Array(repeating: 0, count: 24)
-        hours[min(max(c.hour ?? 0, 0), 23)] += Int(seconds.rounded())
+        hours[hour] += add
         days[key] = hours
+        var pending = unsaved[key] ?? Array(repeating: 0, count: 24)
+        pending[hour] += add
+        unsaved[key] = pending
         dirty = true
         if Date().timeIntervalSince(lastSave) > 60 { flush() }     // the 10 s player tick would otherwise rewrite it constantly
     }
@@ -43,10 +64,13 @@ final class WatchLog {
         guard dirty else { return }
         dirty = false
         lastSave = .now
+        unsaved = [:]
         if days.count > 430 {
             for k in days.keys.sorted().dropLast(400) { days[k] = nil }
         }
         if let d = try? JSONEncoder().encode(days) { UserDefaults.standard.set(d, forKey: storeKey) }
+        // The Pear.pair sync sends this profile's log with a later push.
+        PairSync.shared.localChanged([.watchlog], profile: profileID)
     }
 
     // MARK: Queries

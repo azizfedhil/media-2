@@ -26,7 +26,7 @@ struct ProfileDetailView: View {
     private var signature: String {
         let last = history.entries.first?.updated.timeIntervalSince1970 ?? 0
         let sk = simkl.library.map { "\($0.id)\($0.items.count)" }.joined()
-        return "\(libraryPrefs.source(simkl).rawValue)|\(profiles.activeID)|\(last)|\(history.entries.count)|\(history.archive.count)|\(library.entries.count)|\(sk)|\(tmdbKey.isEmpty)"
+        return "\(libraryPrefs.source(simkl).rawValue)|\(profiles.activeID)|\(last)|\(history.entries.count)|\(history.archive.count)|\(library.entries.count)|\(sk)|\(tmdbKey.isEmpty)|\(Int(log.totalSeconds))"
     }
 
     var body: some View {

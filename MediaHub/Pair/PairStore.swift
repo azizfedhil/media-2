@@ -1,10 +1,12 @@
 import Foundation
+import Observation
 
 /// The Pear.pair account on this device, and what the server last agreed with.
 ///
 /// The device token lives in the Keychain. The cursor, the last sync time and the snapshot are not secrets, but none of this
 /// is in a settings backup: SettingsBackup exports only the keys it lists, and the Keychain fallback keys are not among them.
-@MainActor
+/// Observable, so a view that reads `PairSync.isSignedIn` updates when the device signs in or out.
+@MainActor @Observable
 final class PairStore {
     private enum Key {
         static let account = "pear.pair.account"
@@ -16,7 +18,7 @@ final class PairStore {
 
     /// Nil when this device is not signed in.
     private(set) var credentials: PairCredentials?
-    private var snapshotCache: [String: SyncedRecord]?
+    @ObservationIgnored private var snapshotCache: [String: SyncedRecord]?
 
     init() {
         if let account = Keychain.get(Key.account), let device = Keychain.get(Key.device), let bearer = Keychain.get(Key.bearer) {

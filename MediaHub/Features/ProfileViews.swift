@@ -177,6 +177,7 @@ struct ProfileSheet: View {
     @State private var showProfile = false
     @State private var showDownloads = false
     @State private var showSimkl = false
+    @State private var showPair = false
     @Environment(DownloadManager.self) private var downloads
     @State private var detent: PresentationDetent = .medium
 
@@ -186,7 +187,7 @@ struct ProfileSheet: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 28) {
-                    if !managing { profileLink; simklLink; downloadsLink }
+                    if !managing { profileLink; simklLink; pairLink; downloadsLink }
                     LazyVGrid(columns: columns, spacing: 22) {
                         ForEach(profiles.profiles) { tile($0) }
                         if profiles.canAdd { addTile }
@@ -208,6 +209,7 @@ struct ProfileSheet: View {
             .navigationDestination(isPresented: $showProfile) { ProfileDetailView() }
             .navigationDestination(isPresented: $showDownloads) { DownloadsView() }
             .navigationDestination(isPresented: $showSimkl) { SimklLoginPage() }
+            .navigationDestination(isPresented: $showPair) { PairSettingsView() }
         }
         .coversPages()
         .presentationDetents([.medium, .large], selection: $detent)
@@ -256,6 +258,28 @@ struct ProfileSheet: View {
         .accessibilityHint("Log in to or manage your Simkl account")
     }
 
+    /// Opens Pear.pair: sign in, pair a device, or manage sync. Same card layout as Simkl above.
+    private var pairLink: some View {
+        Button { detent = .large; showPair = true } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "link").font(.title3.weight(.semibold))
+                    .foregroundStyle(theme.accent).frame(width: 44, height: 44)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Pear.pair").font(.headline)
+                    Text(PairSync.shared.isSignedIn ? "Signed in on this device" : "Sync across devices")
+                        .font(.caption).foregroundStyle(PairSync.shared.isSignedIn ? Color.green : Color.secondary)
+                }
+                Spacer()
+                Image(systemName: "chevron.right").font(.footnote.weight(.bold)).foregroundStyle(.secondary)
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity)
+            .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        }
+        .buttonStyle(PressableStyle())
+        .accessibilityHint("Sign in to or manage Pear.pair sync")
+    }
+
     /// Opens the Downloads page (offline files and the storage they use).
     private var downloadsLink: some View {
         Button { detent = .large; showDownloads = true } label: {
@@ -277,9 +301,14 @@ struct ProfileSheet: View {
     }
 
     private var footnote: String {
-        libraryPrefs.usesSimkl(simkl)
-            ? "Watch history and Continue Watching are kept separately for each profile. This profile's library comes from Simkl, so profiles set to Simkl share it. Switch a profile to its own library in Settings."
-            : "Each profile keeps its own watch history and library on this device. Connect Simkl in Settings to sync a library across devices."
+        switch libraryPrefs.source(simkl) {
+        case .simkl:
+            return "Watch history and Continue Watching are kept separately for each profile. This profile's library comes from Simkl, so profiles set to Simkl share it. Switch a profile to its own library in Settings."
+        case .pair:
+            return "Each profile keeps its own watch history and library. This profile's library is kept in step with your other devices over Pear.pair."
+        case .local:
+            return "Each profile keeps its own watch history and library on this device. Connect Simkl in Settings to sync a library across devices."
+        }
     }
 
     private func tile(_ p: Profile) -> some View {
