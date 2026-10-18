@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import UIKit
 
 /// Keeps this device and its Pear.pair account in step (cloud/CLOUD_API.md §2.2 and §4). Port of the Kotlin SyncEngine.
 ///
@@ -50,6 +51,11 @@ final class PairSync {
     private var rePullSettings = false
     /// Unix ms of the last push, for the one-push-per-15-seconds rule.
     private var lastPushAt: Double = 0
+    /// When the last full sync finished without error, and how many full cycles have ended (any outcome). See `freshen`.
+    private var lastFullSyncAt: Date?
+    private var fullCyclesEnded = 0
+    /// Running time the system grants while a sync is in flight and the app has just left the screen.
+    private var backgroundTask = UIBackgroundTaskIdentifier.invalid
     private var retrySeconds = SyncRules.retryMinSeconds
     private var retryGen = 0
     /// The shared settings as they were at the last check, to tell a real change from an unrelated defaults write.
@@ -90,6 +96,21 @@ final class PairSync {
 
     /// The app came to the foreground.
     func foreground() { syncNow() }
+
+    /// Brings this device up to date before a title opens, so its resume point is the account's and not an older one from
+    /// here. Waits at most `timeout` seconds: offline or slow, it gives up and the title opens with what is on the device.
+    /// The sync carries on by itself. Does nothing without an account, while paused, or right after a full sync.
+    func freshen(timeout: Double = 2.5) async {
+        guard store.isSignedIn else { return }
+        if let until = state.pausedUntil, Date.now < until { return }
+        if let last = lastFullSyncAt, Date.now.timeIntervalSince(last) < 20 { return }
+        let before = fullCyclesEnded
+        if cycleRunning { cycleAgain = true } else { run(full: true) }
+        let deadline = Date.now.addingTimeInterval(timeout)
+        while fullCyclesEnded == before, Date.now < deadline {
+            try? await Task.sleep(nanoseconds: 100_000_000)
+        }
+    }
 
     /// The "Sync settings" switch was set. On: the next full pull starts from the beginning, so the account's settings come
     /// in, and a sync runs now. Off: no shared setting is sent or applied from here on.
@@ -321,7 +342,10 @@ final class PairSync {
         dirty.removeAll()
         if full { state.syncing = true }
 
+        beginBackgroundTime()
         await perform(full: full, replace: replace, taken: taken, bearer: credentials.bearer)
+        endBackgroundTime()
+        if full { fullCyclesEnded += 1 }
 
         cycleRunning = false
         if cycleAgain {
@@ -342,21 +366,24 @@ final class PairSync {
                 defer { replacing = false }
                 changed = try await pullAll(bearer: bearer)
                 replacing = false
-                outcome = try await pushScopes(bearer: bearer, targets: allScopes())
+                // The lists were just rebuilt from the account, so progress keeps its cadence here.
+                outcome = try await pushScopes(bearer: bearer, targets: allScopes(), allProgress: false)
             } else if full {
-                outcome = try await pushScopes(bearer: bearer, targets: allScopes())
+                // A full sync sends every progress that differs from the account, whatever the cadence marks say.
+                outcome = try await pushScopes(bearer: bearer, targets: allScopes(), allProgress: true)
                 // The settings switch went on: pull from the start, so the account's settings come in (the cursor may be past them).
                 if rePullSettings { store.lastServerTs = 0 }
                 changed = try await pullAll(bearer: bearer)
                 rePullSettings = false
             } else {
-                outcome = try await pushScopes(bearer: bearer, targets: taken)
+                outcome = try await pushScopes(bearer: bearer, targets: taken, allProgress: false)
             }
 
             // A replace wipes local data even when the account sends nothing back, so the screens must re-read.
             if changed || replace { NotificationCenter.default.post(name: Self.remoteApplied, object: nil) }
             retrySeconds = SyncRules.retryMinSeconds
             if full || outcome.sent > 0 { store.lastSyncAt = Date.now }
+            if full { lastFullSyncAt = Date.now }
             state.syncing = false
             state.pausedUntil = nil
             state.error = outcome.refused.map { "Some changes were refused by the server (\($0))." }
@@ -405,6 +432,20 @@ final class PairSync {
         }
     }
 
+    /// A push that starts as the app leaves the screen gets time to finish. Ended when the cycle ends or the system asks.
+    private func beginBackgroundTime() {
+        guard backgroundTask == .invalid else { return }
+        backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "pear.pair.sync") { [weak self] in
+            self?.endBackgroundTime()
+        }
+    }
+
+    private func endBackgroundTime() {
+        guard backgroundTask != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(backgroundTask)
+        backgroundTask = .invalid
+    }
+
     private func nextUTCMidnight() -> Date {
         let day = 86_400_000.0
         return Date(timeIntervalSince1970: ((floor(Date().unixMs / day) + 1) * day) / 1000)
@@ -434,7 +475,7 @@ final class PairSync {
     }
 
     /// Pushes what differs from the snapshot in `targets`, in batches of SyncRules.pushBatch.
-    private func pushScopes(bearer: String, targets: Set<SyncScope>) async throws -> PushOutcome {
+    private func pushScopes(bearer: String, targets: Set<SyncScope>, allProgress: Bool) async throws -> PushOutcome {
         let now = Date().unixMs
         var snapshot = store.readSnapshot()
         var pending: [Pending] = []
@@ -448,7 +489,7 @@ final class PairSync {
             for (key, record) in local.records {
                 let old = snapshot[key]
                 if old?.fingerprint == record.fingerprint { continue }
-                if record.kind == .progress && !progressMayPush(record, old: old, now: now) { continue }
+                if record.kind == .progress && !progressMayPush(record, old: old, now: now, allProgress: allProgress) { continue }
                 if record.kind == .watchlog {
                     if !dueNow { continue }
                     queuedWatchLog = true
@@ -525,10 +566,13 @@ final class PairSync {
         return max(now, old.updatedAt + 1)
     }
 
-    /// A progress record goes out when it is forced (a pause, a close), or when it is due and its position moved.
-    private func progressMayPush(_ record: LocalRecord, old: SyncedRecord?, now: Double) -> Bool {
+    /// A progress record goes out when it is forced (a pause, a close), or when it is due and its position moved. A full
+    /// sync (`allProgress`) sends every one that differs from the account: the forced and due marks live in memory only and
+    /// are cleared before the request is made, so a push that failed or never ran (the app was suspended, a restart) is
+    /// picked up here.
+    private func progressMayPush(_ record: LocalRecord, old: SyncedRecord?, now: Double, allProgress: Bool) -> Bool {
         let token = RecordKey.token(record.profile, record.key)
-        if forced.contains(token) {
+        if allProgress || forced.contains(token) {
             lastProgressPush[token] = now
             return true
         }

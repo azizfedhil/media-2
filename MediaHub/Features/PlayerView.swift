@@ -664,7 +664,12 @@ struct PlayerScreen: View {
         }
         // Same for leaving the app while playing (PiP, background audio): the system may end it without notice.
         .onChange(of: scenePhase) { _, p in
-            if p == .background { logPlayTime(); save(isFinal: false) }
+            if p == .background {
+                logPlayTime()
+                save(isFinal: false)
+                // The 5 second timer of a quiet save never fires once the app is suspended, so send the position now.
+                PairSync.shared.progressSaved(titleID: current.item.id, immediate: true)
+            }
         }
         .onChange(of: model.error) { _, _ in updateIdleTimer() }
         .onChange(of: showControls, initial: true) { _, shown in
@@ -1646,6 +1651,9 @@ struct PlayerScreen: View {
         attachParty()
         // A guest's source comes from the room (see loadRoomSource), so the player waits for that here.
         if partyGuest { return }
+        // Pear.pair: the resume point should be the account's. Waits a couple of seconds at most; the launch screen covers it.
+        await PairSync.shared.freshen()
+        history.reload()
         hostAdapter?.loadSource(from: current, resumeAt: resumePoint(for: current))
         await model.start(current, resume: resumePoint(for: current))
         scheduleHide()
