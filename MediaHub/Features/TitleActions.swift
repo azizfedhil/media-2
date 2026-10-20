@@ -48,6 +48,8 @@ struct PosterContextMenu: View {
     let item: MetaPreview
     /// Offer "Keep Current Poster". Off on cards that don't show rotating artwork (Continue Watching).
     var artwork = true
+    /// Opens Watch Party for this title. The sheet is presented by the card (see `PosterPartyModifier`).
+    var onParty: () -> Void = {}
     @Environment(WatchHistory.self) private var history
     @Environment(LocalLibrary.self) private var library
 
@@ -80,13 +82,29 @@ struct PosterContextMenu: View {
         NavigationLink(value: item) {
             Label("Details", systemImage: "info.circle")
         }
+        Button(action: onParty) {
+            Label("Watch Party", systemImage: "person.2")
+        }
+    }
+}
+
+/// Owns the Watch Party sheet for a poster. It is attached to the card itself, outside the context menu,
+/// because a sheet attached inside contextMenu content does not present reliably.
+struct PosterPartyModifier: ViewModifier {
+    let item: MetaPreview
+    @State private var showParty = false
+
+    func body(content: Content) -> some View {
+        content
+            .contextMenu { PosterContextMenu(item: item, onParty: { showParty = true }) }
+            .sheet(isPresented: $showParty) { PartySheet(suggest: item) }
     }
 }
 
 extension View {
     /// Long-press menu for posters in carousels and grids. The card keeps its tap-to-open behaviour;
-    /// this adds the dropdown with watched / library / details actions.
+    /// this adds the dropdown with watched / library / details / watch party actions.
     func posterContextMenu(_ item: MetaPreview) -> some View {
-        contextMenu { PosterContextMenu(item: item) }
+        modifier(PosterPartyModifier(item: item))
     }
 }

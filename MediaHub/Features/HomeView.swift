@@ -766,6 +766,7 @@ struct ContinueRow: View {
 /// 16:9 card: episode still (or movie backdrop), where you stopped, and how much is left.
 private struct ContinueCard: View {
     let entry: WatchHistory.Entry
+    @State private var showParty = false
     @Environment(WatchHistory.self) private var history
     @Environment(ThemeStore.self) private var theme
     private let width: CGFloat = 270
@@ -808,8 +809,9 @@ private struct ContinueCard: View {
                 withAnimation { history.remove(entry.id) }
             }
             Divider()
-            PosterContextMenu(item: entry.item, artwork: false)
+            PosterContextMenu(item: entry.item, artwork: false, onParty: { showParty = true })
         }
+        .sheet(isPresented: $showParty) { PartySheet(suggest: entry.item) }
     }
 
     private var progressBar: some View {
@@ -827,6 +829,7 @@ private struct ContinueCard: View {
 
 private struct UpNextCard: View {
     let entry: UpNextItem
+    @State private var showParty = false
     @Environment(WatchHistory.self) private var history
     @Environment(ThemeStore.self) private var theme
     private let width: CGFloat = 270
@@ -858,8 +861,9 @@ private struct UpNextCard: View {
                 withAnimation { history.dismissUpNext(entry.item.id) }
             }
             Divider()
-            PosterContextMenu(item: entry.item, artwork: false)
+            PosterContextMenu(item: entry.item, artwork: false, onParty: { showParty = true })
         }
+        .sheet(isPresented: $showParty) { PartySheet(suggest: entry.item) }
     }
 }
 

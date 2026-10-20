@@ -178,6 +178,7 @@ struct ProfileSheet: View {
     @State private var showDownloads = false
     @State private var showSimkl = false
     @State private var showPair = false
+    @State private var showParty = false
     @Environment(DownloadManager.self) private var downloads
     @State private var detent: PresentationDetent = .medium
 
@@ -187,7 +188,7 @@ struct ProfileSheet: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 28) {
-                    if !managing { profileLink; simklLink; pairLink; downloadsLink }
+                    if !managing { profileLink; simklLink; pairLink; partyLink; downloadsLink }
                     LazyVGrid(columns: columns, spacing: 22) {
                         ForEach(profiles.profiles) { tile($0) }
                         if profiles.canAdd { addTile }
@@ -210,6 +211,7 @@ struct ProfileSheet: View {
             .navigationDestination(isPresented: $showDownloads) { DownloadsView() }
             .navigationDestination(isPresented: $showSimkl) { SimklLoginPage() }
             .navigationDestination(isPresented: $showPair) { PairSettingsView() }
+            .navigationDestination(isPresented: $showParty) { PartyView() }
         }
         .coversPages()
         .presentationDetents([.medium, .large], selection: $detent)
@@ -278,6 +280,27 @@ struct ProfileSheet: View {
         }
         .buttonStyle(PressableStyle())
         .accessibilityHint("Sign in to or manage Pear.pair sync")
+    }
+
+    /// Opens Watch Party: start a party or join one with a code. Same card layout as Pear.pair above.
+    private var partyLink: some View {
+        Button { detent = .large; showParty = true } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "person.2.fill").font(.title3.weight(.semibold))
+                    .foregroundStyle(theme.accent).frame(width: 44, height: 44)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Watch Party").font(.headline)
+                    Text("Watch together").font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Image(systemName: "chevron.right").font(.footnote.weight(.bold)).foregroundStyle(.secondary)
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity)
+            .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        }
+        .buttonStyle(PressableStyle())
+        .accessibilityHint("Start or join a watch party")
     }
 
     /// Opens the Downloads page (offline files and the storage they use).

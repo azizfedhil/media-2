@@ -56,7 +56,6 @@ struct DetailView: View {
     @State private var seasonsExpanded = false
     @State private var trailers: [TMDBClient.Video] = []
     @State private var openTrailer: TMDBClient.Video?
-    @State private var showParty = false
 
     private var isSeries: Bool { item.type == "series" }
 
@@ -109,13 +108,6 @@ struct DetailView: View {
         }
         .ignoresSafeArea(edges: .top)
         .toolbarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button { showParty = true } label: { Image(systemName: "person.2") }
-                    .accessibilityLabel("Watch party")
-            }
-        }
-        .sheet(isPresented: $showParty) { PartySheet(suggest: item) }
         .sheet(isPresented: $showSources, onDismiss: { downloadTarget = nil; startPendingPlayback() }) { sourceSheet }
         // Presented from the page itself (not from inside the sources sheet): the sheet closes first,
         // then the player opens. This keeps dismissing the player reliable.
