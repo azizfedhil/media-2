@@ -10,7 +10,7 @@ packages:
   # FFmpeg demux + VideoToolbox hardware decode: plays MKV and every audio codec with native-player battery use.
   AetherEngine:
     url: https://github.com/superuser404notfound/AetherEngine
-    from: 7.43.0
+    exactVersion: 7.43.0
 targets:
   MediaHub:
     type: application
