@@ -443,8 +443,8 @@ private struct VirtualPadWindow<Content: View>: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel("Exit iPad mode")
                 .padding(.top, insets.top + 12)
-                .padding(.leading, insets.leading)
-                .padding(.trailing, insets.trailing + 12)
+                .padding(.leading, insets.left)
+                .padding(.trailing, insets.right + 12)
                 .frame(width: real.width, height: real.height, alignment: .topTrailing)
             }
             .frame(width: real.width, height: real.height, alignment: .topLeading)
