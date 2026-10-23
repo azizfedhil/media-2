@@ -394,10 +394,11 @@ private struct VirtualPadWindow<Content: View>: View {
             let real = proxy.size
             let virtual = WideLayout.virtualPadSize(for: real)
             let scale = min(real.width / virtual.width, real.height / virtual.height)
-            ZStack {
+            let fitted = CGSize(width: virtual.width * scale, height: virtual.height * scale)
+            ZStack(alignment: .topLeading) {
                 Color.black
                 content
-                    .frame(width: virtual.width, height: virtual.height)
+                    .frame(width: virtual.width, height: virtual.height, alignment: .topLeading)
                     // The fake iPad traits the pages read: wide everywhere, like a real iPad.
                     .environment(\.horizontalSizeClass, .regular)
                     .environment(\.verticalSizeClass, .regular)
@@ -408,12 +409,36 @@ private struct VirtualPadWindow<Content: View>: View {
                     .safeAreaInset(edge: .bottom, spacing: 0) {
                         Color.clear.frame(height: 20).allowsHitTesting(false).accessibilityHidden(true)
                     }
-                    .scaleEffect(scale)
+                    .scaleEffect(scale, anchor: .topLeading)
+                    .frame(width: fitted.width, height: fitted.height, alignment: .topLeading)
+                    .offset(x: (real.width - fitted.width) / 2, y: (real.height - fitted.height) / 2)
+
+                Button {
+                    UserDefaults.standard.set(false, forKey: WideLayout.simulateKey)
+                } label: {
+                    Label("Exit iPad mode", systemImage: "xmark.circle.fill")
+                        .font(.footnote.weight(.semibold))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .pearGlass(in: Capsule(), interactive: true)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Exit iPad mode")
+                .padding(.top, realTopInset + 12)
+                .padding(.trailing, 12)
+                .frame(width: real.width, height: real.height, alignment: .topTrailing)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .frame(width: real.width, height: real.height, alignment: .topLeading)
+            .clipped()
         }
         .background(Color.black)
         .ignoresSafeArea()
-        .clipped()
+    }
+
+    /// The real status-bar / Dynamic Island height, read from the key window because this view ignores safe areas.
+    private var realTopInset: CGFloat {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        let scene = scenes.first(where: { $0.activationState == .foregroundActive }) ?? scenes.first
+        return scene?.keyWindow?.safeAreaInsets.top ?? 47
     }
 }
