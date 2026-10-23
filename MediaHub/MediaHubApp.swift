@@ -381,20 +381,38 @@ struct RootView: View {
     }
 }
 
+/// The real screen size and window safe areas, read from UIKit because the GeometryReader proxy can be stale
+/// after a rotation.
+private enum VirtualPadMetrics {
+    static var screenSize: CGSize {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        let scene = scenes.first(where: { $0.activationState == .foregroundActive }) ?? scenes.first
+        return scene?.effectiveGeometry.coordinateSpace.bounds.size ?? .zero
+    }
+
+    static var safeAreaInsets: UIEdgeInsets {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        let scene = scenes.first(where: { $0.activationState == .foregroundActive }) ?? scenes.first
+        return scene?.keyWindow?.safeAreaInsets ?? .zero
+    }
+}
+
 /// Draws the app in a fixed iPad-sized window, scaled down and centred on black, while the developer's iPad mode is on.
 private struct VirtualPadWindow<Content: View>: View {
     let content: Content
+    @State private var screen: CGSize = VirtualPadMetrics.screenSize
 
     init(@ViewBuilder content: () -> Content) {
         self.content = content()
     }
 
     var body: some View {
-        GeometryReader { proxy in
-            let real = proxy.size
+        GeometryReader { _ in
+            let real = screen
             let virtual = WideLayout.virtualPadSize(for: real)
             let scale = min(real.width / virtual.width, real.height / virtual.height)
             let fitted = CGSize(width: virtual.width * scale, height: virtual.height * scale)
+            let insets = VirtualPadMetrics.safeAreaInsets
             ZStack(alignment: .topLeading) {
                 Color.black
                 content
@@ -424,8 +442,9 @@ private struct VirtualPadWindow<Content: View>: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Exit iPad mode")
-                .padding(.top, realTopInset + 12)
-                .padding(.trailing, 12)
+                .padding(.top, insets.top + 12)
+                .padding(.leading, insets.leading)
+                .padding(.trailing, insets.trailing + 12)
                 .frame(width: real.width, height: real.height, alignment: .topTrailing)
             }
             .frame(width: real.width, height: real.height, alignment: .topLeading)
@@ -433,12 +452,18 @@ private struct VirtualPadWindow<Content: View>: View {
         }
         .background(Color.black)
         .ignoresSafeArea()
+        .onAppear { refreshScreen() }
+        .onReceive(NotificationCenter.default.publisher(for: UIDevice.orientationDidChangeNotification)) { _ in
+            refreshScreen()
+        }
+        .onGeometryChange(for: CGSize.self) { $0.size } action: { _ in
+            refreshScreen()
+        }
     }
 
-    /// The real status-bar / Dynamic Island height, read from the key window because this view ignores safe areas.
-    private var realTopInset: CGFloat {
-        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
-        let scene = scenes.first(where: { $0.activationState == .foregroundActive }) ?? scenes.first
-        return scene?.keyWindow?.safeAreaInsets.top ?? 47
+    private func refreshScreen() {
+        let current = VirtualPadMetrics.screenSize
+        guard current != .zero, current != screen else { return }
+        screen = current
     }
 }
