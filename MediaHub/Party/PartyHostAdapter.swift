@@ -91,7 +91,7 @@ final class PartyHostAdapter: PartyRoomListener, PlayerTransportObserver {
     /// Watches the player's play state. Re-arms itself after every change.
     private func observePlayback() {
         guard attached else { return }
-        _ = withObservationTracking {
+        withObservationTracking {
             _ = model.isPlaying
             _ = model.isBuffering
         } onChange: { [weak self] in

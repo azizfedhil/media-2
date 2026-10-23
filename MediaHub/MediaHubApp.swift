@@ -231,7 +231,7 @@ struct RootView: View {
     /// In iPad mode this is the virtual window's size, not the phone's.
     @State private var size: CGSize = {
         let scene = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
-        let real = scene?.coordinateSpace.bounds.size ?? .zero
+        let real = scene?.effectiveGeometry.coordinateSpace.bounds.size ?? .zero
         return WideLayout.simulatingPad ? WideLayout.virtualPadSize(for: real) : real
     }()
 

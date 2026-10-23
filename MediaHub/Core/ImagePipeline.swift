@@ -37,7 +37,7 @@ actor ImagePipeline {
 
     /// Disk (oldest entries evicted first once 300 MB is reached) plus a small memory tier for raw bytes. A static so
     /// cache probes (`isCached`) don't have to go through the actor.
-    nonisolated(unsafe) static let urlCache = URLCache(memoryCapacity: 30 << 20, diskCapacity: 300 << 20)
+    static let urlCache = URLCache(memoryCapacity: 30 << 20, diskCapacity: 300 << 20)
 
     /// Hosts whose image paths are content-addressed (a changed image gets a new path), so a cached copy never needs
     /// revalidating. Everything else follows normal HTTP caching: URLSession sends the stored ETag / Last-Modified

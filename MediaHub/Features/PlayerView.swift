@@ -650,7 +650,9 @@ struct PlayerScreen: View {
             if let n = notice { toast(n) }
         }
         .preferredColorScheme(.dark)
+        #if os(macOS)
         .pointerVisibility(hideCursor ? .hidden : .visible)
+        #endif
         .statusBarHidden(!showControls)
         .persistentSystemOverlays(showControls ? .automatic : .hidden)
         .animation(.snappy(duration: 0.25), value: notice)
@@ -1000,7 +1002,9 @@ struct PlayerScreen: View {
         }
         .buttonStyle(PressableStyle())
         .hoverEffect(.highlight)
+        #if os(macOS)
         .pointerStyle(.link)
+        #endif
         .accessibilityLabel(open ? "Fewer controls" : "More controls")
     }
 
@@ -1045,7 +1049,9 @@ struct PlayerScreen: View {
         }
         .buttonStyle(PressableStyle())
         .hoverEffect(.highlight)
+        #if os(macOS)
         .pointerStyle(.link)
+        #endif
     }
 
     private func togglePiP() {
@@ -1100,7 +1106,9 @@ struct PlayerScreen: View {
         }
         .buttonStyle(PressableStyle())
         .hoverEffect(.highlight)
+        #if os(macOS)
         .pointerStyle(.link)
+        #endif
     }
 
     private var audioMenu: some View {
@@ -2214,7 +2222,9 @@ private struct SeekBar: View {
                     case .ended: hoverX = nil
                     }
                 }
+                #if os(macOS)
                 .pointerStyle(.link)
+                #endif
                 .animation(.snappy(duration: 0.18), value: active)
             }
             .frame(height: 40)
@@ -2343,7 +2353,9 @@ private struct EpisodePanel: View {
                 }
                 .buttonStyle(PressableStyle())
                 .hoverEffect(.highlight)
+                #if os(macOS)
                 .pointerStyle(.link)
+                #endif
             }
             .padding(.horizontal, 24)
 

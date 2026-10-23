@@ -279,9 +279,9 @@ final class DownloadManager {
             speeds[id] = nil
             session.getAllTasks { [weak self] tasks in
                 let task = tasks.first { $0.taskDescription == name } as? URLSessionDownloadTask
-                guard let task else { Task { @MainActor in self?.pauseSaved(id, nil) }; return }
+                guard let task else { Task { @MainActor [weak self] in self?.pauseSaved(id, nil) }; return }
                 task.cancel(byProducingResumeData: { data in
-                    Task { @MainActor in self?.pauseSaved(id, data) }
+                    Task { @MainActor [weak self] in self?.pauseSaved(id, data) }
                 })
             }
         default:
