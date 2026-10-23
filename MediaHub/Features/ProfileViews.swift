@@ -167,6 +167,9 @@ enum ProfileTarget: Identifiable {
 
 /// "Who's watching?": tap a profile to switch, or enter Manage mode to edit, add and delete.
 struct ProfileSheet: View {
+    /// The wide layout's floating panel: no sheet, so Done and the other closes call `onClose` instead.
+    var floating = false
+    var onClose: (() -> Void)? = nil
     @Environment(\.dismiss) private var dismiss
     @Environment(ProfileStore.self) private var profiles
     @Environment(SimklStore.self) private var simkl
@@ -184,7 +187,23 @@ struct ProfileSheet: View {
 
     private let columns = [GridItem(.adaptive(minimum: 96, maximum: 120), spacing: 16, alignment: .top)]
 
+    init(floating: Bool = false, onClose: (() -> Void)? = nil) {
+        self.floating = floating
+        self.onClose = onClose
+    }
+
     var body: some View {
+        if floating {
+            panel
+                .sheet(item: $target) { ProfileEditor(target: $0) }
+        } else {
+            panel
+                .presentationDetents([.medium, .large], selection: $detent)
+                .sheet(item: $target) { ProfileEditor(target: $0) }
+        }
+    }
+
+    private var panel: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 28) {
@@ -205,7 +224,7 @@ struct ProfileSheet: View {
             .navigationTitle("Who's watching?")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } }
+                ToolbarItem(placement: .topBarTrailing) { Button("Done") { close() } }
             }
             .navigationDestination(isPresented: $showProfile) { ProfileDetailView() }
             .navigationDestination(isPresented: $showDownloads) { DownloadsView() }
@@ -214,8 +233,10 @@ struct ProfileSheet: View {
             .navigationDestination(isPresented: $showParty) { PartyView() }
         }
         .coversPages()
-        .presentationDetents([.medium, .large], selection: $detent)
-        .sheet(item: $target) { ProfileEditor(target: $0) }
+    }
+
+    private func close() {
+        if let onClose { onClose() } else { dismiss() }
     }
 
     /// Opens the active profile's page (stats, integrations, taste). The sheet grows to full height for it.
@@ -338,7 +359,7 @@ struct ProfileSheet: View {
         let active = p.id == profiles.activeID
         return Button {
             if managing { target = .edit(p) }
-            else { profiles.select(p.id); dismiss() }
+            else { profiles.select(p.id); close() }
         } label: {
             VStack(spacing: 9) {
                 ProfileAvatar(profile: p, size: 76)

@@ -24,6 +24,7 @@ final class ShellNav {
     var cataloguePath = NavigationPath()
     var current: AppTab = .home
     var catalogueActive = false
+    var activeFold: FeedCollapse?
 
     init() {
         for tab in AppTab.allCases { paths[tab] = NavigationPath() }
@@ -94,6 +95,17 @@ final class LayoutState {
     var pagesCovered: Bool { coverDepth > 0 }
     func cover() { coverDepth += 1 }
     func uncover() { coverDepth = max(coverDepth - 1, 0) }
+}
+
+/// Holds the wide layout's source picker while a detail page has it open. The page fills this in; the shell draws it
+/// above the sidebar, because a page's own overlay can't cover the sidebar sitting next to it.
+@MainActor @Observable
+final class SourcePickerHost {
+    static let shared = SourcePickerHost()
+    var isPresented = false
+    var content: AnyView?
+    var owner: UUID?
+    private init() {}
 }
 
 /// Whether the last input came from a pointer (trackpad / mouse) rather than a finger. Set on the shell container:
@@ -366,9 +378,13 @@ struct SidebarShell: View {
     @State private var showProfile = false
     @State private var homeFold = FeedCollapse()
     @State private var commands = AppCommands.shared
+    @State private var sourcePicker = SourcePickerHost.shared
 
     private var baseWidth: CGFloat { totalWidth >= 1000 ? 250 : (totalWidth >= 780 ? 212 : 76) }
-    private var fold: CGFloat { (tab == .home && catalogueID == nil) ? homeFold.progress : 0 }
+    private var fold: CGFloat {
+        if let active = shellNav.activeFold { return active.progress }
+        return (tab == .home && catalogueID == nil) ? homeFold.progress : 0
+    }
     private var compact: Bool {
         let width: CGFloat = baseWidth + (76 - baseWidth) * fold
         return fold > 0.45 || width < 100
@@ -398,10 +414,21 @@ struct SidebarShell: View {
                 .environment(\.sidebarBleeds, bleeds)
                 .environment(\.sidebarInset, inset)
             sidebar(width: width)
+            if let overlay = sourcePicker.content, sourcePicker.isPresented {
+                overlay
+                    .ignoresSafeArea()
+                    .coversPages()
+                    .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                    .zIndex(100)
+            }
+            if showProfile {
+                profileOverlay(width: width)
+                    .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .topLeading)))
+                    .zIndex(200)
+            }
         }
         .background(Color(.systemBackground).ignoresSafeArea())
         .environment(\.wideLayout, true)
-        .sheet(isPresented: $showProfile) { ProfileSheet() }
         .animation(.easeOut(duration: 0.14), value: fold)
         .onContinuousHover { phase in
             if case .active = phase, !InputState.shared.pointerActive {
@@ -428,6 +455,41 @@ struct SidebarShell: View {
             shellNav.current = tab
             shellNav.catalogueActive = (catalogueID != nil)
         }
+    }
+
+    // MARK: Floating profile
+
+    private func profileOverlay(width: CGFloat) -> some View {
+        GeometryReader { geo in
+            ZStack(alignment: .topLeading) {
+                Rectangle()
+                    .fill(.black.opacity(0.10))
+                    .ignoresSafeArea()
+                    .contentShape(Rectangle())
+                    .onTapGesture { closeProfile() }
+                ProfileSheet(floating: true, onClose: closeProfile)
+                    .frame(width: 380)
+                    .frame(maxHeight: max(geo.size.height - 32, 0))
+                    .background {
+                        Color.clear.pearGlass(in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 28, style: .continuous)
+                            .strokeBorder(.white.opacity(0.12), lineWidth: 0.5)
+                    }
+                    .shadow(color: .black.opacity(0.35), radius: 30, y: 12)
+                    .contentShape(Rectangle())
+                    .padding(.leading, width + 12)
+                    .padding(.top, 16)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        }
+        .ignoresSafeArea()
+    }
+
+    private func closeProfile() {
+        withAnimation(.easeOut(duration: 0.18)) { showProfile = false }
     }
 
     // MARK: Pages
@@ -539,7 +601,7 @@ struct SidebarShell: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Button { showProfile = true } label: {
+            Button { withAnimation(.easeOut(duration: 0.18)) { showProfile = true } } label: {
                 HStack(spacing: 10) {
                     ProfileAvatar(profile: profiles.active, size: 34)
                     if !compact {
@@ -715,12 +777,15 @@ struct CollapsingSplit<Hero: View, Pane: View>: View {
                 scrollTop += 1
             }
         } label: {
-            Image(systemName: "chevron.right").font(.system(size: 14, weight: .bold))
-                .frame(width: 38, height: 38)
-                .pearGlass(in: .circle, interactive: true)
+            Image(systemName: "chevron.right").font(.system(size: 11, weight: .bold))
+                .frame(width: 18, height: 56)
+                .pearGlass(in: .capsule, interactive: true)
+                .opacity(0.7)
+                .frame(width: 28, height: 56, alignment: .leading)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .padding(.leading, 12 + inset)
+        .padding(.leading, inset + 4)
         .transition(.opacity)
     }
 }

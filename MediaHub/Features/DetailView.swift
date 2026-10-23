@@ -29,8 +29,10 @@ struct DetailView: View {
     @Environment(ThemeStore.self) private var theme
     @Environment(DownloadManager.self) private var downloads
     @Environment(ContentPrefs.self) private var contentPrefs
+    @Environment(ShellNav.self) private var shellNav
     @Environment(\.wideLayout) private var wide
     @Environment(\.sidebarInset) private var sidebarInset
+    @Environment(\.pageActive) private var pageActive
     @Environment(\.dismiss) private var dismiss
     @State private var detailFold = FeedCollapse()
     @State private var tint: Color?
@@ -43,6 +45,8 @@ struct DetailView: View {
     @State private var streams: [(Addon, [StreamItem])] = []
     @State private var loadingStreams = false
     @State private var showSources = false
+    /// Identifies this page while its wide source picker is in the shell, so other pages can't close it.
+    @State private var pickerOwner = UUID()
     /// Set while the sources sheet is open to choose a download source: tapping a row enqueues it instead of playing.
     @State private var downloadTarget: DownloadTarget?
     private struct DownloadTarget { let season: Int?; let episode: Int?; let ep: EpisodeItem? }
@@ -116,11 +120,26 @@ struct DetailView: View {
         .ignoresSafeArea(edges: .top)
         .toolbarTitleDisplayMode(.inline)
         .backShortcuts()
-        .sheet(isPresented: $showSources, onDismiss: { downloadTarget = nil; startPendingPlayback() }) { sourceSheet }
+        .sheet(isPresented: Binding(get: { showSources && !wide }, set: { showSources = $0 }),
+               onDismiss: { downloadTarget = nil; startPendingPlayback() }) { sourceSheet }
         // Presented from the page itself (not from inside the sources sheet): the sheet closes first,
         // then the player opens. This keeps dismissing the player reliable.
         .fullScreenCover(item: $playRequest) { r in
             PlayerScreen(request: r, provider: makeProvider(), onClose: { playRequest = nil })
+        }
+        // The wide picker is drawn by the shell so it covers the sidebar; closing it runs the sheet's old onDismiss.
+        .onChange(of: showSources, initial: true) { _, show in
+            if !show && wide { downloadTarget = nil; startPendingPlayback() }
+            syncWidePicker()
+        }
+        .onChange(of: wide) { _, _ in syncWidePicker() }
+        .onChange(of: widePickerKey) { _, _ in refreshWidePicker() }
+        .onDisappear {
+            let host = SourcePickerHost.shared
+            if host.owner == pickerOwner {
+                host.isPresented = false
+                host.owner = nil
+            }
         }
         .task {
             // Native metadata + suggestions (no-ops without a TMDB key).
@@ -187,7 +206,7 @@ struct DetailView: View {
     /// similar titles and the details list on the right. Drag the right side left to cover the poster.
     private var wideBody: some View {
         GeometryReader { geo in
-            let topInset: CGFloat = geo.safeAreaInsets.top
+            let topInset: CGFloat = max(geo.safeAreaInsets.top, 24)
             CollapsingSplit(heroMaxWidth: 440, collapseDistance: 300) {
                 widePoster
             } pane: { ctx in
@@ -225,20 +244,36 @@ struct DetailView: View {
                     .padding(.leading, 16 + sidebarInset)
                     .padding(.top, topInset + 16)
             }
+            .zIndex(10)
             .ignoresSafeArea(.container, edges: .bottom)
             .navigationBarBackButtonHidden(true)
             .toolbar(.hidden, for: .navigationBar)
             .task(id: posterURL) { await updateTint() }
+            .onAppear {
+                detailFold.expand()
+                if pageActive { shellNav.activeFold = detailFold }
+            }
+            .onDisappear {
+                if shellNav.activeFold === detailFold { shellNav.activeFold = nil }
+            }
+            .onChange(of: pageActive, initial: true) { _, active in
+                if active {
+                    shellNav.activeFold = detailFold
+                } else if shellNav.activeFold === detailFold {
+                    shellNav.activeFold = nil
+                }
+            }
         }
     }
 
     private var backButton: some View {
-        Button { dismiss() } label: {
+        Button { if !shellNav.back() { dismiss() } } label: {
             Image(systemName: "chevron.left")
                 .font(.system(size: 16, weight: .bold))
                 .foregroundStyle(.white)
                 .frame(width: 38, height: 38)
                 .pearGlass(in: .circle, interactive: true)
+                .contentShape(Circle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Back")
@@ -998,6 +1033,236 @@ struct DetailView: View {
             }
         }
         .presentationDetents([.medium, .large])
+    }
+
+    // MARK: Wide source picker
+
+    /// Changes whenever the wide picker needs rebuilding: opening it, streams arriving, the filter or its mode.
+    private var widePickerKey: String {
+        let pin = pinned
+        return [
+            item.id, "\(wide)", "\(showSources)", "\(streams.count)",
+            "\(streams.reduce(0) { $0 + $1.1.count })", "\(loadingStreams)",
+            sourceFilter ?? "", "\(downloadTarget != nil)", "\(season)", "\(episode)",
+            "\(episodes.count)", "\(ratings.count)", "\(details != nil)",
+            details?.voteAverage.map { String($0) } ?? "", logoURL?.absoluteString ?? "",
+            imdbID ?? "", pin?.addon.id ?? "", pin?.stream.id ?? ""
+        ].joined(separator: "|")
+    }
+
+    private func syncWidePicker() {
+        let host = SourcePickerHost.shared
+        if wide && showSources {
+            withAnimation(.easeOut(duration: 0.2)) {
+                host.owner = pickerOwner
+                host.content = AnyView(wideSourcePicker)
+                host.isPresented = true
+            }
+        } else if host.owner == nil || host.owner == pickerOwner {
+            withAnimation(.easeOut(duration: 0.18)) {
+                host.isPresented = false
+                host.owner = nil
+            }
+        }
+    }
+
+    private func refreshWidePicker() {
+        let host = SourcePickerHost.shared
+        guard host.isPresented, host.owner == pickerOwner, wide, showSources else { return }
+        host.content = AnyView(wideSourcePicker)
+    }
+
+    private var wideSourcePicker: some View {
+        GeometryReader { geo in
+            let panelWidth = min(geo.size.width * 0.86, 1280)
+            let panelHeight = min(geo.size.height * 0.86, 800)
+            let sourcesWidth = max((panelWidth - 1) / 3, 0)
+            ZStack {
+                Color.black.opacity(0.42)
+                    .ignoresSafeArea()
+                    .contentShape(Rectangle())
+                    .onTapGesture { showSources = false }
+                HStack(spacing: 0) {
+                    wideSourceInfoPane
+                        .frame(width: max(panelWidth - 1 - sourcesWidth, 0))
+                    Rectangle()
+                        .fill(SidebarMetrics.hairline)
+                        .frame(width: 1)
+                    wideSourceListPane
+                        .frame(width: sourcesWidth)
+                }
+                .frame(width: panelWidth, height: panelHeight)
+                .background {
+                    Color.clear.pearGlass(in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 28, style: .continuous)
+                        .strokeBorder(.white.opacity(0.12), lineWidth: 0.5)
+                }
+                .shadow(color: .black.opacity(0.35), radius: 40, y: 18)
+                .contentShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    private var wideSourceInfoPane: some View {
+        let episodeInfo = isSeries ? episodes.first(where: { $0.id == episode }) : nil
+        let image = episodeInfo?.image ?? item.backdropURL ?? item.posterURL
+        return ZStack(alignment: .bottomLeading) {
+            RemoteImage(url: image, size: 1000)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .clipped()
+                .mask { wideImageRightFade }
+                .mask { wideImageBottomFade }
+            LinearGradient(stops: [.init(color: .clear, location: 0),
+                                   .init(color: .clear, location: 0.18),
+                                   .init(color: .black.opacity(0.70), location: 0.55),
+                                   .init(color: .black.opacity(0.95), location: 0.80),
+                                   .init(color: .black, location: 1)],
+                           startPoint: .top, endPoint: .bottom)
+                .allowsHitTesting(false)
+            VStack(alignment: .leading, spacing: 12) {
+                TitleArt(item: item, maxWidth: 420, maxHeight: 64, font: .largeTitle.bold())
+                Text(wideSourceKicker)
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+                if let name = wideSourceEpisodeName {
+                    Text(name)
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                if !allRatings.isEmpty { ratingsRow }
+                if let text = descriptionText {
+                    Text(text)
+                        .font(.subheadline)
+                        .lineLimit(4)
+                }
+                if !wideSourceFacts.isEmpty {
+                    Text(wideSourceFacts)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+            .foregroundStyle(.white)
+            .padding(28)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .clipped()
+    }
+
+    private var wideImageRightFade: LinearGradient {
+        LinearGradient(stops: [.init(color: .black, location: 0),
+                               .init(color: .black, location: 0.45),
+                               .init(color: .clear, location: 0.92)],
+                       startPoint: .leading, endPoint: .trailing)
+    }
+
+    private var wideImageBottomFade: LinearGradient {
+        LinearGradient(stops: [.init(color: .black, location: 0),
+                               .init(color: .black, location: 0.25),
+                               .init(color: .clear, location: 0.70)],
+                       startPoint: .top, endPoint: .bottom)
+    }
+
+    private var wideSourceKicker: String {
+        isSeries ? "\(item.typeLabel.uppercased()) · S\(season) · E\(episode)" : item.typeLabel.uppercased()
+    }
+
+    private var wideSourceEpisodeName: String? {
+        guard isSeries else { return nil }
+        let name = episodes.first(where: { $0.id == episode })?.name
+        return name?.isEmpty == false ? name : "Episode \(episode)"
+    }
+
+    private var wideSourceFacts: String {
+        var parts: [String] = []
+        if isSeries, let ep = episodes.first(where: { $0.id == episode }) {
+            if let r = ep.runtime { parts.append("\(r) min") }
+            if let d = prettyDate(ep.airDate) { parts.append(d) }
+        } else if !isSeries {
+            if let m = details?.minutes { parts.append("\(m) min") }
+            if let d = prettyDate(details?.releaseDate) { parts.append(d) }
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    private var wideSourceListPane: some View {
+        let pin = pinned
+        let visible = SourceFilter.apply(streams, sourceFilter)
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 10) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(downloadTarget != nil ? "Download from…" : "Sources")
+                        .font(.title3.bold())
+                    Text("\(streams.reduce(0) { $0 + $1.1.count }) found")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+                if streams.count > 1 {
+                    AddonFilterMenu(groups: streams, selection: $sourceFilter)
+                }
+                Button { showSources = false } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 13, weight: .bold))
+                        .frame(width: 30, height: 30)
+                        .pearGlass(in: .circle, interactive: true)
+                        .contentShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Close")
+            }
+            if loadingStreams && !streams.isEmpty {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("Checking more add-ons…").font(.footnote).foregroundStyle(.secondary)
+                }
+                .transition(.opacity)
+            }
+            List {
+                if let p = pin, sourceFilter == nil || sourceFilter == p.addon.id {
+                    Section("Pinned · \(p.addon.manifest.name)") {
+                        row(p.addon, p.stream, isPinned: true).listRowBackground(Color.clear)
+                    }
+                }
+                ForEach(visible, id: \.0.id) { addon, items in
+                    Section {
+                        ForEach(items.filter { $0.id != pin?.stream.id }) {
+                            row(addon, $0, isPinned: false).listRowBackground(Color.clear)
+                        }
+                    } header: { Text(addon.manifest.name) } footer: {
+                        VStack(alignment: .leading, spacing: 4) {
+                            if addon.id == visible.first?.0.id { Text("Swipe a source to pin it to the top for this show.") }
+                            if items.contains(where: \.p2pOff) {
+                                Text("P2P is off, so torrent sources can't be played. Turn it on in Settings → Peer-to-peer.")
+                            }
+                        }
+                    }
+                }
+            }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .animation(.easeOut(duration: 0.2), value: loadingStreams)
+            .overlay {
+                if loadingStreams && streams.isEmpty { ProgressView() }
+                else if !loadingStreams && streams.isEmpty {
+                    VStack(spacing: 8) {
+                        Image(systemName: "play.slash").font(.title2).foregroundStyle(.secondary)
+                        Text("No sources").font(.headline)
+                        Text("Add a stream add-on or connect a media server in Settings.")
+                            .font(.footnote).foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                    }
+                    .padding()
+                }
+            }
+        }
+        .padding(22)
     }
 }
 
