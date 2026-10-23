@@ -79,7 +79,9 @@ extension Color {
 enum OrientationLock {
     /// What the rest of the app (everything but the player) is allowed to do.
     static var appMask: UIInterfaceOrientationMask {
-        if WideLayout.isPad { return .all }
+        // The simulated iPad rotates with the phone. The player still narrows this to landscape through `set`.
+        if WideLayout.simulatingPad { return .allButUpsideDown }
+        if WideLayout.isRealPad { return .all }
         return UserDefaults.standard.bool(forKey: WideLayout.phoneKey) ? .allButUpsideDown : .portrait
     }
     static var mask: UIInterfaceOrientationMask = OrientationLock.appMask
@@ -124,6 +126,8 @@ struct MediaHubApp: App {
     @State private var theme = ThemeStore()
     @State private var profiles = ProfileStore()
     @State private var library = LocalLibrary()
+    @State private var sidebarPins = SidebarPins()
+    @State private var shellNav = ShellNav()
     @State private var libraryPrefs = LibraryPrefs()
     @State private var contentPrefs = ContentPrefs()
     @State private var downloads = DownloadManager.shared
@@ -142,10 +146,56 @@ struct MediaHubApp: App {
             RootView()
                 .fullScreenCover(isPresented: $showOnboarding) { OnboardingView { showOnboarding = false } }
                 .environment(store).environment(history).environment(simkl).environment(pins).environment(theme)
-                .environment(profiles).environment(library).environment(watchLog).environment(libraryPrefs)
+                .environment(profiles).environment(library).environment(sidebarPins).environment(watchLog).environment(libraryPrefs)
                 .environment(contentPrefs).environment(downloads).environment(connectivity).environment(mediaServers)
+                .environment(shellNav)
                 .preferredColorScheme(Theme.forceDark ? .dark : nil)
                 .pearLaunchScreen()
+        }
+        .commands {
+            GoCommands(shellNav: shellNav)
+        }
+    }
+}
+
+/// The "Go" menu: the same destinations and actions the desktop app offers, with their keyboard shortcuts.
+struct GoCommands: Commands {
+    let shellNav: ShellNav
+
+    var body: some Commands {
+        CommandMenu("Go") {
+            Button("Home") { AppCommands.shared.tabRequest = .home }
+                .keyboardShortcut("1", modifiers: .command)
+                .disabled(LayoutState.shared.playerOpen)
+            Button("Explore") { AppCommands.shared.tabRequest = .explore }
+                .keyboardShortcut("2", modifiers: .command)
+                .disabled(LayoutState.shared.playerOpen)
+            Button("Library") { AppCommands.shared.tabRequest = .library }
+                .keyboardShortcut("3", modifiers: .command)
+                .disabled(LayoutState.shared.playerOpen)
+            Button("Settings") { AppCommands.shared.tabRequest = .settings }
+                .keyboardShortcut("4", modifiers: .command)
+                .disabled(LayoutState.shared.playerOpen)
+            Button("Search") {
+                AppCommands.shared.tabRequest = .search
+                AppCommands.shared.pendingSearchFocus = true
+                AppCommands.shared.searchFocusTick += 1
+            }
+            .keyboardShortcut("f", modifiers: .command)
+            .disabled(LayoutState.shared.playerOpen)
+            Button("Back") {
+                _ = shellNav.back()
+                AppCommands.shared.backTick += 1
+            }
+            .keyboardShortcut("[", modifiers: .command)
+            .disabled(LayoutState.shared.playerOpen)
+            Button("Reload") {
+                if shellNav.current == .home && !shellNav.catalogueActive {
+                    NotificationCenter.default.post(name: Notification.Name("pear.refresh"), object: nil)
+                }
+            }
+            .keyboardShortcut("r", modifiers: .command)
+            .disabled(LayoutState.shared.playerOpen)
         }
     }
 }
@@ -157,6 +207,7 @@ struct RootView: View {
     @Environment(ProfileStore.self) private var profiles
     @Environment(WatchHistory.self) private var history
     @Environment(LocalLibrary.self) private var library
+    @Environment(SidebarPins.self) private var sidebarPins
     @Environment(WatchLog.self) private var watchLog
     @Environment(LibraryPrefs.self) private var libraryPrefs
     @Environment(ContentPrefs.self) private var contentPrefs
@@ -164,39 +215,41 @@ struct RootView: View {
     @Environment(PinnedSources.self) private var pinnedSources
     @Environment(DownloadManager.self) private var downloads
     @Environment(Connectivity.self) private var connectivity
+    @Environment(ShellNav.self) private var shellNav
     /// True when the app launched without a connection: shows the Downloads page instead of the (empty) online tabs.
     @State private var offlineMode = false
     /// Watch party: the guest's player and a title to open from a suggestion (see PartyRouter).
     @Bindable private var router = PartyRouter.shared
     @Environment(\.horizontalSizeClass) private var hSize
     @AppStorage(WideLayout.phoneKey) private var phoneLandscape = false
+    @AppStorage(WideLayout.simulateKey) private var ipadMode = false
     @State private var layoutState = LayoutState.shared
+    @State private var commands = AppCommands.shared
     @State private var tab: AppTab = .home
     @State private var wide = WideLayout.isPad
     /// Window size, seeded from the screen so the very first frame already picks the right sidebar width.
+    /// In iPad mode this is the virtual window's size, not the phone's.
     @State private var size: CGSize = {
         let scene = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
-        return scene?.coordinateSpace.bounds.size ?? .zero
+        let real = scene?.coordinateSpace.bounds.size ?? .zero
+        return WideLayout.simulatingPad ? WideLayout.virtualPadSize(for: real) : real
     }()
 
     var body: some View {
-        // Sidebar layout on iPad (and on iPhone in landscape when switched on); the system TabView everywhere else,
-        // which gives the Liquid Glass tab bar for free. The selected tab carries over between the two.
         Group {
-            if wide {
-                SidebarShell(tab: $tab, totalWidth: size.width)
-            } else {
-                TabView(selection: $tab) {
-                    Tab("Home", systemImage: "house.fill", value: AppTab.home) { HomeView() }
-                    Tab("Explore", systemImage: "safari.fill", value: AppTab.explore) { ExploreView() }
-                    Tab("Library", systemImage: "books.vertical.fill", value: AppTab.library) { LibraryView() }
-                    Tab("Settings", systemImage: "gearshape.fill", value: AppTab.settings) { SettingsView() }
-                    Tab(value: AppTab.search, role: .search) { SearchView() }
+            if WideLayout.simulatingPad {
+                VirtualPadWindow {
+                    browsing
                 }
-                .tabBarMinimizeBehavior(.onScrollDown)
+            } else {
+                browsing
             }
         }
-        .onGeometryChange(for: CGSize.self) { $0.size } action: { size = $0; updateWide() }
+        // The developer toggle: let the phone rotate with the virtual iPad, and pick the new layout at once.
+        .onChange(of: ipadMode) { _, _ in
+            OrientationLock.set(OrientationLock.appMask)
+            updateWide()
+        }
         .onChange(of: hSize) { _, _ in updateWide() }
         .onChange(of: phoneLandscape) { _, _ in updateWide() }
         .onChange(of: layoutState.playerOpen) { _, _ in updateWide() }
@@ -207,6 +260,7 @@ struct RootView: View {
         .onChange(of: profiles.activeID, initial: true) { _, id in
             history.load(profile: id)
             library.load(profile: id)
+            sidebarPins.load(profile: id)
             watchLog.load(profile: id)
             libraryPrefs.load(profile: id)
             contentPrefs.load(profile: id)
@@ -228,6 +282,7 @@ struct RootView: View {
             profiles.reload()
             history.reload()
             library.reload()
+            sidebarPins.reload()
             libraryPrefs.reload()
             watchLog.reloadKeepingUnsaved()
             contentPrefs.reload()
@@ -273,6 +328,40 @@ struct RootView: View {
         }
     }
 
+    /// Sidebar layout on iPad (and on iPhone in landscape when switched on); the system TabView everywhere else,
+    /// which gives the Liquid Glass tab bar for free. The selected tab carries over between the two.
+    @ViewBuilder private var browsing: some View {
+        Group {
+            if wide {
+                SidebarShell(tab: $tab, totalWidth: size.width)
+            } else {
+                TabView(selection: $tab) {
+                    Tab("Home", systemImage: "house.fill", value: AppTab.home) { HomeView() }
+                    Tab("Explore", systemImage: "safari.fill", value: AppTab.explore) { ExploreView() }
+                    Tab("Library", systemImage: "books.vertical.fill", value: AppTab.library) { LibraryView() }
+                    Tab("Settings", systemImage: "gearshape.fill", value: AppTab.settings) { SettingsView() }
+                    Tab(value: AppTab.search, role: .search) { SearchView() }
+                }
+                .tabBarMinimizeBehavior(.onScrollDown)
+                .onAppear {
+                    shellNav.current = tab
+                    shellNav.catalogueActive = false
+                }
+                .onChange(of: tab) { _, t in
+                    shellNav.current = t
+                    shellNav.catalogueActive = false
+                }
+                .onChange(of: commands.tabRequest) { _, requested in
+                    guard let requested else { return }
+                    tab = requested
+                    commands.tabRequest = nil
+                }
+            }
+        }
+        // Inside the virtual window this reports its size; outside it reports the real window.
+        .onGeometryChange(for: CGSize.self) { $0.size } action: { size = $0; updateWide() }
+    }
+
     /// Re-evaluates which layout to use. Held still while the player is open (it forces landscape).
     private func updateWide() {
         guard !layoutState.playerOpen else { return }
@@ -289,5 +378,42 @@ struct RootView: View {
         } else if libraryPrefs.usesSimkl(simkl) {
             await simkl.sync()
         }
+    }
+}
+
+/// Draws the app in a fixed iPad-sized window, scaled down and centred on black, while the developer's iPad mode is on.
+private struct VirtualPadWindow<Content: View>: View {
+    let content: Content
+
+    init(@ViewBuilder content: () -> Content) {
+        self.content = content()
+    }
+
+    var body: some View {
+        GeometryReader { proxy in
+            let real = proxy.size
+            let virtual = WideLayout.virtualPadSize(for: real)
+            let scale = min(real.width / virtual.width, real.height / virtual.height)
+            ZStack {
+                Color.black
+                content
+                    .frame(width: virtual.width, height: virtual.height)
+                    // The fake iPad traits the pages read: wide everywhere, like a real iPad.
+                    .environment(\.horizontalSizeClass, .regular)
+                    .environment(\.verticalSizeClass, .regular)
+                    // Fake iPad safe areas, so the real notch and home indicator do not become huge scaled gaps.
+                    .safeAreaInset(edge: .top, spacing: 0) {
+                        Color.clear.frame(height: 24).allowsHitTesting(false).accessibilityHidden(true)
+                    }
+                    .safeAreaInset(edge: .bottom, spacing: 0) {
+                        Color.clear.frame(height: 20).allowsHitTesting(false).accessibilityHidden(true)
+                    }
+                    .scaleEffect(scale)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .background(Color.black)
+        .ignoresSafeArea()
+        .clipped()
     }
 }

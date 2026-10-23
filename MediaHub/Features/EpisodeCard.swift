@@ -13,11 +13,17 @@ struct EpisodeCard<Actions: View>: View {
     let onTap: () -> Void
     @ViewBuilder let actions: () -> Actions
     @Environment(ThemeStore.self) private var theme
+    @Environment(\.wideLayout) private var wideLayout
     @State private var tint: Color?
 
-    static var width: CGFloat { 250 }
-    static var height: CGFloat { 292 }
-    private let radius: CGFloat = 22
+    static var baseWidth: CGFloat { 250 }
+    static var baseHeight: CGFloat { 292 }
+    static var wideScale: CGFloat { 1.33 }
+
+    private var scale: CGFloat { wideLayout ? Self.wideScale : 1 }
+    var width: CGFloat { Self.baseWidth * scale }
+    var height: CGFloat { Self.baseHeight * scale }
+    private var radius: CGFloat { 22 * scale }
 
     /// Not aired yet: the artwork is greyed out and the card says when it comes out.
     private var upcoming: Bool { ep.isUpcoming }
@@ -32,17 +38,17 @@ struct EpisodeCard<Actions: View>: View {
             Color(white: 0.09)
             if let tint { tint.opacity(0.3).transition(.opacity) }
             // Still across the top ~60%, dissolving into the panel instead of ending at an edge.
-            StillImage(url: ep.image, size: Self.height * 0.62 * 16 / 9)
+            StillImage(url: ep.image, size: height * 0.62 * 16 / 9)
                 // Only the artwork fades: the panel stays dark so the white text keeps its contrast.
                 .saturation(upcoming ? 0.1 : 1)
                 .opacity(upcoming ? 0.5 : 1)
-                .frame(width: Self.width, height: Self.height * 0.62)
+                .frame(width: width, height: height * 0.62)
                 .mask {
                     LinearGradient(stops: [.init(color: .black, location: 0), .init(color: .black, location: 0.5),
                                            .init(color: .clear, location: 1)], startPoint: .top, endPoint: .bottom)
                 }
         }
-        .frame(width: Self.width, height: Self.height)
+        .frame(width: width, height: height)
         .overlay(alignment: .topLeading) {
             VStack(alignment: .leading, spacing: 0) {
                 if watched { badge("checkmark.circle.fill", "Watched") }
@@ -67,13 +73,14 @@ struct EpisodeCard<Actions: View>: View {
         .overlay { Button(action: onTap) { Color.clear.contentShape(Rectangle()) }.buttonStyle(PressableStyle()) }
         .overlay(alignment: .bottomTrailing) {
             Menu { actions() } label: {
-                Image(systemName: "ellipsis").font(.system(size: 16, weight: .bold)).foregroundStyle(.white.opacity(0.85))
-                    .frame(width: 44, height: 40).contentShape(Rectangle())
+                Image(systemName: "ellipsis").font(.system(size: 16 * scale, weight: .bold)).foregroundStyle(.white.opacity(0.85))
+                    .frame(width: 44 * scale, height: 40 * scale).contentShape(Rectangle())
             }
-            .padding(.trailing, 6).padding(.bottom, 6)
+            .padding(.trailing, 6 * scale).padding(.bottom, 6 * scale)
         }
         .contextMenu { actions() }
         .contentShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+        .hoverEffect(.lift)
         .animation(.easeOut(duration: 0.3), value: tint == nil)
         .task(id: ep.image) {
             tint = nil
@@ -83,59 +90,62 @@ struct EpisodeCard<Actions: View>: View {
     }
 
     private var text: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 6) {
-                Text("EPISODE \(ep.id)").font(.system(size: 12, weight: .semibold)).tracking(0.8)
+        VStack(alignment: .leading, spacing: 4 * scale) {
+            HStack(spacing: 6 * scale) {
+                Text("EPISODE \(ep.id)").font(.system(size: 12 * scale, weight: .semibold)).tracking(0.8 * scale)
                     .foregroundStyle(.white.opacity(0.65))
                 if ep.isTopRated {
-                    Text("·").font(.system(size: 12, weight: .semibold)).foregroundStyle(.white.opacity(0.4))
-                    ShimmerText(text: "TOP RATED", symbol: "star.fill", color: Color(red: 1.0, green: 0.78, blue: 0.2))
+                    Text("·").font(.system(size: 12 * scale, weight: .semibold)).foregroundStyle(.white.opacity(0.4))
+                    ShimmerText(text: "TOP RATED", symbol: "star.fill", color: Color(red: 1.0, green: 0.78, blue: 0.2),
+                                size: 12 * scale)
                 }
             }
             .lineLimit(1)
-            Text(ep.name).font(.system(size: 18, weight: .bold)).lineLimit(1)
+            Text(ep.name).font(.system(size: 18 * scale, weight: .bold)).lineLimit(1)
                 .opacity(upcoming ? 0.7 : 1)
             if let o = ep.overview, !o.isEmpty {
-                Text(o).font(.system(size: 13)).foregroundStyle(.white.opacity(upcoming ? 0.5 : 0.7)).lineLimit(3)
+                Text(o).font(.system(size: 13 * scale)).foregroundStyle(.white.opacity(upcoming ? 0.5 : 0.7)).lineLimit(3)
                     .multilineTextAlignment(.leading)
             }
             Group {
                 if let airs = ep.airsOn {
                     Label("Airs on \(airs)", systemImage: "calendar")
-                        .font(.system(size: 14, weight: .semibold)).foregroundStyle(.white.opacity(0.9))
+                        .font(.system(size: 14 * scale, weight: .semibold)).foregroundStyle(.white.opacity(0.9))
                 } else {
                     // New episodes announce themselves in words until you've watched them, like "Airs on" does.
                     let fresh = watched ? nil : ep.freshness
-                    HStack(spacing: 6) {
+                    HStack(spacing: 6 * scale) {
                         if let f = fresh {
                             ShimmerText(text: f.text, symbol: "sparkles", color: Color(red: 1.0, green: 0.55, blue: 0.5),
-                                        size: 14, weight: .semibold, tracking: 0)
-                            if runtime != nil { Text("·").foregroundStyle(.white.opacity(0.4)) }
+                                        size: 14 * scale, weight: .semibold, tracking: 0)
+                            if runtime != nil {
+                                Text("·").font(.system(size: 17 * scale)).foregroundStyle(.white.opacity(0.4))
+                            }
                         }
-                        Text(runtime ?? (fresh == nil ? " " : "")).font(.system(size: 14, weight: .medium))
+                        Text(runtime ?? (fresh == nil ? " " : "")).font(.system(size: 14 * scale, weight: .medium))
                             .foregroundStyle(.white.opacity(0.85))
                     }
                     .lineLimit(1)
                 }
             }
-            .padding(.top, 6)
+            .padding(.top, 6 * scale)
         }
         .foregroundStyle(.white)
-        .padding(.horizontal, 16).padding(.bottom, 14)
+        .padding(.horizontal, 16 * scale).padding(.bottom, 14 * scale)
         .frame(maxWidth: .infinity, alignment: .leading)
         .allowsHitTesting(false)
     }
 
     /// Episode ratings come from TMDB, so the badge carries the TMDB mark.
     private func ratingBadge(_ r: Double) -> some View {
-        HStack(spacing: 5) {
-            RatingLogo(label: "TMDB", height: 11)
+        HStack(spacing: 5 * scale) {
+            RatingLogo(label: "TMDB", height: 11 * scale)
             Text(String(format: "%.1f", r)).monospacedDigit()
         }
-        .font(.caption2.bold()).foregroundStyle(.white)
-        .padding(.horizontal, 8).padding(.vertical, 4)
+        .font(.system(size: 11 * scale, weight: .bold)).foregroundStyle(.white)
+        .padding(.horizontal, 8 * scale).padding(.vertical, 4 * scale)
         .background(.black.opacity(0.55), in: Capsule())
-        .padding(10)
+        .padding(10 * scale)
         .allowsHitTesting(false)
     }
 
@@ -150,23 +160,23 @@ struct EpisodeCard<Actions: View>: View {
         case .failed: symbol = "exclamationmark.triangle.fill"; label = "Failed"
         }
         let done = d.state == .done
-        return HStack(spacing: 4) { Image(systemName: symbol); Text(label).monospacedDigit() }
-            .font(.caption2.bold()).foregroundStyle(done ? theme.onAccent : .white)
-            .padding(.horizontal, 8).padding(.vertical, 4)
+        return HStack(spacing: 4 * scale) { Image(systemName: symbol); Text(label).monospacedDigit() }
+            .font(.system(size: 11 * scale, weight: .bold)).foregroundStyle(done ? theme.onAccent : .white)
+            .padding(.horizontal, 8 * scale).padding(.vertical, 4 * scale)
             .background(done ? theme.accent : Color.black.opacity(0.55), in: Capsule())
-            .padding(.leading, 10).padding(.top, below ? 0 : 10)
+            .padding(.leading, 10 * scale).padding(.top, below ? 0 : 10 * scale)
             .allowsHitTesting(false)
     }
 
     private func badge(_ symbol: String?, _ label: String, fill: Color = .black.opacity(0.55), text: Color = .white) -> some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 4 * scale) {
             if let symbol { Image(systemName: symbol) }
             Text(label)
         }
-        .font(.caption2.bold()).foregroundStyle(text)
-        .padding(.horizontal, 8).padding(.vertical, 4)
+        .font(.system(size: 11 * scale, weight: .bold)).foregroundStyle(text)
+        .padding(.horizontal, 8 * scale).padding(.vertical, 4 * scale)
         .background(fill, in: Capsule())
-        .padding(10)
+        .padding(10 * scale)
         .allowsHitTesting(false)
     }
 }

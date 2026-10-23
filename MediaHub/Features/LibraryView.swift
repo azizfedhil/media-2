@@ -13,6 +13,7 @@ struct LibraryView: View {
     @Environment(WatchHistory.self) private var history
     @Environment(ProfileStore.self) private var profiles
     @Environment(ThemeStore.self) private var theme
+    @Environment(ShellNav.self) private var shellNav
     /// Which section the chips show: "all" or a section id.
     @State private var filter = "all"
     /// Comma-separated ids of the collapsed sections; remembered between launches.
@@ -92,7 +93,7 @@ struct LibraryView: View {
         let secs = sections
         let active = secs.contains { $0.id == filter } ? filter : "all"
         let shown = active == "all" ? secs : secs.filter { $0.id == active }
-        NavigationStack {
+        NavigationStack(path: shellNav.binding(for: .library)) {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     if secs.count > 1 { chips(secs, active: active) }
@@ -134,8 +135,7 @@ struct LibraryView: View {
                     await simkl.sync(force: true)
                 }
             }
-            .navigationDestination(for: MetaPreview.self) { DetailView(item: $0) }
-            .navigationDestination(for: CatalogRow.self) { CatalogGridView(row: $0) }
+            .shellDestinations()
             .navigationTitle("Library")
             .navigationSubtitle(subtitle)
             .navigationBarTitleDisplayMode(.large)

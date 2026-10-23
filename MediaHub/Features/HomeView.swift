@@ -269,6 +269,7 @@ struct HomeView: View {
     @Environment(ContentPrefs.self) private var contentPrefs
     @Environment(\.scenePhase) private var phase
     @Environment(\.wideLayout) private var wide
+    @Environment(ShellNav.self) private var shellNav
     @AppStorage("tmdb.key") private var tmdbKey = ""
     @AppStorage("mdblist.key") private var mdbKey = ""
     @AppStorage("mdblist.lists") private var mdbLists = ""
@@ -298,16 +299,17 @@ struct HomeView: View {
     private var selectedLists: Set<Int> { Set(mdbLists.split(separator: ",").compactMap { Int($0) }) }
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: shellNav.binding(for: .home)) {
             feed
-                .navigationDestination(for: MetaPreview.self) { DetailView(item: $0) }
-                .navigationDestination(for: ResumeTarget.self) { DetailView(item: $0.item, startSeason: $0.season, startEpisode: $0.episode) }
-                .navigationDestination(for: CatalogRow.self) { CatalogGridView(row: $0) }
+                .shellDestinations()
                 .task(id: addonTaskID) { await model.load(addons: store.enabledAddons, rules: contentPrefs.rules, pickers: store.pickerIDs, key: addonTaskID.joined(separator: "|")) }
                 .task(id: themesTaskID) { await model.loadThemes(rules: contentPrefs.rules, enrichWith: store.enrichmentAddon, key: themesTaskID) }
                 .task(id: listsTaskID) { await model.loadLists(selected: selectedLists, rules: contentPrefs.rules, key: listsTaskID) }
                 .task(id: suggestionsTaskID) { await model.loadSuggestions(last: history.lastWatched, rules: contentPrefs.rules, key: suggestionsTaskID) }
                 .task(id: history.finishedSeries) { await model.loadUpNext(history.finishedEntries, key: history.finishedSeries.sorted().joined(separator: ",")) }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("pear.refresh"))) { _ in
+            Task { await refresh() }
         }
     }
 
@@ -352,16 +354,26 @@ struct HomeView: View {
     /// Sidebar layout: the day's featured titles as a big poster panel on the left, the rows on the right. Drag the
     /// rows left to cover the poster and get the whole width for titles.
     private var wideFeed: some View {
-        CollapsingSplit(showsHero: !model.hero.isEmpty) {
+        // Keep the panel mounted while the hero is still loading, so the skeleton has somewhere to show.
+        CollapsingSplit(showsHero: !model.hero.isEmpty || !model.settled) {
             WideHeroPanel(items: model.hero, tint: $tint)
         } pane: { ctx in
+            // With no hero at all the feed starts beside the sidebar; while loading the skeleton supplies that space.
+            let extraInset: CGFloat = (model.hero.isEmpty && model.settled) ? ctx.leadingInset : 0
             PaneScroll(ctx: ctx, refresh: refresh) {
-                LazyVStack(alignment: .leading, spacing: 30) { feedRows }
-                    .padding(.leading, 14)
+                LazyVStack(alignment: .leading, spacing: 28) { feedRows }
+                    .padding(.leading, 14 + extraInset)
                     .animation(loadAnimation, value: heroDeps)
-                    .background(alignment: .top, content: { ambient })
             }
         }
+        .background(alignment: .topLeading) {
+            GeometryReader { geo in
+                ambientWash(height: min(geo.size.height, 1100))
+            }
+            .animation(.easeInOut(duration: 0.9), value: tintKey)
+            .allowsHitTesting(false)
+        }
+        .sidebarBleed()
         .ignoresSafeArea(.container, edges: [.top, .bottom])
         .navigationBarTitleDisplayMode(.inline)
         .profileToolbar(logo: true)
@@ -422,11 +434,32 @@ struct HomeView: View {
         }
     }
 
+    /// Phone hero wash. The wide layout draws `ambientWash` behind the whole split instead, so it does not scroll.
     @ViewBuilder private var ambient: some View {
         let t = tint ?? theme.accent
         LinearGradient(colors: [t.opacity(0.7), t.opacity(0.25), .clear], startPoint: .top, endPoint: .bottom)
             .frame(height: 1100)
             .allowsHitTesting(false)
+    }
+
+    /// Animates a wash colour change. `Color` is not a stable animation identity across resolutions, so use its text form.
+    private var tintKey: String { String(describing: tint ?? theme.accent) }
+
+    /// One static wash behind the poster panel and the feed: a full-width band plus a wide leading glow.
+    private func ambientWash(height: CGFloat) -> some View {
+        let color: Color = tint ?? theme.accent
+        let band = LinearGradient(stops: [.init(color: color.opacity(0.70), location: 0),
+                                          .init(color: color.opacity(0.25), location: 0.5),
+                                          .init(color: .clear, location: 1)],
+                                  startPoint: .top, endPoint: .bottom)
+        let glow = LinearGradient(colors: [color.opacity(0.35), .clear],
+                                  startPoint: .leading, endPoint: .trailing)
+        return ZStack(alignment: .topLeading) {
+            band.frame(maxWidth: .infinity).frame(height: height)
+            glow.frame(width: 900, height: height)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .allowsHitTesting(false)
     }
 
     private func refresh() async {
@@ -578,7 +611,7 @@ private struct HeroPage: View {
     }
 }
 
-private extension LinearGradient {
+extension LinearGradient {
     /// Top-to-bottom gradient that holds `from` opacity down to `start` (0...1 of the height), then eases to `to`
     /// at the bottom along a smoothstep curve. A plain two-stop ramp has a visible kink where it begins; the
     /// eased curve starts and ends with zero slope, which is what makes a fade read as seamless.
@@ -598,14 +631,18 @@ private extension LinearGradient {
 /// re-evaluated the view and re-rasterised the masked artwork on every tick, and stepped visibly). It stops under
 /// Reduce Motion and in Low Power Mode. When the page stops being active the zoom is left alone while the page is
 /// still sliding out, and only reset once it is off screen, so nothing snaps back mid-swipe.
-private struct KenBurns<Content: View>: View {
+struct KenBurns<Content: View>: View {
     let active: Bool
+    let targetScale: CGFloat
+    let duration: Double
     let content: Content
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var zoomed = false
 
-    init(active: Bool, @ViewBuilder content: () -> Content) {
+    init(active: Bool, targetScale: CGFloat = 1.08, duration: Double = 9, @ViewBuilder content: () -> Content) {
         self.active = active
+        self.targetScale = targetScale
+        self.duration = duration
         self.content = content()
     }
 
@@ -613,13 +650,13 @@ private struct KenBurns<Content: View>: View {
 
     var body: some View {
         content
-            .scaleEffect(zoomed ? 1.08 : 1)
+            .scaleEffect(zoomed ? targetScale : 1)
             .task(id: moving) {
                 if moving {
                     reset()
                     try? await Task.sleep(for: .milliseconds(40))
                     guard !Task.isCancelled else { return }
-                    withAnimation(.linear(duration: 9)) { zoomed = true }
+                    withAnimation(.linear(duration: duration)) { zoomed = true }
                 } else {
                     try? await Task.sleep(for: .seconds(1.2))
                     guard !Task.isCancelled else { return }
@@ -759,17 +796,35 @@ struct ContinueRow: View {
             .contentMargins(.horizontal, 16, for: .scrollContent)
             .scrollTargetBehavior(.viewAligned)
             .scrollIndicators(.hidden)
+            .reportsRowDrag(id: "continue")
         }
     }
 }
 
 /// 16:9 card: episode still (or movie backdrop), where you stopped, and how much is left.
-private struct ContinueCard: View {
+struct ContinueCard: View {
     let entry: WatchHistory.Entry
+    /// A fixed width for carousels; `fillsWidth` lets a grid column decide the width instead.
+    var width: CGFloat? = nil
+    var fillsWidth = false
     @State private var showParty = false
     @Environment(WatchHistory.self) private var history
     @Environment(ThemeStore.self) private var theme
-    private let width: CGFloat = 270
+    @Environment(\.wideLayout) private var wideLayout
+
+    private var cardWidth: CGFloat? {
+        if fillsWidth { return nil }
+        if let width { return width }
+        return wideLayout ? 270 * 1.33 : 270
+    }
+    private var imageSize: CGFloat { cardWidth ?? (wideLayout ? 270 * 1.33 : 270) }
+    private var fillWidth: CGFloat? { fillsWidth ? .infinity : nil }
+    private var nameFont: Font {
+        wideLayout ? .system(size: 15 * 1.2, weight: .semibold) : .subheadline.weight(.semibold)
+    }
+    private var subtitleFont: Font {
+        wideLayout ? .system(size: 12 * 1.2) : .caption
+    }
 
     private var thumb: URL? {
         entry.thumb.flatMap(URL.init(string:)) ?? entry.item.backdropURL ?? entry.item.posterURL
@@ -786,8 +841,8 @@ private struct ContinueCard: View {
             VStack(alignment: .leading, spacing: 8) {
                 Color.clear
                     .aspectRatio(16.0 / 9.0, contentMode: .fit)
-                    .frame(width: width)
-                    .overlay { StillImage(url: thumb, size: width) }
+                    .frame(width: cardWidth)
+                    .overlay { StillImage(url: thumb, size: imageSize) }
                     .overlay { LinearGradient(colors: [.clear, .black.opacity(0.5)], startPoint: .center, endPoint: .bottom) }
                     .overlay(alignment: .topTrailing) {
                         Text(Fmt.clock(entry.position)).font(.system(size: 11, weight: .bold)).monospacedDigit()
@@ -797,11 +852,14 @@ private struct ContinueCard: View {
                     .overlay(alignment: .bottom) { progressBar }
                     .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(entry.item.name).font(.subheadline.weight(.semibold)).lineLimit(1)
-                    Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    Text(entry.item.name).font(nameFont).lineLimit(1)
+                    Text(subtitle).font(subtitleFont).foregroundStyle(.secondary).lineLimit(1)
                 }
-                .frame(width: width, alignment: .leading)
+                .frame(width: cardWidth, alignment: .leading)
             }
+            .frame(maxWidth: fillWidth, alignment: .leading)
+            .contentShape(Rectangle())
+            .hoverEffect(.lift)
         }
         .buttonStyle(PressableStyle())
         .contextMenu {
@@ -827,20 +885,36 @@ private struct ContinueCard: View {
 
 // MARK: - Up Next
 
-private struct UpNextCard: View {
+struct UpNextCard: View {
     let entry: UpNextItem
+    var width: CGFloat? = nil
+    var fillsWidth = false
     @State private var showParty = false
     @Environment(WatchHistory.self) private var history
     @Environment(ThemeStore.self) private var theme
-    private let width: CGFloat = 270
+    @Environment(\.wideLayout) private var wideLayout
+
+    private var cardWidth: CGFloat? {
+        if fillsWidth { return nil }
+        if let width { return width }
+        return wideLayout ? 270 * 1.33 : 270
+    }
+    private var imageSize: CGFloat { cardWidth ?? (wideLayout ? 270 * 1.33 : 270) }
+    private var fillWidth: CGFloat? { fillsWidth ? .infinity : nil }
+    private var nameFont: Font {
+        wideLayout ? .system(size: 15 * 1.2, weight: .semibold) : .subheadline.weight(.semibold)
+    }
+    private var subtitleFont: Font {
+        wideLayout ? .system(size: 12 * 1.2) : .caption
+    }
 
     var body: some View {
         NavigationLink(value: ResumeTarget(item: entry.item, season: entry.season, episode: entry.episode)) {
             VStack(alignment: .leading, spacing: 8) {
                 Color.clear
                     .aspectRatio(16.0 / 9.0, contentMode: .fit)
-                    .frame(width: width)
-                    .overlay { StillImage(url: entry.thumb, size: width) }
+                    .frame(width: cardWidth)
+                    .overlay { StillImage(url: entry.thumb, size: imageSize) }
                     .overlay { LinearGradient(colors: [.clear, .black.opacity(0.5)], startPoint: .center, endPoint: .bottom) }
                     .overlay(alignment: .topLeading) {
                         Text("UP NEXT").font(.system(size: 10, weight: .heavy)).tracking(0.8).foregroundStyle(theme.onAccent)
@@ -849,11 +923,14 @@ private struct UpNextCard: View {
                     }
                     .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(entry.item.name).font(.subheadline.weight(.semibold)).lineLimit(1)
-                    Text("S\(entry.season) · E\(entry.episode) · \(entry.title)").font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    Text(entry.item.name).font(nameFont).lineLimit(1)
+                    Text("S\(entry.season) · E\(entry.episode) · \(entry.title)").font(subtitleFont).foregroundStyle(.secondary).lineLimit(1)
                 }
-                .frame(width: width, alignment: .leading)
+                .frame(width: cardWidth, alignment: .leading)
             }
+            .frame(maxWidth: fillWidth, alignment: .leading)
+            .contentShape(Rectangle())
+            .hoverEffect(.lift)
         }
         .buttonStyle(PressableStyle())
         .contextMenu {
@@ -873,8 +950,8 @@ struct CatalogRowView: View {
     let row: CatalogRow
     @Environment(ThemeStore.self) private var theme
     @Environment(\.wideLayout) private var wide
-    /// Bigger posters in the sidebar layout.
-    private var posterWidth: CGFloat { wide ? 140 : 102 }
+    /// Denser posters in the sidebar layout.
+    private var posterWidth: CGFloat { wide ? 110 : 102 }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -900,7 +977,10 @@ struct CatalogRowView: View {
                             Image(systemName: "arrow.right.circle").font(.title)
                             Text("See all").font(.footnote.weight(.semibold))
                         }
-                        .foregroundStyle(.secondary).frame(width: 78, height: posterWidth * 1.5)   // matches the poster height
+                        .foregroundStyle(.secondary)
+                        .frame(width: 78, height: posterWidth * 1.5)   // matches the poster height
+                        .contentShape(Rectangle())
+                        .hoverEffect(.highlight)
                     }
                     .buttonStyle(.plain)
                 }
@@ -909,6 +989,7 @@ struct CatalogRowView: View {
             .contentMargins(.horizontal, 16, for: .scrollContent)
             .scrollTargetBehavior(.viewAligned)
             .scrollIndicators(.hidden)
+            .reportsRowDrag(id: row.id)
         }
     }
 }
@@ -1014,6 +1095,8 @@ struct PosterCard: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
+            .contentShape(Rectangle())
+            .hoverEffect(.lift)
         }
         .buttonStyle(PressableStyle())
     }

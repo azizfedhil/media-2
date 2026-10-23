@@ -1,5 +1,6 @@
 import SwiftUI
 import Combine
+import MediaPlayer
 import AetherEngine
 
 struct PlayRequest: Identifiable {
@@ -576,6 +577,18 @@ struct PlayerScreen: View {
     /// Host: drives the room from this player. Guest: follows the room. At most one is set.
     @State private var hostAdapter: PartyHostAdapter?
     @State private var guestAdapter: PartyGuestAdapter?
+    /// Bumped when a panel closes so the hidden key controller takes first responder again.
+    @State private var focusTick = 0
+    /// Pointer is over one of the three control clusters (top buttons, transport, bottom bar).
+    @State private var topHovered = false
+    @State private var centerHovered = false
+    @State private var bottomHovered = false
+    /// Tokens returned by the media remote commands, removed when the player goes away.
+    @State private var remoteTokens: [Any] = []
+
+    /// Desktop mirrors overTop / overCenter / overBottom; here the three control clusters are hovered separately and
+    /// their flags are combined, so hovering the video itself still lets the controls hide.
+    private var controlsHovered: Bool { topHovered || centerHovered || bottomHovered }
 
     /// Liquid Glass over live video is re-sampled every frame, so Low Power Mode uses the flat look.
     /// A hot phone does not: the glass stays on regardless of thermal state.
@@ -589,15 +602,36 @@ struct PlayerScreen: View {
     }
 
     var body: some View {
-        ZStack {
+        let hideCursor: Bool = !showControls && InputState.shared.pointerActive && model.isPlaying
+        return ZStack {
             Color.black.ignoresSafeArea()
             if let engine = model.engine { AetherPlayerSurface(engine: engine).ignoresSafeArea() }
             if pip.isActive { pipPlaceholder }
             SubtitleOverlay(cues: pip.isActive ? [] : model.activeCues, lift: showControls ? 112 : 0, style: subStyle)
                 .animation(.easeInOut(duration: 0.2), value: showControls)
-            Color.clear.contentShape(Rectangle()).onTapGesture { tapBackground() }
-            // Only while the volume pill is open: gives us the system slider and lets the pill replace iOS's own volume HUD.
-            if showVolume { SystemVolumeHost(volume: volume).frame(width: 1, height: 1).opacity(0.011).allowsHitTesting(false) }
+            PlayerPointerSurface(
+                onTouchTap: { tapBackground() },
+                onClick: { pointerClick() },
+                onPointerMoved: { pointerMoved() },
+                onVolumeStep: { step in
+                    guard !launching, model.error == nil else { return }
+                    keyTouch()
+                    adjustVolume(by: Double(step) * 0.05)
+                },
+                onSeekStep: { step in
+                    guard !launching, model.error == nil else { return }
+                    keyTouch()
+                    model.skip(by: Double(step) * 5)
+                },
+                panelOpen: anyPanelOpen
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            PlayerKeyInput(actions: keyActions, focusTick: focusTick)
+                .frame(width: 0, height: 0)
+                .allowsHitTesting(false)
+            // Gives us the system slider (and lets the pill replace iOS's own volume HUD). On iPad it stays mounted
+            // for the player's whole life so the keyboard volume keys work even when the pill is closed.
+            if showVolume || WideLayout.isPad { SystemVolumeHost(volume: volume).frame(width: 1, height: 1).opacity(0.011).allowsHitTesting(false) }
             if pausedDim { pausedOverlay }
             if model.showSpinner && model.error == nil && !showControls && !showEpisodes && !launching {
                 ProgressView().controlSize(.large).tint(.white)
@@ -616,6 +650,7 @@ struct PlayerScreen: View {
             if let n = notice { toast(n) }
         }
         .preferredColorScheme(.dark)
+        .pointerVisibility(hideCursor ? .hidden : .visible)
         .statusBarHidden(!showControls)
         .persistentSystemOverlays(showControls ? .automatic : .hidden)
         .animation(.snappy(duration: 0.25), value: notice)
@@ -674,14 +709,24 @@ struct PlayerScreen: View {
         .onChange(of: model.error) { _, _ in updateIdleTimer() }
         .onChange(of: showControls, initial: true) { _, shown in
             model.controlsVisible = shown
-            if !shown { volumeTask?.cancel(); pillTask?.cancel(); showVolume = false; pillExpanded = false }
+            if !shown {
+                volumeTask?.cancel(); pillTask?.cancel(); showVolume = false; pillExpanded = false
+                topHovered = false; centerHovered = false; bottomHovered = false
+            }
         }
+        .onChange(of: controlsHovered) { _, hovered in
+            if !hovered { scheduleHide() }
+        }
+        .onChange(of: anyPanelOpen) { _, _ in focusTick += 1 }
         // Another panel takes over: the pill goes back to its icons.
         .onChange(of: showEpisodes || showSubtitles || showSources || showSpeed || showInfo || showParty) { _, open in
             if open { volumeTask?.cancel(); pillTask?.cancel(); showVolume = false; pillExpanded = false }
         }
         // Hardware buttons (or the mute tap) while the pill is open count as adjusting: the 3 s countdown restarts.
-        .onChange(of: volume.level) { _, _ in bumpVolume() }
+        .onChange(of: volume.level) { _, level in
+            bumpVolume()
+            flash(level < 0.001 ? "Muted" : "Volume \(Int((level * 100).rounded()))%")
+        }
         .onChange(of: subJSON, initial: true) { _, json in subStyle = SubtitleStyle.decode(json) }
         .onChange(of: model.didEnd) { _, ended in
             if ended, autoplayNext, nextEp != nil { playNext() }
@@ -691,9 +736,11 @@ struct PlayerScreen: View {
             volume.startObserving()
             OrientationLock.set(.landscape)          // landscape only, free to flip 180°
             pip.onFailure = { flash("Picture in Picture isn't available right now") }
+            installRemoteCommands()
         }
         .onDisappear {
             UIApplication.shared.isIdleTimerDisabled = false
+            removeRemoteCommands()
             volumeTask?.cancel()
             pillTask?.cancel()
             volume.stopObserving()
@@ -737,10 +784,13 @@ struct PlayerScreen: View {
                     if party.code != nil { circleButton("person.2.fill", size: 42, icon: 16) { openParty() } }
                     Spacer()
                 }
+                .onHover { topHovered = $0 }
                 Spacer()
                 transport
+                    .onHover { centerHovered = $0 }
                 Spacer()
                 bottomBar
+                    .onHover { bottomHovered = $0 }
             }
             .padding(.horizontal, 24).padding(.top, 4).padding(.bottom, 6)
         }
@@ -949,6 +999,8 @@ struct PlayerScreen: View {
                 .contentShape(Circle())
         }
         .buttonStyle(PressableStyle())
+        .hoverEffect(.highlight)
+        .pointerStyle(.link)
         .accessibilityLabel(open ? "Fewer controls" : "More controls")
     }
 
@@ -992,6 +1044,8 @@ struct PlayerScreen: View {
                 .contentShape(Circle())
         }
         .buttonStyle(PressableStyle())
+        .hoverEffect(.highlight)
+        .pointerStyle(.link)
     }
 
     private func togglePiP() {
@@ -1045,6 +1099,8 @@ struct PlayerScreen: View {
                 .contentShape(Circle())
         }
         .buttonStyle(PressableStyle())
+        .hoverEffect(.highlight)
+        .pointerStyle(.link)
     }
 
     private var audioMenu: some View {
@@ -1807,25 +1863,205 @@ struct PlayerScreen: View {
         return nil
     }
 
+    // MARK: Keyboard
+
+    private var anyPanelOpen: Bool {
+        showEpisodes || showSubtitles || showSources || showSpeed || showInfo || showParty || showVolume || pillExpanded
+    }
+
+    private var keyActions: PlayerKeyActions {
+        PlayerKeyActions(
+            togglePlay: { keyTogglePlay() },
+            seek: { delta in keySeek(delta) },
+            volume: { delta in keyVolume(delta) },
+            mute: { keyMute() },
+            subtitles: { keySubtitles() },
+            nextEpisode: {
+                guard nextEp != nil else { return }
+                keyTouch()
+                playNext()
+            },
+            escape: { keyEscape() },
+            enabled: { !launching && model.error == nil }
+        )
+    }
+
+    /// Any key press brings the controls back and restarts their auto-hide countdown.
+    private func keyTouch() {
+        showControls = true
+        scheduleHide()
+    }
+
+    private func keyTogglePlay() {
+        keyTouch()
+        togglePlayOrRestart()
+    }
+
+    /// Play / pause, restarting from the start when the previous playback reached the end.
+    private func togglePlayOrRestart() {
+        if model.didEnd {
+            Task { await model.seek(to: 0); model.togglePlay() }
+        } else {
+            model.togglePlay()
+        }
+    }
+
+    /// Pointer click on the video: close a panel if one is open, otherwise play / pause. Never toggles the controls.
+    private func pointerClick() {
+        guard !launching, model.error == nil else { return }
+        if !InputState.shared.pointerActive { InputState.shared.pointerActive = true }
+        if closeTopPanel() { return }
+        togglePlayOrRestart()
+    }
+
+    /// Pointer moved over the video: the controls come back and their hide timer restarts.
+    private func pointerMoved() {
+        guard !launching, model.error == nil else { return }
+        if !InputState.shared.pointerActive { InputState.shared.pointerActive = true }
+        showControls = true
+        scheduleHide()
+    }
+
+    // MARK: Media keys
+
+    private func installRemoteCommands() {
+        removeRemoteCommands()
+        let center = MPRemoteCommandCenter.shared()
+        center.skipForwardCommand.preferredIntervals = [NSNumber(value: 10)]
+        center.skipBackwardCommand.preferredIntervals = [NSNumber(value: 10)]
+        remoteTokens = [
+            center.playCommand.addTarget { _ in remote { if !model.isPlaying { togglePlayOrRestart() } } },
+            center.pauseCommand.addTarget { _ in remote { if model.isPlaying { model.togglePlay() } } },
+            center.togglePlayPauseCommand.addTarget { _ in remote { togglePlayOrRestart() } },
+            center.skipForwardCommand.addTarget { _ in remote { model.skip(by: 10) } },
+            center.skipBackwardCommand.addTarget { _ in remote { model.skip(by: -10) } },
+            center.changePlaybackPositionCommand.addTarget { event in
+                guard let e = event as? MPChangePlaybackPositionCommandEvent else { return .commandFailed }
+                let target: Double = e.positionTime
+                return remote { _ = Task { await model.seek(to: target) } }
+            }
+        ]
+    }
+
+    private func removeRemoteCommands() {
+        guard !remoteTokens.isEmpty else { return }
+        let center = MPRemoteCommandCenter.shared()
+        for token in remoteTokens {
+            center.playCommand.removeTarget(token)
+            center.pauseCommand.removeTarget(token)
+            center.togglePlayPauseCommand.removeTarget(token)
+            center.skipForwardCommand.removeTarget(token)
+            center.skipBackwardCommand.removeTarget(token)
+            center.changePlaybackPositionCommand.removeTarget(token)
+        }
+        remoteTokens.removeAll()
+    }
+
+    private func remote(_ action: @escaping @MainActor () -> Void) -> MPRemoteCommandHandlerStatus {
+        Task { @MainActor in
+            guard !launching, model.error == nil else { return }
+            action()
+        }
+        return .success
+    }
+
+    private func keySeek(_ delta: Double) {
+        keyTouch()
+        model.skip(by: delta)
+    }
+
+    private func keyVolume(_ delta: Double) {
+        keyTouch()
+        adjustVolume(by: delta)
+    }
+
+    private func keyMute() {
+        keyTouch()
+        volume.toggleMute()
+        let percent = Int((volume.level * 100).rounded())
+        flash(volume.level < 0.001 ? "Muted" : "Volume \(percent)%")
+    }
+
+    private func keySubtitles() {
+        keyTouch()
+        toggleSubtitles()
+    }
+
+    private func keyEscape() {
+        if closeTopPanel() { return }
+        close()
+    }
+
+    /// Keyboard volume. iOS hides its own HUD while `SystemVolumeHost` is mounted, so every step flashes the level
+    /// and, when the controls are up, opens the volume pill for a visible slider.
+    private func adjustVolume(by delta: Double) {
+        let next: Double = min(max(Double(volume.level) + delta, 0), 1)
+        if showControls && !showVolume { toggleVolume() }
+        volume.set(Float(next))
+        flash("Volume \(Int((next * 100).rounded()))%")
+    }
+
+    /// Closes the topmost open panel without touching the controls or their hide timer.
+    @discardableResult
+    private func closeTopPanel() -> Bool {
+        if showEpisodes {
+            withAnimation(.snappy(duration: 0.3)) { showEpisodes = false }
+            return true
+        }
+        if showParty {
+            withAnimation(.snappy(duration: 0.3)) { showParty = false }
+            return true
+        }
+        if showSubtitles {
+            withAnimation(.snappy(duration: 0.3)) { showSubtitles = false }
+            return true
+        }
+        if showSources {
+            withAnimation(.snappy(duration: 0.3)) { showSources = false }
+            return true
+        }
+        if showSpeed {
+            withAnimation(.snappy(duration: 0.3)) { showSpeed = false }
+            return true
+        }
+        if showInfo {
+            withAnimation(.snappy(duration: 0.3)) { showInfo = false }
+            return true
+        }
+        if showVolume {
+            volumeTask?.cancel()
+            volumeDragging = false
+            volume.isAdjusting = false
+            withAnimation(.snappy(duration: 0.3)) { showVolume = false }
+            return true
+        }
+        if pillExpanded {
+            pillTask?.cancel()
+            withAnimation(.snappy(duration: 0.3)) { pillExpanded = false }
+            return true
+        }
+        return false
+    }
+
     private func tapBackground() {
-        if showEpisodes { closeEpisodes(); return }
-        if showParty { closeParty(); return }
-        if showSubtitles { closeSubtitles(); return }
-        if showSources { closeSources(); return }
-        if showSpeed { closeSpeed(); return }
-        if showInfo { closeInfo(); return }
-        if showVolume { closeVolume(); return }
-        if pillExpanded { foldPill(); scheduleHide(); return }
+        let restoresControls = showEpisodes || showSubtitles || showSources || showInfo
+        if closeTopPanel() {
+            if restoresControls {
+                withAnimation(.snappy(duration: 0.3)) { showControls = true }
+            }
+            scheduleHide()
+            return
+        }
         withAnimation(.easeInOut(duration: 0.2)) { showControls.toggle() }
         if showControls { scheduleHide() }
     }
 
     private func scheduleHide() {
         hideTask?.cancel()
-        guard model.isPlaying, !pip.isActive else { return }
+        guard model.isPlaying, !pip.isActive, !controlsHovered else { return }
         hideTask = Task {
             try? await Task.sleep(for: .seconds(3.5))
-            guard !Task.isCancelled, !model.playhead.scrubbing, !showEpisodes, !showSubtitles, !showSources, !showSpeed, !showVolume, !pillExpanded, !showInfo, !showParty else { return }
+            guard !Task.isCancelled, !controlsHovered, !model.playhead.scrubbing, !showEpisodes, !showSubtitles, !showSources, !showSpeed, !showVolume, !pillExpanded, !showInfo, !showParty else { return }
             withAnimation(.easeInOut(duration: 0.25)) { showControls = false }
         }
     }
@@ -1903,6 +2139,7 @@ private struct SeekBar: View {
     var onScrubStart: () -> Void = {}
     let onCommit: (Double) -> Void
     @State private var dragValue: Double?
+    @State private var hoverX: CGFloat?
 
     private var shown: Double { dragValue ?? playhead.position }
 
@@ -1919,6 +2156,8 @@ private struct SeekBar: View {
                 let bufFrac = min(max(max(playhead.buffered, playhead.position) / dur, 0), 1)
                 let h: CGFloat = active ? 20 : 12
                 let knob: CGFloat = 30
+                let hoverFrac: CGFloat? = hoverX.map { min(max($0 / w, 0), 1) }
+                let bubbleX: CGFloat? = hoverFrac.map { min(max(w * $0, 28), max(w - 28, 28)) }
                 ZStack(alignment: .leading) {
                     Capsule().fill(Color.clear).frame(height: h)
                         .modifier(GlassCapsule(on: glass))
@@ -1942,6 +2181,17 @@ private struct SeekBar: View {
                         .scaleEffect(active ? 1 : 0.4)
                         .opacity(active ? 1 : 0)
                         .allowsHitTesting(false)
+                    if let f = hoverFrac, let bx = bubbleX {
+                        Text(Fmt.clock(Double(f) * dur))
+                            .font(.caption)
+                            .monospacedDigit()
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 8).padding(.vertical, 4)
+                            .background(Color.black.opacity(0.6), in: Capsule())
+                            .fixedSize()
+                            .position(x: bx, y: -18)
+                            .allowsHitTesting(false)
+                    }
                 }
                 .frame(maxHeight: .infinity)
                 .contentShape(Rectangle())
@@ -1958,6 +2208,13 @@ private struct SeekBar: View {
                             onCommit(v)
                         }
                 )
+                .onContinuousHover { phase in
+                    switch phase {
+                    case .active(let p): hoverX = p.x
+                    case .ended: hoverX = nil
+                    }
+                }
+                .pointerStyle(.link)
                 .animation(.snappy(duration: 0.18), value: active)
             }
             .frame(height: 40)
@@ -2085,6 +2342,8 @@ private struct EpisodePanel: View {
                         .padding(6).contentShape(Rectangle())
                 }
                 .buttonStyle(PressableStyle())
+                .hoverEffect(.highlight)
+                .pointerStyle(.link)
             }
             .padding(.horizontal, 24)
 

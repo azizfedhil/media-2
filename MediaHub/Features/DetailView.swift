@@ -1,5 +1,6 @@
 import SwiftUI
 import SafariServices
+import UIKit
 
 private struct SeasonChip: Identifiable {
     let id: Int          // season number
@@ -29,6 +30,10 @@ struct DetailView: View {
     @Environment(DownloadManager.self) private var downloads
     @Environment(ContentPrefs.self) private var contentPrefs
     @Environment(\.wideLayout) private var wide
+    @Environment(\.sidebarInset) private var sidebarInset
+    @Environment(\.dismiss) private var dismiss
+    @State private var detailFold = FeedCollapse()
+    @State private var tint: Color?
     @State private var imdbID: String?
     @State private var onWatchlist = false
     @State private var ratings: [MDBListClient.Rating] = []
@@ -58,6 +63,8 @@ struct DetailView: View {
     @State private var openTrailer: TMDBClient.Video?
 
     private var isSeries: Bool { item.type == "series" }
+
+    private var episodeCardScale: CGFloat { wide ? EpisodeCard<EmptyView>.wideScale : 1 }
 
     /// Height of the collapsing hero (artwork + title block), roughly 60% of a phone screen like the Apple TV app.
     private static let heroHeight: CGFloat = 500
@@ -108,6 +115,7 @@ struct DetailView: View {
         }
         .ignoresSafeArea(edges: .top)
         .toolbarTitleDisplayMode(.inline)
+        .backShortcuts()
         .sheet(isPresented: $showSources, onDismiss: { downloadTarget = nil; startPendingPlayback() }) { sourceSheet }
         // Presented from the page itself (not from inside the sources sheet): the sheet closes first,
         // then the player opens. This keeps dismissing the player reliable.
@@ -178,49 +186,128 @@ struct DetailView: View {
     /// Sidebar layout: poster, title, facts, buttons and synopsis big on the left; seasons, episodes, trailers,
     /// similar titles and the details list on the right. Drag the right side left to cover the poster.
     private var wideBody: some View {
-        CollapsingSplit {
-            widePoster
-        } pane: { ctx in
-            PaneScroll(ctx: ctx) {
-                VStack(alignment: .leading, spacing: 16) {
-                    if isSeries { seasonSection }
-                    if !trailers.isEmpty { trailersSection }
-                    if !similar.isEmpty {
-                        CatalogRowView(row: CatalogRow(id: "similar-\(item.id)", title: "More like this", items: similar))
-                            .padding(.top, 8)
+        GeometryReader { geo in
+            let topInset: CGFloat = geo.safeAreaInsets.top
+            CollapsingSplit(heroMaxWidth: 440, collapseDistance: 300) {
+                widePoster
+            } pane: { ctx in
+                PaneScroll(ctx: ctx) {
+                    VStack(alignment: .leading, spacing: 28) {
+                        if isSeries { seasonSection }
+                        if !trailers.isEmpty { trailersSection }
+                        if !similar.isEmpty {
+                            CatalogRowView(row: CatalogRow(id: "similar-\(item.id)", title: "More like this", items: similar))
+                        }
+                        detailsSection
                     }
-                    detailsSection
+                    .padding(.top, 6)
+                    .padding(.leading, 24)
+                    .padding(.trailing, 24)
+                    .padding(.bottom, 24)
                 }
-                .padding(.leading, 8)
             }
+            .environment(\.feedCollapse, detailFold)
+            .sidebarBleed()
+            .background(alignment: .topLeading) {
+                GeometryReader { washGeo in
+                    DetailWash(color: tint ?? theme.accent, height: min(washGeo.size.height, 1100))
+                }
+                .animation(.easeInOut(duration: 1.8), value: tintKey)
+                .allowsHitTesting(false)
+            }
+            .background {
+                InteractivePopEnabler()
+                    .frame(width: 0, height: 0)
+                    .allowsHitTesting(false)
+            }
+            .overlay(alignment: .topLeading) {
+                backButton
+                    .padding(.leading, 16 + sidebarInset)
+                    .padding(.top, topInset + 16)
+            }
+            .ignoresSafeArea(.container, edges: .bottom)
+            .navigationBarBackButtonHidden(true)
+            .toolbar(.hidden, for: .navigationBar)
+            .task(id: posterURL) { await updateTint() }
         }
-        .ignoresSafeArea(.container, edges: .bottom)
+    }
+
+    private var backButton: some View {
+        Button { dismiss() } label: {
+            Image(systemName: "chevron.left")
+                .font(.system(size: 16, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: 38, height: 38)
+                .pearGlass(in: .circle, interactive: true)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Back")
     }
 
     private var widePoster: some View {
         GeometryReader { geo in
-            let compact = geo.size.height < 560
+            let compact: Bool = geo.size.height < 560
+            let width: CGFloat = geo.size.width
+            let height: CGFloat = geo.size.height
             ZStack(alignment: .bottomLeading) {
-                RotatingArtwork(item: item, kind: .poster, size: 1000)
-                    .frame(width: geo.size.width, height: geo.size.height)
-                    .clipped()
-                LinearGradient(stops: [.init(color: .clear, location: 0.2),
-                                       .init(color: .black.opacity(0.6), location: 0.55),
-                                       .init(color: .black.opacity(0.92), location: 1)],
-                               startPoint: .top, endPoint: .bottom)
-                VStack(alignment: .leading, spacing: compact ? 9 : 14) {
+                ZStack(alignment: .bottom) {
+                    RotatingArtwork(item: item, kind: .poster, size: 1000)
+                        .frame(width: width, height: height)
+                        .clipped()
+                    posterScrim
+                }
+                .frame(width: width, height: height)
+                .clipped()
+                .mask { posterRightFade }
+                .mask { posterBottomFade }
+                VStack(alignment: .leading, spacing: 12) {
                     TitleArt(item: item, maxWidth: 300, maxHeight: compact ? 58 : 100, font: .largeTitle.bold())
                     if !metaLine.isEmpty || networkText != nil { metaRow }
                     if !allRatings.isEmpty { ratingsRow }
-                    header
+                    actionBar
+                    if !isSeries, let imdb = imdbID,
+                       let rec = downloads.record(imdb: imdb, season: nil, episode: nil) {
+                        downloadStatus(rec)
+                    }
+                    synopsis
                 }
                 .foregroundStyle(.white)
-                .scrollDisabled(true)       // the ratings strip must not swallow the drag that collapses the poster
-                .padding(.horizontal, 22)
-                .padding(.bottom, max(geo.safeAreaInsets.bottom, 0) + (compact ? 18 : 30))
+                .padding(.leading, 30 + sidebarInset)
+                .padding(.trailing, 60)
+                .padding(.bottom, 40)
             }
-            .frame(width: geo.size.width, height: geo.size.height)
+            .frame(width: width, height: height)
         }
+    }
+
+    private var posterRightFade: LinearGradient {
+        LinearGradient(stops: [.init(color: .black, location: 0),
+                               .init(color: .black, location: 0.5),
+                               .init(color: .clear, location: 1)],
+                       startPoint: .leading, endPoint: .trailing)
+    }
+
+    private var posterBottomFade: LinearGradient {
+        LinearGradient.easedFade(start: 0.42, from: 1, to: 0)
+    }
+
+    private var posterScrim: LinearGradient {
+        LinearGradient(stops: [.init(color: .clear, location: 0.5),
+                               .init(color: .black.opacity(0.7), location: 1)],
+                       startPoint: .top, endPoint: .bottom)
+    }
+
+    private var posterURL: URL? {
+        ArtworkRotation.shared.poster(for: item, longestEdgePixels: 1000).url
+    }
+
+    /// Animates the wash colour change. `Color` is not a stable animation identity across resolutions, so use its text form.
+    private var tintKey: String { String(describing: tint ?? theme.accent) }
+
+    @MainActor private func updateTint() async {
+        guard let url = posterURL,
+              let c = await ImagePipeline.shared.averageColor(for: url), !Task.isCancelled else { return }
+        tint = Color(uiColor: c)
     }
 
     // MARK: Header
@@ -428,6 +515,8 @@ struct DetailView: View {
                                 .foregroundStyle(c.id == season ? theme.onAccent : Color.primary)
                                 .glassEffect(c.id == season ? .regular.tint(theme.accent).interactive() : .regular.interactive(),
                                              in: .capsule)
+                                .contentShape(Capsule())
+                                .hoverEffect(.highlight)
                         }
                         .buttonStyle(.plain)
                         // Long tap: mark the whole season as watched (or unmark it).
@@ -509,7 +598,8 @@ struct DetailView: View {
                 ScrollView(.horizontal) {
                     LazyHStack(spacing: 12) {
                         if loadingEpisodes && episodes.isEmpty {
-                            ProgressView().frame(width: EpisodeCard<EmptyView>.width, height: EpisodeCard<EmptyView>.height)
+                            ProgressView().frame(width: EpisodeCard<EmptyView>.baseWidth * episodeCardScale,
+                                                 height: EpisodeCard<EmptyView>.baseHeight * episodeCardScale)
                         }
                         ForEach(episodes) { episodeCard($0).id($0.id) }
                     }
@@ -909,4 +999,46 @@ struct DetailView: View {
         }
         .presentationDetents([.medium, .large])
     }
+}
+
+private struct DetailWash: View {
+    let color: Color
+    let height: CGFloat
+
+    var body: some View {
+        let band: LinearGradient = LinearGradient(stops: [.init(color: color.opacity(0.70), location: 0),
+                                                          .init(color: color.opacity(0.25), location: 0.5),
+                                                          .init(color: .clear, location: 1)],
+                                                  startPoint: .top, endPoint: .bottom)
+        let glow: LinearGradient = LinearGradient(colors: [color.opacity(0.35), .clear],
+                                                  startPoint: .leading, endPoint: .trailing)
+        return ZStack(alignment: .topLeading) {
+            band.frame(maxWidth: .infinity).frame(height: height)
+            glow.frame(width: 900, height: height)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .allowsHitTesting(false)
+    }
+}
+
+private struct InteractivePopEnabler: UIViewControllerRepresentable {
+    final class Controller: UIViewController {
+        override func didMove(toParent parent: UIViewController?) {
+            super.didMove(toParent: parent)
+            enablePop()
+        }
+
+        override func viewDidAppear(_ animated: Bool) {
+            super.viewDidAppear(animated)
+            enablePop()
+        }
+
+        private func enablePop() {
+            navigationController?.interactivePopGestureRecognizer?.isEnabled = true
+            navigationController?.interactivePopGestureRecognizer?.delegate = nil
+        }
+    }
+
+    func makeUIViewController(context: Context) -> Controller { Controller() }
+    func updateUIViewController(_ uiViewController: Controller, context: Context) {}
 }

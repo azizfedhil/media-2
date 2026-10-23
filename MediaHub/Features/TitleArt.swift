@@ -7,6 +7,7 @@ struct TitleArt: View {
     var maxWidth: CGFloat = 260
     var maxHeight: CGFloat = 90
     var font: Font = .largeTitle.bold()
+    var tracking: CGFloat = 0
     var alignment: Alignment = .leading
     @State private var image: UIImage?
     /// Title the shown logo belongs to, so a new logo for the same title replaces it without a flash of plain text.
@@ -21,7 +22,7 @@ struct TitleArt: View {
                     .accessibilityLabel(item.name)
                     .transition(.opacity)
             } else {
-                Text(item.name).font(font)
+                Text(item.name).font(font).tracking(tracking)
                     .multilineTextAlignment(alignment == .center ? .center : .leading)
                     .lineLimit(2).minimumScaleFactor(0.7)
                     .shadow(color: .black.opacity(0.5), radius: 10, y: 2)

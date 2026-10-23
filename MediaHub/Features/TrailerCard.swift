@@ -45,6 +45,7 @@ struct TrailerCard: View {
         .overlay { RoundedRectangle(cornerRadius: radius, style: .continuous).strokeBorder(.white.opacity(0.1), lineWidth: 1) }
         .overlay { Button(action: onTap) { Color.clear.contentShape(Rectangle()) }.buttonStyle(PressableStyle()) }
         .contentShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+        .hoverEffect(.lift)
         .animation(.easeOut(duration: 0.3), value: tint == nil)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(video.type): \(video.name)")

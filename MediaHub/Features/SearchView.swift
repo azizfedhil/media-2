@@ -1,4 +1,5 @@
 import SwiftUI
+import Foundation
 
 @MainActor @Observable
 final class SearchModel {
@@ -64,9 +65,12 @@ final class SearchModel {
 struct SearchView: View {
     @Environment(AddonStore.self) private var store
     @Environment(ContentPrefs.self) private var contentPrefs
+    @Environment(ShellNav.self) private var shellNav
     @State private var query = ""
     @State private var scope: Scope = .all
     @State private var model = SearchModel()
+    @State private var commands = AppCommands.shared
+    @FocusState private var searchFocused: Bool
     private let columns = [GridItem(.adaptive(minimum: 104, maximum: 160), spacing: 12, alignment: .top)]
 
     enum Scope: String, CaseIterable, Identifiable {
@@ -78,7 +82,7 @@ struct SearchView: View {
     private var showShows: Bool { scope != .movies && !model.shows.isEmpty }
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: shellNav.binding(for: .search)) {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 26) {
                     if showMovies { section("Movies", symbol: "film", items: model.movies) }
@@ -99,19 +103,27 @@ struct SearchView: View {
             }
             .navigationTitle("Search")
             .profileToolbar()
-            .navigationDestination(for: MetaPreview.self) { DetailView(item: $0) }
-            .navigationDestination(for: CatalogRow.self) { CatalogGridView(row: $0) }
+            .shellDestinations()
         }
         .searchable(text: $query, prompt: "Movies and shows")
         .searchScopes($scope) {
             ForEach(Scope.allCases) { Text($0.rawValue).tag($0) }
         }
+        .searchFocused($searchFocused)
+        .onChange(of: commands.searchFocusTick) { _, _ in focusSearch() }
+        .onAppear { if commands.pendingSearchFocus { focusSearch() } }
         .task(id: query + "|" + (contentPrefs.rules.filterSearch ? contentPrefs.rules.categoryKey : "")) {
             // Debounce: only the last keystroke in a 350 ms window hits the network.
             try? await Task.sleep(for: .milliseconds(350))
             guard !Task.isCancelled else { return }
             await model.run(query, addons: store.enabledAddons, rules: contentPrefs.rules)
         }
+    }
+
+    /// ⌘F arrives before the field exists when the Search tab was not mounted; one run-loop hop lets it appear.
+    private func focusSearch() {
+        commands.pendingSearchFocus = false
+        DispatchQueue.main.async { searchFocused = true }
     }
 
     private func section(_ title: String, symbol: String, items: [MetaPreview]) -> some View {

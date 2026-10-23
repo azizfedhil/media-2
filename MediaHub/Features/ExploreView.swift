@@ -116,6 +116,7 @@ struct ExploreView: View {
     @Environment(ThemeStore.self) private var theme
     @Environment(ContentPrefs.self) private var contentPrefs
     @Environment(AddonStore.self) private var store
+    @Environment(ShellNav.self) private var shellNav
     @State private var model = ExploreModel()
     @AppStorage("tmdb.key") private var tmdbKey = ""
     private let columns = [GridItem(.adaptive(minimum: 104, maximum: 160), spacing: 12, alignment: .top)]
@@ -125,7 +126,7 @@ struct ExploreView: View {
     }()
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: shellNav.binding(for: .explore)) {
             Group {
                 if tmdbKey.isEmpty && !TMDBClient.hasProxy {
                     ContentUnavailableView("Explore needs TMDB", systemImage: "safari",
@@ -134,8 +135,7 @@ struct ExploreView: View {
             }
             .navigationTitle("Explore")
             .profileToolbar()
-            .navigationDestination(for: MetaPreview.self) { DetailView(item: $0) }
-            .navigationDestination(for: CatalogRow.self) { CatalogGridView(row: $0) }
+            .shellDestinations()
         }
         .task(id: themesTaskID) {
             guard !tmdbKey.isEmpty || TMDBClient.hasProxy else { return }

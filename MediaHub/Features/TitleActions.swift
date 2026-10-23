@@ -50,8 +50,12 @@ struct PosterContextMenu: View {
     var artwork = true
     /// Opens Watch Party for this title. The sheet is presented by the card (see `PosterPartyModifier`).
     var onParty: () -> Void = {}
+    /// Opens the detail page without pushing onto a NavigationStack.
+    var onDetails: (() -> Void)? = nil
     @Environment(WatchHistory.self) private var history
     @Environment(LocalLibrary.self) private var library
+    @Environment(SidebarPins.self) private var sidebarPins
+    @Environment(\.wideLayout) private var wideLayout
 
     private var isWatched: Bool { history.entry(for: item.id)?.isTitleWatched ?? false }
     private var inList: Bool { library.entry(for: item.id) != nil }
@@ -71,6 +75,15 @@ struct PosterContextMenu: View {
             Label(inList ? "Remove from Library" : "Add to Library",
                   systemImage: inList ? "bookmark.slash" : "bookmark")
         }
+        if wideLayout {
+            let pinned = sidebarPins.isPinned(item.id)
+            Button {
+                sidebarPins.toggle(item)
+            } label: {
+                Label(pinned ? "Unpin from Sidebar" : "Pin to Sidebar",
+                      systemImage: pinned ? "pin.slash" : "pin")
+            }
+        }
         if artwork {
             let kept = ArtworkRotation.shared.isPinned(item.id)
             Button {
@@ -79,8 +92,14 @@ struct PosterContextMenu: View {
                 Label(kept ? "Resume Poster Rotation" : "Keep Current Poster", systemImage: kept ? "pin.slash" : "pin")
             }
         }
-        NavigationLink(value: item) {
-            Label("Details", systemImage: "info.circle")
+        if let onDetails {
+            Button(action: onDetails) {
+                Label("Details", systemImage: "info.circle")
+            }
+        } else {
+            NavigationLink(value: item) {
+                Label("Details", systemImage: "info.circle")
+            }
         }
         Button(action: onParty) {
             Label("Watch Party", systemImage: "person.2")

@@ -2,6 +2,8 @@ import SwiftUI
 
 /// What the app is, and the third-party components and services it relies on, with their licences.
 struct AboutView: View {
+    @AppStorage(WideLayout.simulateKey) private var ipadMode = false
+
     static var versionString: String {
         let v = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.1.0"
         return "v\(v)"
@@ -56,6 +58,14 @@ struct AboutView: View {
                           note: "Pear. is not affiliated with or endorsed by Simkl.")
             } header: { Text("Services") } footer: {
                 Text("Service names and logos belong to their owners. These services are not open source: they're accessed through their public APIs, under their own terms.")
+            }
+
+            Section {
+                Toggle("iPad mode", isOn: $ipadMode)
+            } header: {
+                Text("Developer")
+            } footer: {
+                Text("Renders the app in a virtual iPad-sized window, scaled to fit this iPhone. For layout testing only.")
             }
         }
         .navigationTitle("About")

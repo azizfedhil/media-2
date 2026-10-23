@@ -268,6 +268,7 @@ struct ThemeCarousel: View {
             .contentMargins(.horizontal, 16, for: .scrollContent)
             .scrollTargetBehavior(.viewAligned)
             .scrollIndicators(.hidden)
+            .reportsRowDrag(id: row.id)
         }
     }
 }
@@ -292,7 +293,7 @@ private struct ThemeCard: View {
         NavigationLink(value: item) {
             Color.clear
                 .aspectRatio(4.0 / 5.0, contentMode: .fit)
-                .containerRelativeFrame(.horizontal) { w, _ in wide ? 270 : min(w - 56, 440) }
+                .containerRelativeFrame(.horizontal) { w, _ in wide ? 240 * 1.33 : min(w - 56, 440) }
                 .overlay { RotatingArtwork(item: item, kind: .hero(wide: false), size: 440) }
                 .overlay {
                     LinearGradient(stops: [.init(color: .clear, location: 0.4), .init(color: .black.opacity(0.85), location: 1)],
@@ -301,6 +302,8 @@ private struct ThemeCard: View {
                 .overlay(alignment: .bottomLeading) { info }
                 .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
                 .overlay { RoundedRectangle(cornerRadius: 28, style: .continuous).strokeBorder(.white.opacity(0.15), lineWidth: 1) }
+                .contentShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+                .hoverEffect(.lift)
         }
         .buttonStyle(PressableStyle())
         .posterContextMenu(item)

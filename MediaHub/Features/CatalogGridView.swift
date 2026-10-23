@@ -120,6 +120,7 @@ struct CatalogGridView: View {
             }
         }
         .animation(.smooth(duration: 0.35), value: order)
+        .backShortcuts()
     }
 
     private func header(_ sec: YearSection) -> some View {

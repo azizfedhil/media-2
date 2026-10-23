@@ -12,11 +12,14 @@ struct SettingsView: View {
     @Environment(ContentPrefs.self) private var contentPrefs
     @Environment(WatchLog.self) private var watchLog
     @Environment(PinnedSources.self) private var pins
+    @Environment(SidebarPins.self) private var sidebarPins
+    @Environment(ShellNav.self) private var shellNav
     @AppStorage("tmdb.key") private var tmdbKey = ""
     @AppStorage("tvdb.key") private var tvdbKey = ""
     @AppStorage("mdblist.key") private var mdbKey = ""
     @AppStorage("ui.networkBadges") private var networkBadges = true
     @AppStorage("ui.titleLogos") private var titleLogos = true
+    @AppStorage("ui.sidebarStyle") private var sidebarStyle = "liquid"
     @AppStorage(WideLayout.phoneKey) private var landscapeLayout = false
     @AppStorage("player.glass") private var glass = true
     @AppStorage("player.autoplayNext") private var autoplayNext = true
@@ -49,7 +52,7 @@ struct SettingsView: View {
     }
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: shellNav.binding(for: .settings)) {
             Form {
                 Section {
                     NavigationLink { PairSettingsView() } label: {
@@ -155,6 +158,16 @@ struct SettingsView: View {
                     .padding(.vertical, 4)
                     Toggle("Network icons on posters", isOn: $networkBadges)
                     Toggle("Logos instead of title text", isOn: $titleLogos)
+                    if WideLayout.isPad || landscapeLayout {
+                        Picker("Sidebar style", selection: Binding(
+                            get: { SidebarStyle(rawValue: sidebarStyle) ?? .liquid },
+                            set: { sidebarStyle = $0.rawValue })) {
+                            ForEach(SidebarStyle.allCases) { style in
+                                Text(style.title).tag(style)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                    }
                     // iPad always uses the sidebar layout; on iPhone it is opt-in.
                     if !WideLayout.isPad {
                         Toggle("Landscape layout", isOn: $landscapeLayout)
@@ -162,7 +175,12 @@ struct SettingsView: View {
                             .onChange(of: landscapeLayout) { _, _ in OrientationLock.set(OrientationLock.appMask) }
                     }
                 } header: { Text("Appearance") } footer: {
-                    Text("Network icons make one small request per visible poster. Logos come from TMDB, TheTVDB and Metahub and are cached after the first lookup.\(WideLayout.isPad ? "" : " Landscape layout turns the app sideways into the iPad-style sidebar layout when you rotate your iPhone. Off keeps the app portrait-only.")")
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Network icons make one small request per visible poster. Logos come from TMDB, TheTVDB and Metahub and are cached after the first lookup.\(WideLayout.isPad ? "" : " Landscape layout turns the app sideways into the iPad-style sidebar layout when you rotate your iPhone. Off keeps the app portrait-only.")")
+                        if WideLayout.isPad || landscapeLayout {
+                            Text("Liquid floats over the page as glass. Frosted is a full-height blurred panel. Flat is a solid panel.")
+                        }
+                    }
                 }
 
                 Section {
@@ -244,6 +262,7 @@ struct SettingsView: View {
                     Text("What Pear. is, and the open-source components and services it uses.")
                 }
             }
+            .shellDestinations()
             .navigationTitle("Settings")
             .profileToolbar()
             .scrollDismissesKeyboard(.interactively)
@@ -315,7 +334,7 @@ struct SettingsView: View {
     private func applyBackup(_ data: Data) {
         do {
             let n = try SettingsBackup.restore(data)
-            theme.reload(); profiles.reload(); history.reload(); library.reload(); watchLog.reload(); pins.reload(); libraryPrefs.reload()
+            theme.reload(); profiles.reload(); history.reload(); library.reload(); watchLog.reload(); pins.reload(); sidebarPins.reload(); libraryPrefs.reload()
             contentPrefs.reload()
             Task { await store.reloadFromDefaults() }
             backupNote = "Imported \(n) settings."
