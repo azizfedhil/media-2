@@ -46,6 +46,7 @@ struct PlayerInfoCard: View {
     /// Below this width the still moves above the text; beside it, the text column would be too narrow to read.
     private static let stackBelow: CGFloat = 520
     @State private var stacked = false
+    @State private var synopsisHeight: CGFloat = 0
 
     private var runtimeText: String? {
         guard let m = info.runtime, m > 0 else { return nil }
@@ -181,11 +182,13 @@ struct PlayerInfoCard: View {
                 .font(.caption2.weight(.bold)).tracking(0.9).foregroundStyle(.white.opacity(0.5))
             if let o = info.overview, !o.isEmpty {
                 // Plain text when it fits; scrolls when a long synopsis would push the card off a landscape phone.
-                ViewThatFits(in: .vertical) {
+                ScrollView {
                     text(o)
-                    ScrollView { text(o) }.scrollIndicators(.automatic)
+                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { synopsisHeight = $0 }
                 }
-                .frame(maxHeight: 124)
+                .scrollIndicators(.automatic)
+                .scrollBounceBehavior(.basedOnSize)
+                .frame(height: synopsisHeight > 0 ? min(synopsisHeight, 124) : nil, alignment: .top)
             } else if info.isLoading {
                 skeleton
             } else {

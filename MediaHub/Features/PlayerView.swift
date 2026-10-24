@@ -725,9 +725,8 @@ struct PlayerScreen: View {
             if open { volumeTask?.cancel(); pillTask?.cancel(); showVolume = false; pillExpanded = false }
         }
         // Hardware buttons (or the mute tap) while the pill is open count as adjusting: the 3 s countdown restarts.
-        .onChange(of: volume.level) { _, level in
+        .onChange(of: volume.level) { _, _ in
             bumpVolume()
-            flash(level < 0.001 ? "Muted" : "Volume \(Int((level * 100).rounded()))%")
         }
         .onChange(of: subJSON, initial: true) { _, json in subStyle = SubtitleStyle.decode(json) }
         .onChange(of: model.didEnd) { _, ended in
@@ -1986,8 +1985,6 @@ struct PlayerScreen: View {
     private func keyMute() {
         keyTouch()
         volume.toggleMute()
-        let percent = Int((volume.level * 100).rounded())
-        flash(volume.level < 0.001 ? "Muted" : "Volume \(percent)%")
     }
 
     private func keySubtitles() {
@@ -2006,7 +2003,6 @@ struct PlayerScreen: View {
         let next: Double = min(max(Double(volume.level) + delta, 0), 1)
         if showControls && !showVolume { toggleVolume() }
         volume.set(Float(next))
-        flash("Volume \(Int((next * 100).rounded()))%")
     }
 
     /// Closes the topmost open panel without touching the controls or their hide timer.
