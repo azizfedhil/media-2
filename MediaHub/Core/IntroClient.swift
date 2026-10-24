@@ -18,7 +18,7 @@ struct SkipSegment: Equatable, Sendable, Identifiable {
 }
 
 /// Intro / recap / credits / preview timestamps from TheIntroDB (community-verified, free, no API key for reads).
-/// GET https://api.theintrodb.org/v3/media?tmdb_id=…&season=…&episode=…  →  { intro:[{start_ms,end_ms}], recap:[…], credits:[…], preview:[…] }
+/// GET https://api.theintrodb.org/v4/media?tmdb_id=…&season=…&episode=…  →  { intro:[{start_ms,end_ms}], recap:[…], credits:[…], preview:[…] }
 /// `null` start = beginning of the media, `null` end = end of the media.
 actor IntroClient {
     static let shared = IntroClient()
@@ -66,7 +66,7 @@ actor IntroClient {
     private func fetch(_ q: [URLQueryItem]) async -> Fetch {
         for attempt in 0..<2 {
             if attempt > 0 { try? await Task.sleep(for: .seconds(2)) }
-            var c = URLComponents(string: "https://api.theintrodb.org/v3/media")!
+            var c = URLComponents(string: "https://api.theintrodb.org/v4/media")!
             c.queryItems = q
             var r = URLRequest(url: c.url!)
             r.timeoutInterval = 10
