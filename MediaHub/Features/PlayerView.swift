@@ -644,7 +644,7 @@ struct PlayerScreen: View {
             if showSubtitles { subtitlePanel.transition(.move(edge: .trailing).combined(with: .opacity)) }
             if showSources { sourcesPanel.transition(.move(edge: .trailing).combined(with: .opacity)) }
             if showSpeed { speedLayer.transition(.move(edge: .bottom).combined(with: .opacity)) }
-            if showInfo, let info { infoPanel(info).transition(.move(edge: .bottom).combined(with: .opacity)) }
+            if showInfo, let info { infoPanel(info).transition(.scale(scale: 0.94).combined(with: .opacity)) }
             if showParty, party.code != nil { partyPanel.transition(.move(edge: .trailing).combined(with: .opacity)) }
             if let e = model.error { errorCard(e) }
             if let n = notice { toast(n) }
@@ -1317,15 +1317,17 @@ struct PlayerScreen: View {
     /// Bottom card over the video (which keeps playing): thumbnail, title, date, runtime, ratings and synopsis of
     /// the episode being watched, or of the movie.
     private func infoPanel(_ info: PlayerInfo) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
+        VStack(alignment: .center, spacing: 0) {
             Spacer(minLength: 0)
             PlayerInfoCard(info: info, logo: pausedLogo, onClose: { closeInfo() })
                 .foregroundStyle(.white)
                 .padding(20)
                 .frame(maxWidth: 720)
                 .modifier(GlassCard(on: glass))
-                .padding(.horizontal, 20).padding(.bottom, 10)
+                .padding(.horizontal, 20).padding(.vertical, 10)
+            Spacer(minLength: 0)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private func openInfo() {
