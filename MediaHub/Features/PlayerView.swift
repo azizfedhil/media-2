@@ -647,9 +647,12 @@ struct PlayerScreen: View {
         return ZStack {
             Color.black.ignoresSafeArea()
             if let engine = model.engine {
+                // The surface must span the full screen (safe areas included) BEFORE scaling/clipping, otherwise it is
+                // laid out in the safe-area rect and the picture sits at the top with a permanent bar underneath.
                 AetherPlayerSurface(engine: engine)
-                    .ignoresSafeArea()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .scaleEffect(videoFit.scale)
+                    .ignoresSafeArea(.all, edges: .all)
                     .clipped()
                     .task(id: ObjectIdentifier(engine)) { engine.videoGravity = videoFit.gravity }
                     .onChange(of: videoFit) { _, fit in engine.videoGravity = fit.gravity }
