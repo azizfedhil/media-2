@@ -264,6 +264,7 @@ struct ThemeCarousel: View {
                     ForEach(row.items) { ThemeCard(entry: $0) }
                 }
                 .scrollTargetLayout()
+                .pointerDragScroll()
             }
             .contentMargins(.horizontal, 16, for: .scrollContent)
             .scrollTargetBehavior(.viewAligned)

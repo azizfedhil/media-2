@@ -116,6 +116,7 @@ struct LibraryView: View {
                 .animation(.snappy(duration: 0.3), value: active)
             }
             .scrollIndicators(.hidden)
+            .collapsesSidebarOnScroll()
             .overlay {
                 if secs.isEmpty {
                     if prefs.usesSimkl(simkl) {
@@ -160,8 +161,10 @@ struct LibraryView: View {
                 }
             }
             .padding(.horizontal, 16).padding(.vertical, 4)
+            .pointerDragScroll()
         }
         .scrollIndicators(.hidden)
+        .reportsRowDrag(id: "library-chips")
         .sensoryFeedback(.selection, trigger: active)
     }
 

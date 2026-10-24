@@ -41,6 +41,7 @@ struct ContinueWatchingPage: View {
                     }
                     .padding(24)
                 }
+                .collapsesSidebarOnScroll()
             }
         }
         .navigationTitle("Continue Watching")

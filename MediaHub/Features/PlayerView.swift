@@ -1,5 +1,6 @@
 import SwiftUI
 import Combine
+import AVFoundation
 import MediaPlayer
 import AetherEngine
 
@@ -121,6 +122,7 @@ final class PlayerModel {
         let startAt = exact ? (resume ?? 0) : ((resume ?? 0) > 30 ? (resume ?? 0) : 0)
         if wasDropped, keptDuration > 0 { playhead.duration = keptDuration }
         if startAt > 0 { playhead.position = startAt; holdPosition = startAt }      // seek bar holds the resume point while loading
+        updateNowPlaying()
         do {
             // An open PiP window survives a next-episode load only if the engine is not stopped in between: it hands the item over in place.
             if replacing, !engine.pictureInPictureActive { engine.stop() }
@@ -191,12 +193,14 @@ final class PlayerModel {
             case .error: holdPosition = nil; P2PManager.shared.playbackChanged(false); isPlaying = false; isPaused = false; setBuffering(false); error = "Playback failed (\(String(describing: s)))."
             default: break
             }
+            updateNowPlaying()
         }.store(in: &bag)
         engine.$duration.receive(on: DispatchQueue.main).sink { [weak self] d in
             guard let self else { return }
             // engine.stop() publishes 0: not a real duration while we are dropped or reloading.
             if (p2pDropped || holdPosition != nil) && Double(d) <= 0 { return }
             playhead.duration = Double(d)
+            updateNowPlaying()
         }.store(in: &bag)
         // P2P torn down while we weren't looking: stop the engine cleanly and wait on the play button (or a seek) to reopen.
         NotificationCenter.default.publisher(for: P2PManager.didStop)
@@ -213,6 +217,7 @@ final class PlayerModel {
                 seekTask?.cancel(); pendingTarget = nil; seekInFlight = false
                 engine.stop()
                 isPlaying = false; isPaused = true; setBuffering(false)
+                updateNowPlaying()
             }.store(in: &bag)
         // The seek bar only needs the clock to the second: 2 Hz while the controls are up, 1 Hz while they are hidden
         // (the skip-intro button is the only reader then). Fewer publishes means fewer redraws and CPU wake-ups.
@@ -419,6 +424,7 @@ final class PlayerModel {
         rateStale = false
         // `setRate` takes the engine's own float type; the generic helper keeps this compiling for Float or Double.
         Self.apply(engine.setRate, rate)
+        updateNowPlaying()
     }
 
     private static func apply<T: BinaryFloatingPoint>(_ f: (T) -> Void, _ v: Double) { f(T(v)) }
@@ -432,6 +438,7 @@ final class PlayerModel {
         seekTask?.cancel()
         pendingTarget = clamp(t)
         playhead.position = pendingTarget ?? t
+        updateNowPlaying()
         seekInFlight = true
         await commitSeek()
     }
@@ -441,6 +448,7 @@ final class PlayerModel {
         let target = clamp((pendingTarget ?? playhead.position) + delta)
         pendingTarget = target
         playhead.position = target
+        updateNowPlaying()
         seekInFlight = true
         seekTask?.cancel()
         seekTask = Task { [weak self] in
@@ -457,6 +465,37 @@ final class PlayerModel {
         if p2pDropped { seekInFlight = false; resumeAfterDrop(at: t); return }
         await engine?.seek(to: t)
         if pendingTarget == nil { seekInFlight = false }
+    }
+
+    // MARK: Now Playing
+
+    /// Publishes what is on screen to the lock screen, Control Center and the media keys. It runs on state, seek, rate
+    /// and episode changes only: the system extrapolates elapsed time from the rate it was given, so nothing per frame.
+    func updateNowPlaying() {
+        guard !isShutDown, let r = lastRequest else { return }
+        var info: [String: Any] = [
+            MPNowPlayingInfoPropertyMediaType: NSNumber(value: MPNowPlayingInfoMediaType.video.rawValue),
+            MPNowPlayingInfoPropertyElapsedPlaybackTime: playhead.position,
+            MPNowPlayingInfoPropertyPlaybackRate: isPlaying ? rate : 0,
+            MPNowPlayingInfoPropertyDefaultPlaybackRate: 1.0
+        ]
+        if let season = r.season, let episode = r.episode {
+            info[MPMediaItemPropertyTitle] = r.episodeTitle ?? "S\(season) · E\(episode)"
+            info[MPMediaItemPropertyAlbumTitle] = r.item.name
+        } else {
+            info[MPMediaItemPropertyTitle] = r.item.name
+        }
+        if playhead.duration > 0 { info[MPMediaItemPropertyPlaybackDuration] = playhead.duration }
+        let center = MPNowPlayingInfoCenter.default()
+        center.nowPlayingInfo = info
+        center.playbackState = isPlaying ? .playing : (didEnd ? .stopped : .paused)
+    }
+
+    /// The player is leaving the screen: give the lock screen and media keys back to whatever comes next.
+    func clearNowPlaying() {
+        let center = MPNowPlayingInfoCenter.default()
+        center.nowPlayingInfo = nil
+        center.playbackState = .stopped
     }
 
     func shutdown() {
@@ -746,11 +785,13 @@ struct PlayerScreen: View {
             volume.startObserving()
             OrientationLock.set(.landscape)          // landscape only, free to flip 180°
             pip.onFailure = { flash("Picture in Picture isn't available right now") }
+            activatePlaybackSession()
             installRemoteCommands()
         }
         .onDisappear {
             UIApplication.shared.isIdleTimerDisabled = false
             removeRemoteCommands()
+            model.clearNowPlaying()
             volumeTask?.cancel()
             pillTask?.cancel()
             volume.stopObserving()
@@ -1967,11 +2008,29 @@ struct PlayerScreen: View {
 
     // MARK: Media keys
 
+    /// Media keys and the lock screen only reach an app whose audio session is a playback session. Set it only when it
+    /// isn't one already, so a session the engine configured itself is left alone.
+    private func activatePlaybackSession() {
+        let session = AVAudioSession.sharedInstance()
+        guard session.category != .playback else { return }
+        do {
+            try session.setCategory(.playback, mode: .moviePlayback)
+            try session.setActive(true)
+        } catch {
+            // Playback still works without it. Only the media keys and the lock screen are affected.
+        }
+    }
+
     private func installRemoteCommands() {
         removeRemoteCommands()
         let center = MPRemoteCommandCenter.shared()
         center.skipForwardCommand.preferredIntervals = [NSNumber(value: 10)]
         center.skipBackwardCommand.preferredIntervals = [NSNumber(value: 10)]
+        for command in [center.playCommand, center.pauseCommand, center.togglePlayPauseCommand, center.skipForwardCommand,
+                        center.skipBackwardCommand, center.changePlaybackPositionCommand, center.nextTrackCommand,
+                        center.previousTrackCommand] {
+            command.isEnabled = true
+        }
         remoteTokens = [
             center.playCommand.addTarget { _ in remote { if !model.isPlaying { togglePlayOrRestart() } } },
             center.pauseCommand.addTarget { _ in remote { if model.isPlaying { model.togglePlay() } } },
@@ -1982,7 +2041,11 @@ struct PlayerScreen: View {
                 guard let e = event as? MPChangePlaybackPositionCommandEvent else { return .commandFailed }
                 let target: Double = e.positionTime
                 return remote { _ = Task { await model.seek(to: target) } }
-            }
+            },
+            // Next: the next episode when there is one, otherwise a 10 s skip. Previous has no earlier episode to go to,
+            // so it restarts the current one.
+            center.nextTrackCommand.addTarget { _ in remote { if nextEp != nil { playNext() } else { model.skip(by: 10) } } },
+            center.previousTrackCommand.addTarget { _ in remote { _ = Task { await model.seek(to: 0) } } }
         ]
     }
 
@@ -1996,6 +2059,8 @@ struct PlayerScreen: View {
             center.skipForwardCommand.removeTarget(token)
             center.skipBackwardCommand.removeTarget(token)
             center.changePlaybackPositionCommand.removeTarget(token)
+            center.nextTrackCommand.removeTarget(token)
+            center.previousTrackCommand.removeTarget(token)
         }
         remoteTokens.removeAll()
     }

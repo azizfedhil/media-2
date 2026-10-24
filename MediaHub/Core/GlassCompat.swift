@@ -20,7 +20,9 @@ extension View {
     @ViewBuilder
     func pearGlass<S: Shape>(in shape: S, tint: Color? = nil, interactive: Bool = false) -> some View {
         if #available(iOS 26.0, *) {
-            self.glassEffect(pearGlassStyle(tint: tint, interactive: interactive), in: shape)
+            // iPad mode scales the whole app, and interactive glass may stop receiving taps under that transform.
+            // It stays static there.
+            self.glassEffect(pearGlassStyle(tint: tint, interactive: interactive && !WideLayout.simulatingPad), in: shape)
         } else {
             if let tint {
                 self.background(tint, in: shape)

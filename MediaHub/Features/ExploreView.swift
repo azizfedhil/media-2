@@ -188,6 +188,7 @@ struct ExploreView: View {
             .padding(.vertical, 8)
         }
         .scrollIndicators(.hidden)
+        .collapsesSidebarOnScroll()
         .refreshable {
             async let t: () = model.loadThemes(rules: contentPrefs.rules, enrichWith: store.enrichmentAddon,
                                                key: themesTaskID, force: true)
@@ -224,8 +225,10 @@ struct ExploreView: View {
                     }
                 }
                 .padding(.horizontal, 16)
+                .pointerDragScroll()
             }
             .scrollIndicators(.hidden)
+            .reportsRowDrag(id: "explore-genres")
 
             HStack(spacing: 10) {
                 Menu {

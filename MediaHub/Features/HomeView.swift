@@ -506,6 +506,7 @@ struct HeroCarousel: View {
                 }
             }
             .scrollTargetLayout()
+            .pointerDragScroll()
         }
         .scrollTargetBehavior(.paging)
         .scrollPosition(id: $page)
@@ -792,6 +793,7 @@ struct ContinueRow: View {
                     }
                 }
                 .scrollTargetLayout()
+                .pointerDragScroll()
             }
             .contentMargins(.horizontal, 16, for: .scrollContent)
             .scrollTargetBehavior(.viewAligned)
@@ -985,6 +987,7 @@ struct CatalogRowView: View {
                     .buttonStyle(.plain)
                 }
                 .scrollTargetLayout()
+                .pointerDragScroll()
             }
             .contentMargins(.horizontal, 16, for: .scrollContent)
             .scrollTargetBehavior(.viewAligned)

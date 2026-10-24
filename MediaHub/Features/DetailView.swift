@@ -207,7 +207,7 @@ struct DetailView: View {
     private var wideBody: some View {
         GeometryReader { geo in
             let topInset: CGFloat = max(geo.safeAreaInsets.top, 24)
-            CollapsingSplit(heroMaxWidth: 440, collapseDistance: 300) {
+            CollapsingSplit(heroMaxWidth: 440, collapseDistance: 300, heroButtonLeadingExtra: 64) {
                 widePoster
             } pane: { ctx in
                 PaneScroll(ctx: ctx) {
@@ -266,14 +266,18 @@ struct DetailView: View {
         }
     }
 
+    /// Pops this page the way Escape does (see `BackShortcuts`), so touch, mouse and keyboard take one path.
+    /// `dismiss()` pops a pushed page; `NavigationStack(path:)` writes that back into `ShellNav`'s paths.
+    private func goBack() { dismiss() }
+
     private var backButton: some View {
-        Button { if !shellNav.back() { dismiss() } } label: {
+        Button { goBack() } label: {
             Image(systemName: "chevron.left")
                 .font(.system(size: 16, weight: .bold))
                 .foregroundStyle(.white)
                 .frame(width: 38, height: 38)
-                .pearGlass(in: .circle, interactive: true)
                 .contentShape(Circle())
+                .pearGlass(in: .circle, interactive: true)
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Back")
@@ -477,6 +481,7 @@ struct DetailView: View {
             HStack(spacing: 16) {
                 ForEach(allRatings) { RatingBadge(rating: $0, flat: true) }
             }
+            .pointerDragScroll()
         }
         .scrollIndicators(.hidden)
     }
@@ -560,8 +565,10 @@ struct DetailView: View {
                 }
             }
             .padding(.horizontal, 20)
+            .pointerDragScroll()
         }
         .scrollIndicators(.hidden)
+        .reportsRowDrag(id: "detail-season-pills")
     }
 
     /// The show's watched marker sits on its last-watched episode; a season counts when that episode is inside it.
@@ -623,8 +630,10 @@ struct DetailView: View {
                 }
             }
             .padding(.horizontal, 20)
+            .pointerDragScroll()
         }
         .scrollIndicators(.hidden)
+        .reportsRowDrag(id: "detail-season-posters")
     }
 
     private var episodeCarousel: some View {
@@ -639,12 +648,14 @@ struct DetailView: View {
                         ForEach(episodes) { episodeCard($0).id($0.id) }
                     }
                     .scrollTargetLayout()
+                    .pointerDragScroll()
                 }
                 .contentMargins(.horizontal, 20, for: .scrollContent)
                 .scrollTargetBehavior(.viewAligned)
                 .scrollIndicators(.hidden)
                 // A fresh strip per season, so switching seasons starts at the first episode instead of keeping the old offset.
                 .id(season)
+                .reportsRowDrag(id: AnyHashable("detail-episodes-\(season)"))
                 .onChange(of: episodes.count) { _, _ in
                     if episode > 1 { proxy.scrollTo(episode, anchor: .center) }
                 }
@@ -803,10 +814,12 @@ struct DetailView: View {
                     ForEach(trailers) { v in TrailerCard(video: v) { openTrailer = v } }
                 }
                 .scrollTargetLayout()
+                .pointerDragScroll()
             }
             .contentMargins(.horizontal, 20, for: .scrollContent)
             .scrollTargetBehavior(.viewAligned)
             .scrollIndicators(.hidden)
+            .reportsRowDrag(id: "detail-trailers")
         }
         .fullScreenCover(item: $openTrailer) { v in
             if let u = v.watchURL { SafariView(url: u).ignoresSafeArea() }
@@ -940,28 +953,31 @@ struct DetailView: View {
     }
 
     private func row(_ addon: Addon, _ s: StreamItem, isPinned: Bool) -> some View {
-        Button {
-            if let t = downloadTarget {
-                queueDownload(season: t.season, episode: t.episode, ep: t.ep, addon: addon, stream: s)
-                showSources = false
-            } else { play(addon, s) }
-        } label: {
-            HStack {
-                VStack(alignment: .leading) {
-                    Text(s.name ?? s.title ?? "Stream").font(.headline)
-                    if let t = s.description ?? s.title { Text(t).font(.caption).foregroundStyle(.secondary) }
+        // The menus sit on this container around the Button, as on the Downloads rows, not on the Button itself.
+        HStack {
+            Button {
+                if let t = downloadTarget {
+                    queueDownload(season: t.season, episode: t.episode, ep: t.ep, addon: addon, stream: s)
+                    showSources = false
+                } else { play(addon, s) }
+            } label: {
+                HStack {
+                    VStack(alignment: .leading) {
+                        Text(s.name ?? s.title ?? "Stream").font(.headline)
+                        if let t = s.description ?? s.title { Text(t).font(.caption).foregroundStyle(.secondary) }
+                    }
+                    Spacer()
+                    if s.p2pOff {
+                        Label("P2P off", systemImage: "antenna.radiowaves.left.and.right.slash")
+                            .font(.caption).foregroundStyle(.secondary)
+                    } else if s.isTorrent {
+                        Image(systemName: s.p2pLocked ? "lock.fill" : "antenna.radiowaves.left.and.right").foregroundStyle(.secondary)
+                    }
+                    if isPinned { Image(systemName: "pin.fill").foregroundStyle(.tint) }
                 }
-                Spacer()
-                if s.p2pOff {
-                    Label("P2P off", systemImage: "antenna.radiowaves.left.and.right.slash")
-                        .font(.caption).foregroundStyle(.secondary)
-                } else if s.isTorrent {
-                    Image(systemName: s.p2pLocked ? "lock.fill" : "antenna.radiowaves.left.and.right").foregroundStyle(.secondary)
-                }
-                if isPinned { Image(systemName: "pin.fill").foregroundStyle(.tint) }
             }
+            .disabled(downloadTarget != nil ? !s.isDownloadable : !s.isPlayable)
         }
-        .disabled(downloadTarget != nil ? !s.isDownloadable : !s.isPlayable)
         .contextMenu {
             if downloadTarget != nil {
                 EmptyView()

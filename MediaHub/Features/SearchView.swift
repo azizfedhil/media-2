@@ -92,6 +92,7 @@ struct SearchView: View {
                 .animation(.smooth(duration: 0.3), value: model.results.count)
             }
             .scrollDismissesKeyboard(.interactively)
+            .collapsesSidebarOnScroll()
             .overlay {
                 if query.trimmingCharacters(in: .whitespaces).count < 2 {
                     ContentUnavailableView("Search", systemImage: "magnifyingglass",

@@ -262,6 +262,7 @@ struct SettingsView: View {
                     Text("What Pear. is, and the open-source components and services it uses.")
                 }
             }
+            .collapsesSidebarOnScroll()
             .shellDestinations()
             .navigationTitle("Settings")
             .profileToolbar()

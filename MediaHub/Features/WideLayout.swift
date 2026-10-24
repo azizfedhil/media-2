@@ -75,7 +75,7 @@ extension View {
         self
             .navigationDestination(for: MetaPreview.self) { DetailView(item: $0) }
             .navigationDestination(for: ResumeTarget.self) { DetailView(item: $0.item, startSeason: $0.season, startEpisode: $0.episode) }
-            .navigationDestination(for: CatalogRow.self) { CatalogGridView(row: $0) }
+            .navigationDestination(for: CatalogRow.self) { row in PushedFoldPage { CatalogGridView(row: row) } }
     }
 }
 
@@ -376,14 +376,19 @@ struct SidebarShell: View {
     @State private var visited: Set<AppTab> = [.home]
     @State private var catalogueID: String?
     @State private var showProfile = false
-    @State private var homeFold = FeedCollapse()
+    /// One fold per tab, so a page's scroll and row drags move only its own tab's state.
+    @State private var tabFolds: [AppTab: FeedCollapse] = Dictionary(uniqueKeysWithValues: AppTab.allCases.map { ($0, FeedCollapse()) })
+    /// The sidebar catalogue pages share one fold; it is reset each time a different catalogue opens.
+    @State private var catalogueFold = FeedCollapse()
     @State private var commands = AppCommands.shared
     @State private var sourcePicker = SourcePickerHost.shared
 
     private var baseWidth: CGFloat { totalWidth >= 1000 ? 250 : (totalWidth >= 780 ? 212 : 76) }
+    /// The fold of the page on screen: the open catalogue's, else the selected tab's.
+    private var visibleFold: FeedCollapse? { catalogueID != nil ? catalogueFold : tabFolds[tab] }
     private var fold: CGFloat {
         if let active = shellNav.activeFold { return active.progress }
-        return (tab == .home && catalogueID == nil) ? homeFold.progress : 0
+        return visibleFold?.progress ?? 0
     }
     private var compact: Bool {
         let width: CGFloat = baseWidth + (76 - baseWidth) * fold
@@ -410,7 +415,6 @@ struct SidebarShell: View {
             pages
                 .safeAreaPadding(.leading, width)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .environment(\.feedCollapse, homeFold)
                 .environment(\.sidebarBleeds, bleeds)
                 .environment(\.sidebarInset, inset)
             sidebar(width: width)
@@ -444,6 +448,8 @@ struct SidebarShell: View {
         }
         .onChange(of: catalogueID, initial: true) { _, id in
             shellNav.catalogueActive = (id != nil)
+            // A catalogue opens at the top, so its fold starts open too.
+            catalogueFold.expand()
         }
         .onChange(of: commands.tabRequest) { _, requested in
             guard let requested else { return }
@@ -502,6 +508,7 @@ struct SidebarShell: View {
                 if visited.contains(t) || tab == t {
                     page(t)
                         .environment(\.pageActive, shown(t))
+                        .environment(\.feedCollapse, tabFolds[t])
                         .opacity(shown(t) ? 1 : 0)
                         .allowsHitTesting(shown(t))
                         .accessibilityHidden(!shown(t))
@@ -509,10 +516,10 @@ struct SidebarShell: View {
             }
             if let id = catalogueID {
                 if let ref = catalogues.first(where: { $0.id == id }) {
-                    CataloguePage(ref: ref).id(ref.id)
+                    CataloguePage(ref: ref).id(ref.id).environment(\.feedCollapse, catalogueFold)
                 } else if id.hasPrefix("local:") {
                     let ref = CatalogueRef(localID: id)
-                    CataloguePage(ref: ref).id(ref.id)
+                    CataloguePage(ref: ref).id(ref.id).environment(\.feedCollapse, catalogueFold)
                 }
             }
         }
@@ -722,6 +729,8 @@ struct CollapsingSplit<Hero: View, Pane: View>: View {
     var heroFraction: CGFloat = 0.42
     var heroMaxWidth: CGFloat = 506
     var collapseDistance: CGFloat = 260
+    /// Room the re-open chevron keeps from the pane's leading edge. A page with a back button passes enough to clear it.
+    var heroButtonLeadingExtra: CGFloat = 0
     @ViewBuilder var hero: () -> Hero
     @ViewBuilder var pane: (SplitContext) -> Pane
 
@@ -758,9 +767,10 @@ struct CollapsingSplit<Hero: View, Pane: View>: View {
                 }
                 pane(ctx)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .overlay(alignment: .leading) {
+                    .overlay(alignment: .topLeading) {
                         if showsHero && fold > 0.5 && !tooNarrow {
-                            showHeroButton(fc, inset: inset)
+                            // Same line as the back button DetailView draws: max(top, 24) + 16 from the top.
+                            showHeroButton(fc, top: max(ctx.topInset, 24) + 16, leading: heroButtonLeadingExtra)
                         }
                     }
                     .environment(\.feedCollapse, fc)
@@ -770,22 +780,23 @@ struct CollapsingSplit<Hero: View, Pane: View>: View {
         }
     }
 
-    private func showHeroButton(_ fc: FeedCollapse, inset: CGFloat) -> some View {
+    private func showHeroButton(_ fc: FeedCollapse, top: CGFloat, leading: CGFloat) -> some View {
         Button {
             withAnimation(.smooth(duration: 0.45)) {
                 fc.expand()
                 scrollTop += 1
             }
         } label: {
-            Image(systemName: "chevron.right").font(.system(size: 11, weight: .bold))
-                .frame(width: 18, height: 56)
-                .pearGlass(in: .capsule, interactive: true)
-                .opacity(0.7)
-                .frame(width: 28, height: 56, alignment: .leading)
-                .contentShape(Rectangle())
+            Image(systemName: "chevron.right")
+                .font(.system(size: 16, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: 38, height: 38)
+                .contentShape(Circle())
+                .pearGlass(in: .circle, interactive: true)
         }
         .buttonStyle(.plain)
-        .padding(.leading, inset + 4)
+        .padding(.leading, leading)
+        .padding(.top, top)
         .transition(.opacity)
     }
 }
@@ -804,6 +815,7 @@ struct PaneScroll<Content: View>: View {
             content()
                 .padding(.top, ctx.topInset + 18)
                 .padding(.bottom, ctx.bottomInset + 40)
+                .pointerDragScroll()
         }
         .scrollPosition($position)
         .scrollIndicators(.hidden)
@@ -816,7 +828,7 @@ struct PaneScroll<Content: View>: View {
             if y <= 0 { fc.expand() }
         }
         .onChange(of: ctx.scrollTop) { _, _ in
-            withAnimation(.smooth(duration: 0.45)) { position.scrollTo(y: 0) }
+            withAnimation(.smooth(duration: 0.45)) { position.scrollTo(edge: .top) }
         }
         if let refresh { scroll.refreshable { await refresh() } } else { scroll }
     }
@@ -846,6 +858,65 @@ private struct ReportsRowDrag: ViewModifier {
 extension View {
     /// Report this horizontal row's drag to the wide layout's `FeedCollapse`. Does nothing on the phone.
     func reportsRowDrag(id: AnyHashable) -> some View { modifier(ReportsRowDrag(id: id)) }
+}
+
+/// Folds the sidebar as a plain vertical scroll view moves, the way `PaneScroll` folds the poster panel. For pages
+/// with no poster (grids, lists, settings). It is inert outside the wide layout.
+private struct CollapsesSidebarOnScroll: ViewModifier {
+    let distance: CGFloat
+    @Environment(\.feedCollapse) private var feedCollapse
+    @Environment(\.wideLayout) private var wide
+
+    @ViewBuilder func body(content: Content) -> some View {
+        if wide, let fc = feedCollapse {
+            content
+                .onScrollGeometryChange(for: CGFloat.self) { geo in
+                    max(geo.contentOffset.y + geo.contentInsets.top, 0)
+                } action: { _, y in
+                    fc.scrollY = y
+                    fc.vertical = min(y / distance, 1)
+                    if y <= 0 { fc.expand() }
+                }
+        } else {
+            content
+        }
+    }
+}
+
+extension View {
+    /// Let this vertical scroll view fold the wide layout's sidebar, the same way a poster page's pane does.
+    func collapsesSidebarOnScroll(distance: CGFloat = 160) -> some View {
+        modifier(CollapsesSidebarOnScroll(distance: distance))
+    }
+}
+
+/// A page pushed inside a tab or the catalogue, such as a "See all" grid. It owns its fold the way `DetailView` does:
+/// registered as `shellNav.activeFold` while it is the page on screen, and cleared when it leaves, so the sidebar goes
+/// back to the tab's own fold once it is popped. It is inert outside the wide layout.
+struct PushedFoldPage<Content: View>: View {
+    @ViewBuilder let content: () -> Content
+    @Environment(ShellNav.self) private var shellNav
+    @Environment(\.pageActive) private var pageActive
+    @Environment(\.wideLayout) private var wide
+    @State private var fold = FeedCollapse()
+
+    var body: some View {
+        if wide {
+            content()
+                .environment(\.feedCollapse, fold)
+                .onAppear { if pageActive { shellNav.activeFold = fold } }
+                .onDisappear { if shellNav.activeFold === fold { shellNav.activeFold = nil } }
+                .onChange(of: pageActive) { _, active in
+                    if active {
+                        shellNav.activeFold = fold
+                    } else if shellNav.activeFold === fold {
+                        shellNav.activeFold = nil
+                    }
+                }
+        } else {
+            content()
+        }
+    }
 }
 
 // MARK: - Home poster panel
@@ -996,6 +1067,7 @@ struct WideHeroPanel: View {
                      font: .system(size: compact ? 32 : 40, weight: .black), tracking: 1)
             ScrollView(.horizontal) {
                 InlineRatings(item: item)
+                    .pointerDragScroll()
             }
             .scrollIndicators(.hidden)
             synopsis(item)

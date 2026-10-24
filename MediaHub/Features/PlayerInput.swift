@@ -259,7 +259,10 @@ final class PlayerKeyController: UIViewController {
     @objc private func handle(_ command: UIKeyCommand) {
         let flags = command.modifierFlags
         guard !flags.contains(.control), !flags.contains(.alternate), !flags.contains(.command) else { return }
-        let input = (command.input ?? "").lowercased()
+        // Only single characters are case-folded. Special keys report names such as "UIKeyInputLeftArrow", which
+        // lowercasing would turn into a string no binding matches, silently dropping arrows and Escape.
+        let raw = command.input ?? ""
+        let input = raw.count == 1 ? raw.lowercased() : raw
         let stroke = PlayerKeyStroke(input, shift: flags.contains(.shift))
         guard let action = Self.bindings[stroke] else { return }
         if case .escape = action {
