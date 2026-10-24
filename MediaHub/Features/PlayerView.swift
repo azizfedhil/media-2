@@ -543,6 +543,8 @@ struct PlayerScreen: View {
     /// The pill has more than `pillFolded` items and the user unfolded it with the chevron.
     @State private var pillExpanded = false
     @State private var pillTask: Task<Void, Never>?
+    /// Fit / Stretch / Zoom / Fill, picked from the pill. Per playback: a new player screen starts on Fit.
+    @State private var videoFit: VideoFit = .fit
     /// Picture in Picture window (native AVPlayer path only; the pill hides the button otherwise).
     @State private var pip = PiPController()
     @State private var sourceGroups: [(Addon, [StreamItem])] = []
@@ -605,7 +607,14 @@ struct PlayerScreen: View {
         let hideCursor: Bool = !showControls && InputState.shared.pointerActive && model.isPlaying
         return ZStack {
             Color.black.ignoresSafeArea()
-            if let engine = model.engine { AetherPlayerSurface(engine: engine).ignoresSafeArea() }
+            if let engine = model.engine {
+                AetherPlayerSurface(engine: engine)
+                    .ignoresSafeArea()
+                    .scaleEffect(videoFit.scale)
+                    .clipped()
+                    .task(id: ObjectIdentifier(engine)) { engine.videoGravity = videoFit.gravity }
+                    .onChange(of: videoFit) { _, fit in engine.videoGravity = fit.gravity }
+            }
             if pip.isActive { pipPlaceholder }
             SubtitleOverlay(cues: pip.isActive ? [] : model.activeCues, lift: showControls ? 112 : 0, style: subStyle)
                 .animation(.easeInOut(duration: 0.2), value: showControls)
@@ -915,6 +924,7 @@ struct PlayerScreen: View {
         case .sources, .volume: return true
         case .episodes: return provider != nil
         case .pip: return pip.isAvailable || pip.isActive
+        case .aspect: return true
         case .subtitles: return !model.subtitleTracks.isEmpty || OpenSubtitlesClient.shared.enabled
         case .audio: return model.audioTracks.count > 1
         case .next: return nextEp != nil && !partyGuest
@@ -984,6 +994,7 @@ struct PlayerScreen: View {
         case .subtitles:
             pillButton(model.activeSubtitleID == nil ? "captions.bubble" : "captions.bubble.fill",
                        active: showSubtitles) { toggleSubtitles() }
+        case .aspect: fitMenu
         case .audio: audioMenu
         case .next: nextButton
         }
@@ -1124,6 +1135,29 @@ struct PlayerScreen: View {
         }
         .menuIndicator(.hidden)
         .tint(.white)
+    }
+
+    /// Video fit: Fit / Stretch / Zoom / Fill. A button in the pill that opens a menu, no gestures.
+    private var fitMenu: some View {
+        Menu {
+            ForEach(VideoFit.allCases) { fit in
+                Button {
+                    withAnimation(.snappy(duration: 0.25)) { videoFit = fit }
+                    if pillExpanded { bumpPill() } else { scheduleHide() }
+                } label: {
+                    if fit == videoFit { Label(fit.title, systemImage: "checkmark") }
+                    else { Label(fit.title, systemImage: fit.symbol) }
+                }
+            }
+        } label: {
+            Image(systemName: "aspectratio").font(.system(size: 19, weight: .semibold)).foregroundStyle(.white)
+                .frame(width: 46, height: 46)
+                .background { if videoFit != .fit { Circle().fill(theme.accent.opacity(0.6)) } }
+                .contentShape(Circle())
+        }
+        .menuIndicator(.hidden)
+        .tint(.white)
+        .accessibilityLabel("Video fit")
     }
 
     @ViewBuilder private func checkLabel(_ title: String, _ on: Bool) -> some View {

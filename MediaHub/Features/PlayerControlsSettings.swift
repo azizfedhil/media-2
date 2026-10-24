@@ -1,11 +1,12 @@
 import SwiftUI
+import AVFoundation
 
 // MARK: - Items
 
 /// Everything that can sit in the player's controls pill. Declaration order is the default on-screen order;
 /// the user can rearrange it (`orderKey`).
 enum PillItem: String, CaseIterable, Identifiable {
-    case speed, episodes, sources, volume, pip, subtitles, audio, next
+    case speed, episodes, sources, volume, pip, aspect, subtitles, audio, next
 
     var id: String { rawValue }
 
@@ -16,6 +17,7 @@ enum PillItem: String, CaseIterable, Identifiable {
         case .sources: "Sources"
         case .volume: "Volume"
         case .pip: "Picture in Picture"
+        case .aspect: "Video fit"
         case .subtitles: "Subtitles"
         case .audio: "Audio track"
         case .next: "Next episode"
@@ -29,6 +31,7 @@ enum PillItem: String, CaseIterable, Identifiable {
         case .sources: "rectangle.stack"
         case .volume: "speaker.wave.2"
         case .pip: "pip.enter"
+        case .aspect: "aspectratio"
         case .subtitles: "captions.bubble"
         case .audio: "waveform"
         case .next: "forward.end.fill"
@@ -77,6 +80,45 @@ enum PillItem: String, CaseIterable, Identifiable {
     static func encodeOrder(_ items: [PillItem]) -> String {
         items.map(\.rawValue).joined(separator: ",")
     }
+}
+
+// MARK: - Video fit
+
+/// How the picture sits on the screen. Chosen from the player's pill (Video fit button); resets to Fit for every playback.
+enum VideoFit: String, CaseIterable, Identifiable {
+    case fit, stretch, zoom, fill
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .fit: "Fit"
+        case .stretch: "Stretch"
+        case .zoom: "Zoom"
+        case .fill: "Fill"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .fit: "arrow.down.right.and.arrow.up.left"
+        case .stretch: "arrow.left.and.right"
+        case .zoom: "plus.magnifyingglass"
+        case .fill: "arrow.up.left.and.arrow.down.right"
+        }
+    }
+
+    /// Fit: whole picture, black bars. Stretch: distorted to the screen. Fill: cropped to cover the screen exactly.
+    /// Zoom: Fit magnified by a fixed amount (edges cropped).
+    var gravity: AVLayerVideoGravity {
+        switch self {
+        case .fit, .zoom: .resizeAspect
+        case .stretch: .resize
+        case .fill: .resizeAspectFill
+        }
+    }
+
+    var scale: CGFloat { self == .zoom ? 1.25 : 1 }
 }
 
 // MARK: - Settings screen
