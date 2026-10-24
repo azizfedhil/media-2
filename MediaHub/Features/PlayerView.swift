@@ -647,15 +647,15 @@ struct PlayerScreen: View {
         return ZStack {
             Color.black.ignoresSafeArea()
             if let engine = model.engine {
-                // The surface must span the full screen (safe areas included) BEFORE scaling/clipping, otherwise it is
-                // laid out in the safe-area rect and the picture sits at the top with a permanent bar underneath.
-                AetherPlayerSurface(engine: engine)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .scaleEffect(videoFit.scale)
-                    .ignoresSafeArea(.all, edges: .all)
-                    .clipped()
-                    .task(id: ObjectIdentifier(engine)) { engine.videoGravity = videoFit.gravity }
-                    .onChange(of: videoFit) { _, fit in engine.videoGravity = fit.gravity }
+                // The surface keeps exactly the modifiers it had before the aspect option (just ignoresSafeArea).
+                // Zoom is applied to a container around it, never to the representable itself, so Fit lays out as before.
+                ZStack {
+                    AetherPlayerSurface(engine: engine)
+                        .ignoresSafeArea()
+                }
+                .scaleEffect(videoFit.scale)
+                // Gravity is only pushed to the engine when the user changes it; Fit is the engine's own default.
+                .onChange(of: videoFit) { _, fit in engine.videoGravity = fit.gravity }
             }
             if pip.isActive { pipPlaceholder }
             SubtitleOverlay(cues: pip.isActive ? [] : model.activeCues, lift: showControls ? 112 : 0, style: subStyle)
