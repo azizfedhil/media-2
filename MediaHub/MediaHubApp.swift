@@ -79,8 +79,8 @@ extension Color {
 enum OrientationLock {
     /// What the rest of the app (everything but the player) is allowed to do.
     static var appMask: UIInterfaceOrientationMask {
-        // The simulated iPad rotates with the phone. The player still narrows this to landscape through `set`.
-        if WideLayout.simulatingPad { return .allButUpsideDown }
+        // The simulated iPad is a landscape window: the phone is held in landscape while it is on.
+        if WideLayout.simulatingPad { return .landscape }
         if WideLayout.isRealPad { return .all }
         return UserDefaults.standard.bool(forKey: WideLayout.phoneKey) ? .allButUpsideDown : .portrait
     }
@@ -90,7 +90,8 @@ enum OrientationLock {
     static func set(_ new: UIInterfaceOrientationMask) {
         mask = new
         // The player (landscape only) owns the screen: the layout mode holds still until it is gone.
-        LayoutState.shared.playerOpen = (new == .landscape)
+        // (The simulated iPad is landscape already, so there landscape alone doesn't mean the player is up.)
+        LayoutState.shared.playerOpen = (new == .landscape) && (new != appMask)
         let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
         guard let scene = scenes.first(where: { $0.activationState == .foregroundActive }) ?? scenes.first else { return }
         // Tell every controller in the presented chain to re-read the supported orientations.
@@ -233,7 +234,8 @@ struct RootView: View {
     @State private var size: CGSize = {
         let scene = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
         let real = scene?.effectiveGeometry.coordinateSpace.bounds.size ?? .zero
-        return WideLayout.simulatingPad ? WideLayout.virtualPadSize(for: real) : real
+        // iPad mode is landscape only, so its window is always the landscape one, whatever the phone reports yet.
+        return WideLayout.simulatingPad ? WideLayout.padLandscapeSize : real
     }()
 
     var body: some View {
@@ -246,7 +248,7 @@ struct RootView: View {
                 browsing
             }
         }
-        // The developer toggle: let the phone rotate with the virtual iPad, and pick the new layout at once.
+        // The developer toggle: turn the phone to landscape for the virtual iPad (or back to the app's own mask), and pick the new layout at once.
         .onChange(of: ipadMode) { _, _ in
             OrientationLock.set(OrientationLock.appMask)
             updateWide()
@@ -385,10 +387,14 @@ struct RootView: View {
 /// The real screen size and window safe areas, read from UIKit because the GeometryReader proxy can be stale
 /// after a rotation.
 private enum VirtualPadMetrics {
+    /// The screen in landscape. iPad mode only runs in landscape (see `OrientationLock.appMask`), so a size that
+    /// still reads as portrait is the phone mid-rotation: it is turned the right way round instead of drawing a
+    /// portrait window on a landscape screen.
     static var screenSize: CGSize {
         let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
         let scene = scenes.first(where: { $0.activationState == .foregroundActive }) ?? scenes.first
-        return scene?.effectiveGeometry.coordinateSpace.bounds.size ?? .zero
+        let raw = scene?.effectiveGeometry.coordinateSpace.bounds.size ?? .zero
+        return CGSize(width: max(raw.width, raw.height), height: min(raw.width, raw.height))
     }
 
     static var safeAreaInsets: UIEdgeInsets {
@@ -410,7 +416,7 @@ private struct VirtualPadWindow<Content: View>: View {
     var body: some View {
         GeometryReader { _ in
             let real = screen
-            let virtual = WideLayout.virtualPadSize(for: real)
+            let virtual = WideLayout.padLandscapeSize
             let scale = min(real.width / virtual.width, real.height / virtual.height)
             let fitted = CGSize(width: virtual.width * scale, height: virtual.height * scale)
             let insets = VirtualPadMetrics.safeAreaInsets
