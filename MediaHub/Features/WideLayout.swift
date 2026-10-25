@@ -248,8 +248,9 @@ private struct SidebarBleedModifier: ViewModifier {
     /// would change the page's identity and throw its state away. The page reports whether or not it may bleed yet,
     /// so the shell can give its stack the room (and the page the sidebar inset) on the next pass.
     func body(content: Content) -> some View {
-        content
-            .ignoresSafeArea(.container, edges: sidebarBleeds ? .leading : [])
+        let edges: Edge.Set = sidebarBleeds ? Edge.Set.leading : Edge.Set()
+        return content
+            .ignoresSafeArea(.container, edges: edges)
             .onAppear { shellNav.setBleeding(stackKey, token, true) }
             .onDisappear { shellNav.setBleeding(stackKey, token, false) }
     }
@@ -1090,8 +1091,9 @@ struct WideHeroPanel: View {
         let panelH: CGFloat = size.height
         let overscan: CGFloat = panelH * 0.125
         let artH: CGFloat = panelH * 1.25
-        let scroll: CGFloat = fc?.scrollY ?? 0
-        let parallax: CGFloat = min(scroll * 0.5, overscan)
+        // Parallax used to follow the scroll offset frame by frame, which re-rendered the art on every frame of a
+        // scroll. It now shifts once, with the fold, and animates there.
+        let parallax: CGFloat = (fc?.folded ?? false) ? overscan : 0
         let y: CGFloat = parallax - overscan
         return ZStack(alignment: .bottom) {
             KenBurns(active: pageRunning, targetScale: 1.1, duration: 18) {

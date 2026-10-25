@@ -94,8 +94,8 @@ final class PointerScrollDriver: NSObject, UIGestureRecognizerDelegate {
 
     func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
         guard gestureRecognizer === pan, let window else { return true }
-        let t = pan.translation(in: window)
-        let dir: Axis = abs(t.x) > abs(t.y) ? .horizontal : .vertical
+        let t: CGPoint = pan.translation(in: window)
+        let dir: Axis = abs(t.x) > abs(t.y) ? Axis.horizontal : Axis.vertical
         var view: UIView? = window.hitTest(pan.location(in: window), with: nil)
         while let v = view {
             if let scroll = v as? UIScrollView, canScroll(scroll, dir) {
@@ -129,7 +129,8 @@ final class PointerScrollDriver: NSObject, UIGestureRecognizerDelegate {
             startOffset = target?.contentOffset ?? .zero
         case .changed:
             guard let scroll = target else { return }
-            let t = g.translation(in: scroll.superview ?? window)
+            let space: UIView? = scroll.superview ?? window
+            let t: CGPoint = g.translation(in: space)
             var o = startOffset
             switch axis {
             case .horizontal: o.x = clamp(startOffset.x - t.x, scroll, .horizontal)
@@ -138,8 +139,10 @@ final class PointerScrollDriver: NSObject, UIGestureRecognizerDelegate {
             scroll.setContentOffset(o, animated: false)
         case .ended:
             guard let scroll = target else { return }
-            let v = g.velocity(in: scroll.superview ?? window)
-            finish(scroll, velocity: -(axis == .horizontal ? v.x : v.y))
+            let space: UIView? = scroll.superview ?? window
+            let v: CGPoint = g.velocity(in: space)
+            let along: CGFloat = axis == .horizontal ? v.x : v.y
+            finish(scroll, velocity: -along)
         default:
             target = nil
         }
@@ -147,7 +150,8 @@ final class PointerScrollDriver: NSObject, UIGestureRecognizerDelegate {
 
     private func canScroll(_ s: UIScrollView, _ a: Axis) -> Bool {
         guard s.isScrollEnabled, !(s is UITextView) else { return false }
-        return range(s, a).upperBound - range(s, a).lowerBound > 1
+        let r: ClosedRange<CGFloat> = range(s, a)
+        return r.upperBound - r.lowerBound > 1
     }
 
     private func range(_ s: UIScrollView, _ a: Axis) -> ClosedRange<CGFloat> {
@@ -191,15 +195,18 @@ final class PointerScrollDriver: NSObject, UIGestureRecognizerDelegate {
     @objc private func tick() {
         guard let scroll = target else { stopMomentum(); return }
         let now = CACurrentMediaTime()
-        let dt = min(now - lastTick, 1.0 / 30.0)
+        let dt: CGFloat = CGFloat(min(now - lastTick, 1.0 / 30.0))
         lastTick = now
         var o = scroll.contentOffset
         let current = axis == .horizontal ? o.x : o.y
-        let next = clamp(current + momentumVelocity * dt, scroll, axis == .horizontal ? .horizontal : .vertical)
+        let a: Axis = axis
+        let proposed: CGFloat = current + momentumVelocity * dt
+        let next: CGFloat = clamp(proposed, scroll, a)
         if axis == .horizontal { o.x = next } else { o.y = next }
         scroll.setContentOffset(o, animated: false)
         // UIScrollView's normal deceleration: 0.998 per millisecond.
-        momentumVelocity *= CGFloat(pow(0.998, dt * 1000))
+        let decay: Double = pow(0.998, Double(dt) * 1000.0)
+        momentumVelocity *= CGFloat(decay)
         if abs(momentumVelocity) < 20 || next == current { stopMomentum() }
     }
 
