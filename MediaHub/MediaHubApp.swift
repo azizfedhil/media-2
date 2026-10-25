@@ -417,17 +417,21 @@ private struct VirtualPadWindow<Content: View>: View {
             ZStack(alignment: .topLeading) {
                 Color.black
                 content
-                    .frame(width: virtual.width, height: virtual.height, alignment: .topLeading)
                     // The fake iPad traits the pages read: wide everywhere, like a real iPad.
                     .environment(\.horizontalSizeClass, .regular)
                     .environment(\.verticalSizeClass, .regular)
                     // Fake iPad safe areas, so the real notch and home indicator do not become huge scaled gaps.
+                    // These sit inside the window's frame (not outside it): applied after a fixed frame they would
+                    // stack on top of the window's height, pushing the bottom ~44pt of the app past the window edge.
                     .safeAreaInset(edge: .top, spacing: 0) {
                         Color.clear.frame(height: 24).allowsHitTesting(false).accessibilityHidden(true)
                     }
                     .safeAreaInset(edge: .bottom, spacing: 0) {
                         Color.clear.frame(height: 20).allowsHitTesting(false).accessibilityHidden(true)
                     }
+                    .frame(width: virtual.width, height: virtual.height, alignment: .topLeading)
+                    // Draw the window like an iPad screen: nothing spills past its edge, and its corners are rounded.
+                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
                     .scaleEffect(scale, anchor: .topLeading)
                     .frame(width: fitted.width, height: fitted.height, alignment: .topLeading)
                     .offset(x: (real.width - fitted.width) / 2, y: (real.height - fitted.height) / 2)
