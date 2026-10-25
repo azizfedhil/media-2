@@ -144,6 +144,7 @@ struct MediaHubApp: App {
     var body: some Scene {
         WindowGroup {
             RootView()
+                .background { PointerInputHost().allowsHitTesting(false) }
                 .fullScreenCover(isPresented: $showOnboarding) { OnboardingView { showOnboarding = false } }
                 .environment(store).environment(history).environment(simkl).environment(pins).environment(theme)
                 .environment(profiles).environment(library).environment(sidebarPins).environment(watchLog).environment(libraryPrefs)

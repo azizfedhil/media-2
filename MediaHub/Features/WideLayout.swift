@@ -292,18 +292,45 @@ private struct BackShortcuts: ViewModifier {
 /// push the poster panel away. Zero is fully open; one is fully folded.
 @MainActor @Observable
 final class FeedCollapse {
-    var vertical: CGFloat = 0
-    /// Raw vertical scroll offset, in points. `vertical` is the clamped fold fraction; the hero uses this for parallax.
-    var scrollY: CGFloat = 0
-    private var rows: [AnyHashable: CGFloat] = [:]
+    // Raw scroll values change on every frame of a scroll, so they are kept out of observation: nothing re-renders
+    // for them. Views read `folded`, which only changes when the fold crosses a threshold.
+    @ObservationIgnored var vertical: CGFloat = 0
+    @ObservationIgnored private var rows: [AnyHashable: CGFloat] = [:]
 
-    func report(_ id: AnyHashable, _ px: CGFloat) { rows[id] = px }
-    func forget(_ id: AnyHashable) { rows[id] = nil }
-    func expand() { rows.removeAll(); vertical = 0 }
+    /// Whether the layout is folded: the poster panel is away and the sidebar is at icon width. It flips once as the
+    /// scroll crosses a threshold, with a gap between the two so it does not flutter near the line, and the layout
+    /// animates that one change. Folding follows the finger frame by frame used to re-lay out the whole page on
+    /// every frame of a scroll, which is what made scrolling drop frames on a phone.
+    private(set) var folded = false
 
-    /// The furthest any one row has been dragged sideways, as a 0...1 fraction of a full fold.
-    var horizontal: CGFloat { min(max((rows.values.max() ?? 0) / 360, 0), 1) }
-    var progress: CGFloat { max(vertical, horizontal) }
+    /// Where a scroll bucket stands as a fraction of a full fold (see `bucket`).
+    nonisolated static let bucketFractions: [CGFloat] = [0, 0.05, 0.2, 1]
+
+    /// A scroll position as 0...1 of a full fold, reduced to four buckets. A scroll view's change callback only
+    /// fires when this value changes, so it runs a few times per scroll instead of once per frame.
+    nonisolated static func bucket(_ fraction: CGFloat) -> Int {
+        fraction <= 0 ? 0 : (fraction < 0.08 ? 1 : (fraction < 0.35 ? 2 : 3))
+    }
+
+    func setVertical(bucket b: Int) {
+        vertical = Self.bucketFractions[min(max(b, 0), 3)]
+        if b == 0 { rows.removeAll() }
+        settle()
+    }
+
+    func report(_ id: AnyHashable, bucket b: Int) {
+        rows[id] = Self.bucketFractions[min(max(b, 0), 3)]
+        settle()
+    }
+    func forget(_ id: AnyHashable) { rows[id] = nil; settle() }
+    func expand() { rows.removeAll(); vertical = 0; settle() }
+
+    var progress: CGFloat { max(vertical, rows.values.max() ?? 0) }
+
+    private func settle() {
+        let p = progress
+        if !folded, p >= 0.35 { folded = true } else if folded, p <= 0.08 { folded = false }
+    }
 }
 
 private struct FeedCollapseKey: EnvironmentKey { static let defaultValue: FeedCollapse? = nil }
@@ -414,8 +441,8 @@ struct SidebarShell: View {
     /// The fold of the page on screen: the open catalogue's, else the selected tab's.
     private var visibleFold: FeedCollapse? { catalogueID != nil ? catalogueFold : tabFolds[tab] }
     private var fold: CGFloat {
-        if let active = shellNav.activeFold { return active.progress }
-        return visibleFold?.progress ?? 0
+        if let active = shellNav.activeFold { return active.folded ? 1 : 0 }
+        return (visibleFold?.folded ?? false) ? 1 : 0
     }
     private var compact: Bool {
         let width: CGFloat = baseWidth + (76 - baseWidth) * fold
@@ -459,15 +486,12 @@ struct SidebarShell: View {
         }
         .background(Color(.systemBackground).ignoresSafeArea())
         .environment(\.wideLayout, true)
-        .animation(.easeOut(duration: 0.14), value: fold)
+        .animation(.easeInOut(duration: 0.22), value: fold)
         .onContinuousHover { phase in
             if case .active = phase, !InputState.shared.pointerActive {
                 InputState.shared.pointerActive = true
             }
         }
-        .simultaneousGesture(DragGesture(minimumDistance: 0).onChanged { _ in
-            if InputState.shared.pointerActive { InputState.shared.pointerActive = false }
-        })
         .onChange(of: tab, initial: true) { _, t in
             visited.insert(t)
             shellNav.current = t
@@ -796,7 +820,7 @@ struct CollapsingSplit<Hero: View, Pane: View>: View {
             let heroFull: CGFloat = min(max(geo.size.width * heroFraction, 290), heroMaxWidth)
             let feedWidth: CGFloat = geo.size.width - (inset + heroFull)
             let tooNarrow: Bool = showsHero && feedWidth < 300
-            let fold: CGFloat = tooNarrow ? 1 : min(max(fc.progress, 0), 1)
+            let fold: CGFloat = tooNarrow ? 1 : (fc.folded ? 1 : 0)
             let heroWidth: CGFloat = inset + heroFull * (1 - fold)
             let ctx = SplitContext(collapsed: fold >= 0.98 || !showsHero,
                                    fold: fold,
@@ -825,7 +849,7 @@ struct CollapsingSplit<Hero: View, Pane: View>: View {
                     }
                     .environment(\.feedCollapse, fc)
             }
-            .animation(.easeOut(duration: 0.14), value: fold)
+            .animation(.easeInOut(duration: 0.22), value: fold)
             .sensoryFeedback(.selection, trigger: ctx.collapsed)
         }
     }
@@ -869,13 +893,10 @@ struct PaneScroll<Content: View>: View {
         }
         .scrollPosition($position)
         .scrollIndicators(.hidden)
-        .onScrollGeometryChange(for: CGFloat.self) { geo in
-            max(geo.contentOffset.y + geo.contentInsets.top, 0)
-        } action: { _, y in
-            guard let fc = feedCollapse else { return }
-            fc.scrollY = y
-            fc.vertical = min(y / ctx.collapseDistance, 1)
-            if y <= 0 { fc.expand() }
+        .onScrollGeometryChange(for: Int.self) { geo in
+            FeedCollapse.bucket(max(geo.contentOffset.y + geo.contentInsets.top, 0) / ctx.collapseDistance)
+        } action: { _, b in
+            feedCollapse?.setVertical(bucket: b)
         }
         .onChange(of: ctx.scrollTop) { _, _ in
             withAnimation(.smooth(duration: 0.45)) { position.scrollTo(edge: .top) }
@@ -893,10 +914,10 @@ private struct ReportsRowDrag: ViewModifier {
     @ViewBuilder func body(content: Content) -> some View {
         if wide, let fc = feedCollapse {
             content
-                .onScrollGeometryChange(for: CGFloat.self) { geo in
-                    max(geo.contentOffset.x + geo.contentInsets.leading, 0)
-                } action: { _, x in
-                    fc.report(id, x)
+                .onScrollGeometryChange(for: Int.self) { geo in
+                    FeedCollapse.bucket(max(geo.contentOffset.x + geo.contentInsets.leading, 0) / 360)
+                } action: { _, b in
+                    fc.report(id, bucket: b)
                 }
                 .onDisappear { fc.forget(id) }
         } else {
@@ -920,12 +941,10 @@ private struct CollapsesSidebarOnScroll: ViewModifier {
     @ViewBuilder func body(content: Content) -> some View {
         if wide, let fc = feedCollapse {
             content
-                .onScrollGeometryChange(for: CGFloat.self) { geo in
-                    max(geo.contentOffset.y + geo.contentInsets.top, 0)
-                } action: { _, y in
-                    fc.scrollY = y
-                    fc.vertical = min(y / distance, 1)
-                    if y <= 0 { fc.expand() }
+                .onScrollGeometryChange(for: Int.self) { geo in
+                    FeedCollapse.bucket(max(geo.contentOffset.y + geo.contentInsets.top, 0) / distance)
+                } action: { _, b in
+                    fc.setVertical(bucket: b)
                 }
         } else {
             content
