@@ -25,6 +25,17 @@ final class ShellNav {
     var current: AppTab = .home
     var catalogueActive = false
     var activeFold: FeedCollapse?
+    /// Pages currently on screen in each stack that asked to draw under the sidebar (see `sidebarBleed()`).
+    private(set) var bleeders: [String: Set<UUID>] = [:]
+
+    func setBleeding(_ key: String, _ token: UUID, _ on: Bool) {
+        var set = bleeders[key] ?? []
+        if on { set.insert(token) } else { set.remove(token) }
+        if set != (bleeders[key] ?? []) { bleeders[key] = set }
+    }
+
+    /// True while a page that bleeds is showing in this stack.
+    func isBleeding(_ key: String) -> Bool { !(bleeders[key] ?? []).isEmpty }
 
     init() {
         for tab in AppTab.allCases { paths[tab] = NavigationPath() }
@@ -194,9 +205,20 @@ extension EnvironmentValues {
     }
 }
 
-/// Kill switch. Set to false to make pages simply start beside the sidebar.
-/// It exists because glass bleed could not be verified on a device.
+/// Kill switch. Set to false to make every page simply start beside the sidebar.
+/// With it on, only the pages that call `sidebarBleed()` (the Home hero, a title's poster) draw beneath the glass
+/// sidebar, exactly as on the desktop app. Every other page is laid out beside it.
 enum WideLayoutConfig { static let bleedUnderSidebar = true }
+
+private struct ShellStackKey: EnvironmentKey { static let defaultValue = "none" }
+extension EnvironmentValues {
+    /// Which navigation stack of the shell a page lives in ("tab-home", "catalogue", ...). Pages that bleed report
+    /// themselves under this key, so the shell knows whether the stack's visible page may sit under the sidebar.
+    var shellStackKey: String {
+        get { self[ShellStackKey.self] }
+        set { self[ShellStackKey.self] = newValue }
+    }
+}
 
 private struct SidebarInsetKey: EnvironmentKey { static let defaultValue: CGFloat = 0 }
 extension EnvironmentValues {
@@ -218,13 +240,18 @@ extension EnvironmentValues {
 
 private struct SidebarBleedModifier: ViewModifier {
     @Environment(\.sidebarBleeds) private var sidebarBleeds
+    @Environment(\.shellStackKey) private var stackKey
+    @Environment(ShellNav.self) private var shellNav
+    @State private var token = UUID()
 
-    @ViewBuilder func body(content: Content) -> some View {
-        if sidebarBleeds {
-            content.ignoresSafeArea(.container, edges: .leading)
-        } else {
-            content
-        }
+    /// One code path on purpose: the shell flips `sidebarBleeds` once this page has reported in, and a branch here
+    /// would change the page's identity and throw its state away. The page reports whether or not it may bleed yet,
+    /// so the shell can give its stack the room (and the page the sidebar inset) on the next pass.
+    func body(content: Content) -> some View {
+        content
+            .ignoresSafeArea(.container, edges: sidebarBleeds ? .leading : [])
+            .onAppear { shellNav.setBleeding(stackKey, token, true) }
+            .onDisappear { shellNav.setBleeding(stackKey, token, false) }
     }
 }
 
@@ -412,8 +439,7 @@ struct SidebarShell: View {
         let width: CGFloat = baseWidth + (76 - baseWidth) * fold
         let inset: CGFloat = bleeds ? width : 0
         ZStack(alignment: .leading) {
-            pages
-                .safeAreaPadding(.leading, width)
+            pages(width: width)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .environment(\.sidebarBleeds, bleeds)
                 .environment(\.sidebarInset, inset)
@@ -502,11 +528,32 @@ struct SidebarShell: View {
 
     private func shown(_ t: AppTab) -> Bool { catalogueID == nil && tab == t }
 
-    private var pages: some View {
+    /// Desktop rule: a page that bleeds (Home's hero, a title's poster) starts at the window edge and is told how far
+    /// the sidebar covers it. Every other page gets the sidebar's width as real layout space, so its title, lists and
+    /// sideways-scrolling rows are laid out and clipped beside the sidebar and can never slide under it.
+    /// Home's root counts as bleeding before it has reported in, so it does not jump on launch.
+    private func stackBleeds(_ key: String, home: Bool = false) -> Bool {
+        guard bleeds else { return false }
+        if shellNav.isBleeding(key) { return true }
+        return home && (shellNav.paths[.home]?.isEmpty ?? true)
+    }
+
+    @ViewBuilder
+    private func stack<V: View>(_ key: String, width: CGFloat, home: Bool = false, @ViewBuilder _ content: () -> V) -> some View {
+        let b: Bool = stackBleeds(key, home: home)
+        content()
+            .padding(.leading, b ? 0 : width)
+            .safeAreaPadding(.leading, b ? width : 0)
+            .environment(\.sidebarBleeds, b)
+            .environment(\.sidebarInset, b ? width : 0)
+            .environment(\.shellStackKey, key)
+    }
+
+    private func pages(width: CGFloat) -> some View {
         ZStack {
             ForEach(AppTab.allCases) { t in
                 if visited.contains(t) || tab == t {
-                    page(t)
+                    stack("tab-\(t)", width: width, home: t == .home) { page(t) }
                         .environment(\.pageActive, shown(t))
                         .environment(\.feedCollapse, tabFolds[t])
                         .opacity(shown(t) ? 1 : 0)
@@ -516,13 +563,16 @@ struct SidebarShell: View {
             }
             if let id = catalogueID {
                 if let ref = catalogues.first(where: { $0.id == id }) {
-                    CataloguePage(ref: ref).id(ref.id).environment(\.feedCollapse, catalogueFold)
+                    stack("catalogue", width: width) { CataloguePage(ref: ref).id(ref.id) }
+                        .environment(\.feedCollapse, catalogueFold)
                 } else if id.hasPrefix("local:") {
                     let ref = CatalogueRef(localID: id)
-                    CataloguePage(ref: ref).id(ref.id).environment(\.feedCollapse, catalogueFold)
+                    stack("catalogue", width: width) { CataloguePage(ref: ref).id(ref.id) }
+                        .environment(\.feedCollapse, catalogueFold)
                 }
             }
         }
+        .animation(.easeOut(duration: 0.14), value: [stackBleeds("tab-\(tab)", home: tab == .home), stackBleeds("catalogue")])
     }
 
     @ViewBuilder private func page(_ t: AppTab) -> some View {
