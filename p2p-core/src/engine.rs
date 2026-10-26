@@ -148,7 +148,7 @@ fn build_magnet(hash: &str, trackers: &[String]) -> Result<String, P2pError> {
         return Err(P2pError::InvalidInput { msg: "info hash must be 40 hex chars".into() });
     }
     let mut m = format!("magnet:?xt=urn:btih:{}", hash.to_ascii_lowercase());
-    for t in trackers.iter().filter(|t| ["udp://", "http://", "https://"].iter().any(|p| t.starts_with(p))).take(12) {
+    for t in trackers.iter().filter(|t| ["udp://", "http://", "https://"].iter().any(|p| t.starts_with(p))).take(24) {
         m.push_str("&tr=");
         m.extend(url::form_urlencoded::byte_serialize(t.as_bytes()));
     }
@@ -166,8 +166,11 @@ impl Ctx {
     async fn open(&self, info_hash: String, trackers: Vec<String>, file_idx: Option<u32>) -> Result<StreamInfo, P2pError> {
         self.drop_current().await; // one stream at a time: bounded peers, disk and memory
         let magnet = build_magnet(&info_hash, &trackers)?;
+        // A known file index (Torrentio) is selected at add time, so the torrent can start straight away. Without one,
+        // it stays paused until the metadata shows which file to take.
+        let direct = file_idx.is_some();
         let opts = AddTorrentOptions {
-            paused: true, // metadata resolves, but no piece traffic until we pick the one file we need
+            paused: !direct, // metadata resolves, but no piece traffic until we pick the one file we need
             overwrite: true,
             only_files: file_idx.map(|i| vec![i as usize]),
             ..Default::default()
@@ -200,9 +203,17 @@ impl Ctx {
             // initializing torrent"). A paused magnet passes through that state right after its metadata
             // resolves, so wait for it to settle (Paused) before touching the file selection.
             handle.wait_until_initialized().await.map_err(t_err)?;
-            self.session.update_only_files(&handle, &only).await.map_err(t_err)?;
-            self.session.unpause(&handle).await.map_err(t_err)?;
-            handle.wait_until_initialized().await.map_err(t_err)?;
+            if direct {
+                // Already running on the requested file. Only if that index was unusable (pick_file chose another)
+                // does the selection need changing.
+                if file_idx.map(|i| i as usize) != Some(idx) {
+                    self.session.update_only_files(&handle, &only).await.map_err(t_err)?;
+                }
+            } else {
+                self.session.update_only_files(&handle, &only).await.map_err(t_err)?;
+                self.session.unpause(&handle).await.map_err(t_err)?;
+                handle.wait_until_initialized().await.map_err(t_err)?;
+            }
 
             let safe: String = url::form_urlencoded::byte_serialize(name.as_bytes()).collect();
             let url = format!("{}/{}/stream/{}", self.base, self.token, safe);

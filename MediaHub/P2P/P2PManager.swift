@@ -19,13 +19,10 @@ final class P2PManager {
     nonisolated static let placeholderURL = URL(string: "p2p://pending")!
     /// Posted (main queue) whenever a running engine is torn down. userInfo["reason"] is a StopReason raw value.
     static let didStop = Notification.Name("P2PManagerDidStop")
-    /// A paused stream keeps the engine this long (instant resume, buffered pieces kept); after that everything is torn down.
-    /// A paused engine is nearly free: the pacer throttles the swarm to a trickle once the read-ahead window is full,
-    /// so a long hold costs little, while a teardown throws away the buffer and forces a cold start. Shorter under
-    /// Low Power Mode / thermal pressure.
-    nonisolated static var idleTimeout: Duration { powerSaving ? .seconds(5 * 60) : .seconds(15 * 60) }
-    /// After an audio interruption (call, Siri, alarm) begins: much shorter, since it may last minutes.
-    static let interruptionGrace: Duration = .seconds(15)
+    // There is no idle timeout: a paused, backgrounded or interrupted stream keeps its engine (instant resume, buffered
+    // pieces kept). A paused engine is nearly free, since the pacer throttles the swarm to a trickle once the read-ahead
+    // window is full, while a teardown throws away the buffer and forces a cold start. The engine ends when the user
+    // ends the stream, or for the two safety stops below (network no longer allowed, memory pressure).
 
     enum StopReason: String {
         case user, idle, background, memory, network, interruption
@@ -51,9 +48,7 @@ final class P2PManager {
     private var generation = 0
     /// Serial: engine construction and metadata fetch block their thread, so they never run on the main thread or the cooperative pool.
     private let worker = DispatchQueue(label: "p2p.worker", qos: .userInitiated)
-    private var idleTask: Task<Void, Never>?
     private var isPlaying = false
-    private var interrupted = false
     private var observers: [NSObjectProtocol] = []
 
     private init() {
@@ -67,10 +62,6 @@ final class P2PManager {
         watch(P2PNetwork.didChange) { m, n in if (n.userInfo?["allowed"] as? Bool) == false { m.stop(.network) } }
         // Jetsam guard: under memory pressure the engine goes first; playback can reopen at the same position.
         watch(UIApplication.didReceiveMemoryWarningNotification) { m, _ in m.stop(.memory) }
-        watch(AVAudioSession.interruptionNotification) { m, n in
-            let raw = n.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt
-            m.interruption(raw.flatMap(AVAudioSession.InterruptionType.init(rawValue:)))
-        }
         watch(.NSProcessInfoPowerStateDidChange) { m, _ in m.applyPowerSaving() }
         watch(ProcessInfo.thermalStateDidChangeNotification) { m, _ in m.applyPowerSaving() }
     }
@@ -84,33 +75,13 @@ final class P2PManager {
 
     // MARK: Lifecycle hooks (called by RootView and PlayerModel)
 
-    /// Scene went to the background. A stream that is playing keeps going (background audio / PiP); anything else is torn down.
-    func scenePhaseChanged(_ phase: ScenePhase) {
-        guard phase == .background, engine != nil, !isPlaying else { return }
-        stop(.background)
-    }
+    /// Scene phase changes. The engine is kept: a stream that is playing keeps going (background audio / PiP), and a
+    /// paused one waits, suspended with the app, until the user comes back. Kept so callers need no change.
+    func scenePhaseChanged(_ phase: ScenePhase) {}
 
-    /// Mirrors the player: playing / buffering / seeking = true; paused / ended / failed = false.
-    /// While not playing, an idle countdown runs and ends in a full teardown.
+    /// Mirrors the player: playing / buffering / seeking = true; paused / ended / failed = false. Nothing times out.
     func playbackChanged(_ playing: Bool) {
         isPlaying = playing
-        idleTask?.cancel(); idleTask = nil
-        guard engine != nil, !playing else { return }
-        if UIApplication.shared.applicationState == .background { stop(.background); return }
-        let wait = interrupted ? Self.interruptionGrace : Self.idleTimeout
-        idleTask = Task { [weak self] in
-            try? await Task.sleep(for: wait)
-            guard !Task.isCancelled, let self else { return }
-            self.stop(self.interrupted ? .interruption : .idle)
-        }
-    }
-
-    private func interruption(_ type: AVAudioSession.InterruptionType?) {
-        switch type {
-        case .began: interrupted = true; playbackChanged(false)
-        case .ended: interrupted = false; playbackChanged(isPlaying)
-        default: break
-        }
     }
 
     var isActive: Bool { engine != nil }
@@ -119,7 +90,6 @@ final class P2PManager {
     /// Seeks need no handling here: AetherEngine/FFmpeg send HTTP Range requests and the Rust proxy answers 206.
     func open(_ src: P2PSource) async throws -> URL {
         guard P2PSettings.isEnabled else { throw Failure.disabled }
-        idleTask?.cancel(); idleTask = nil
         await P2PNetwork.shared.ready()
         guard P2PNetwork.shared.allowed else { throw Failure.networkBlocked }
 
@@ -154,7 +124,6 @@ final class P2PManager {
     /// task so it also finishes when the app is moving to the background.
     func stop(_ reason: StopReason = .user) {
         generation += 1
-        idleTask?.cancel(); idleTask = nil
         guard let e = engine else { return }
         engine = nil
         NotificationCenter.default.post(name: Self.didStop, object: nil, userInfo: ["reason": reason.rawValue])
