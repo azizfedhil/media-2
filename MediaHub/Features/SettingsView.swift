@@ -158,6 +158,8 @@ struct SettingsView: View {
                     .padding(.vertical, 4)
                     Toggle("Network icons on posters", isOn: $networkBadges)
                     Toggle("Logos instead of title text", isOn: $titleLogos)
+                    Toggle("Built-in font", isOn: Binding(get: { FontPrefs.shared.enabled },
+                                                          set: { FontPrefs.shared.set($0) }))
                     if WideLayout.isPad || landscapeLayout {
                         Picker("Sidebar style", selection: Binding(
                             get: { SidebarStyle(rawValue: sidebarStyle) ?? .liquid },
@@ -176,7 +178,7 @@ struct SettingsView: View {
                     }
                 } header: { Text("Appearance") } footer: {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("Network icons make one small request per visible poster. Logos come from TMDB, TheTVDB and Metahub and are cached after the first lookup.\(WideLayout.isPad ? "" : " Landscape layout turns the app sideways into the iPad-style sidebar layout when you rotate your iPhone. Off keeps the app portrait-only.")")
+                        Text("Network icons make one small request per visible poster. Logos come from TMDB, TheTVDB and Metahub and are cached after the first lookup. Built-in font uses Archivo; off uses the system font (navigation bar titles switch after restarting the app).\(WideLayout.isPad ? "" : " Landscape layout turns the app sideways into the iPad-style sidebar layout when you rotate your iPhone. Off keeps the app portrait-only.")")
                         if WideLayout.isPad || landscapeLayout {
                             Text("Liquid floats over the page as glass. Frosted is a full-height blurred panel. Flat is a solid panel.")
                         }

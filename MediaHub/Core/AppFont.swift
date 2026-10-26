@@ -2,6 +2,24 @@ import SwiftUI
 import UIKit
 import CoreText
 
+/// The "Built-in font" switch in Settings (on by default). Observable, so every view that builds a font through
+/// `Font.archivo` while rendering updates the moment it changes. Off means the system font everywhere.
+@Observable
+final class FontPrefs {
+    static let shared = FontPrefs()
+    static let key = "ui.builtInFont"
+    private(set) var enabled: Bool
+
+    private init() { enabled = UserDefaults.standard.object(forKey: Self.key) as? Bool ?? true }
+
+    func set(_ on: Bool) {
+        guard on != enabled else { return }
+        enabled = on
+        UserDefaults.standard.set(on, forKey: Self.key)
+        Archivo.installAppearance()
+    }
+}
+
 /// Archivo, the app-wide typeface. The static TTFs live in Resources/Fonts and are registered at launch
 /// (`Archivo.register()`), so no Info.plist entry is needed. If a file is ever missing, SwiftUI falls back to the system font.
 enum Archivo {
@@ -47,26 +65,37 @@ enum Archivo {
 
     /// UIKit-drawn text (navigation bar titles, bar buttons). SwiftUI text is covered by `Font.archivo`.
     static func installAppearance() {
-        func ui(_ weight: Font.Weight, _ size: CGFloat) -> UIFont? { UIFont(name: postScriptName(weight), size: size) }
-        let nav = UINavigationBar.appearance()
-        if let f = ui(.semibold, 17) { nav.titleTextAttributes = [.font: f] }
-        if let f = ui(.bold, 34) { nav.largeTitleTextAttributes = [.font: f] }
-        if let f = ui(.medium, 17) {
-            UIBarButtonItem.appearance().setTitleTextAttributes([.font: f], for: .normal)
-            UIBarButtonItem.appearance().setTitleTextAttributes([.font: f], for: .highlighted)
+        let on = FontPrefs.shared.enabled
+        func attrs(_ weight: Font.Weight, _ size: CGFloat) -> [NSAttributedString.Key: Any]? {
+            guard on, let f = UIFont(name: postScriptName(weight), size: size) else { return nil }
+            return [NSAttributedString.Key.font: f]
         }
+        let nav = UINavigationBar.appearance()
+        nav.titleTextAttributes = attrs(.semibold, 17)
+        nav.largeTitleTextAttributes = attrs(.bold, 34)
+        UIBarButtonItem.appearance().setTitleTextAttributes(attrs(.medium, 17), for: .normal)
+        UIBarButtonItem.appearance().setTitleTextAttributes(attrs(.medium, 17), for: .highlighted)
     }
 }
 
 extension Font {
     /// Archivo at a text style's size, scaling with Dynamic Type like the system styles do. `.headline` is semibold by default.
+    /// With "Built-in font" off in Settings this is the matching system style instead.
     static func archivo(_ style: Font.TextStyle, weight: Font.Weight? = nil, italic: Bool = false) -> Font {
+        guard FontPrefs.shared.enabled else {
+            let f = Font.system(style, weight: weight)
+            return italic ? f.italic() : f
+        }
         let w = weight ?? (style == .headline ? .semibold : .regular)
         return .custom(Archivo.postScriptName(w, italic: italic), size: Archivo.baseSize(style), relativeTo: style)
     }
 
-    /// Archivo at a fixed point size (the replacement for `.system(size:weight:)`).
+    /// Archivo at a fixed point size (the replacement for `.system(size:weight:)`). System font when the setting is off.
     static func archivo(size: CGFloat, weight: Font.Weight = .regular, italic: Bool = false) -> Font {
-        .custom(Archivo.postScriptName(weight, italic: italic), fixedSize: size)
+        guard FontPrefs.shared.enabled else {
+            let f = Font.system(size: size, weight: weight)
+            return italic ? f.italic() : f
+        }
+        return .custom(Archivo.postScriptName(weight, italic: italic), fixedSize: size)
     }
 }
