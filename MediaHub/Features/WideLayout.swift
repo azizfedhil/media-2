@@ -644,6 +644,9 @@ struct SidebarShell: View {
             } else {
                 SidebarColumn(catalogueID: $catalogueID, catalogues: catalogues)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    // The list's scroll view bleeds into the bottom safe area, which would draw its rows (and
+                    // "Show less") below the panel. Keep them inside the panel.
+                    .clipped()
             }
         }
         .padding(.horizontal, sidebarHorizontalPadding)

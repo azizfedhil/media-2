@@ -8,6 +8,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: xcodebuild -version
+      # Cargo only reuses compiled crates when the compiler is the same one that built them. The runner image updates
+      # Rust every so often, and a cache is never overwritten once its key exists. Without the compiler in the key, an
+      # old cache would keep being restored as an exact hit, recompile everything, and never be saved again.
+      - name: Rust compiler id
+        id: rust
+        run: echo "id=$(rustc -Vv | shasum | cut -c1-16)" >> "$GITHUB_OUTPUT"
       - name: Restore Cargo cache
         id: cargo-cache
         uses: actions/cache/restore@v4
@@ -19,9 +25,10 @@ jobs:
             p2p-core/uniffi-bindgen/target
             p2p-core/Cargo.lock
             p2p-core/uniffi-bindgen/Cargo.lock
-          key: cargo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('p2p-core/Cargo.toml', 'p2p-core/uniffi-bindgen/Cargo.toml') }}
+          key: cargo-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust.outputs.id }}-${{ hashFiles('p2p-core/Cargo.toml', 'p2p-core/uniffi-bindgen/Cargo.toml') }}
+          # A changed Cargo.toml still starts from the same compiler's cache; a different compiler never restores.
           restore-keys: |
-            cargo-${{ runner.os }}-${{ runner.arch }}-
+            cargo-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust.outputs.id }}-
       - name: Build P2PCore.xcframework
         run: bash ./p2p-core/scripts/build-xcframework.sh
       # Saved right after the Rust build, so a later Xcode failure can't lose the cache.
