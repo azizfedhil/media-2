@@ -75,7 +75,7 @@ struct IntegrationsView: View {
     }
 
     @ViewBuilder private func status(_ text: String?) -> some View {
-        if let text { Label(text, systemImage: "checkmark.circle.fill").font(.footnote).foregroundStyle(.green) }
+        if let text { Label(text, systemImage: "checkmark.circle.fill").font(.archivo(.footnote)).foregroundStyle(.green) }
     }
 
     // MARK: Simkl (PIN login with MediaHub's own app: nothing to register, works inside LiveContainer)

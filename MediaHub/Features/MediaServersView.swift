@@ -34,8 +34,8 @@ struct MediaServersView: View {
         HStack(spacing: 12) {
             Image(systemName: a.kind.symbol).frame(width: 28).foregroundStyle(.tint)
             VStack(alignment: .leading, spacing: 2) {
-                Text(a.name).font(.body.weight(.semibold))
-                Text(a.kind == .plex ? "Plex" : "Jellyfin · \(a.host)").font(.footnote).foregroundStyle(.secondary)
+                Text(a.name).font(.archivo(.body, weight: .semibold))
+                Text(a.kind == .plex ? "Plex" : "Jellyfin · \(a.host)").font(.archivo(.footnote)).foregroundStyle(.secondary)
             }
             Spacer()
             Toggle("Use \(a.name)", isOn: Binding(get: { a.enabled }, set: { servers.setEnabled(a.id, $0) })).labelsHidden()
@@ -77,7 +77,7 @@ struct AddJellyfinView: View {
                     Text(quick.code).font(.system(size: 34, weight: .bold, design: .monospaced)).textSelection(.enabled)
                     HStack(spacing: 8) {
                         ProgressView()
-                        Text("Waiting for approval…").font(.footnote).foregroundStyle(.secondary)
+                        Text("Waiting for approval…").font(.archivo(.footnote)).foregroundStyle(.secondary)
                     }
                     Button("Cancel", role: .cancel) { cancel() }
                 } header: { Text("Quick Connect") } footer: {
@@ -88,7 +88,7 @@ struct AddJellyfinView: View {
                     TextField("Username", text: $user).textInputAutocapitalization(.never).autocorrectionDisabled()
                     SecureField("Password", text: $password)
                     Button { signIn() } label: {
-                        Text(busy ? "Signing in…" : "Sign in").font(.body.weight(.semibold)).foregroundStyle(theme.onAccent)
+                        Text(busy ? "Signing in…" : "Sign in").font(.archivo(.body, weight: .semibold)).foregroundStyle(theme.onAccent)
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
@@ -103,7 +103,7 @@ struct AddJellyfinView: View {
             }
 
             if let error {
-                Section { Label(error, systemImage: "xmark.octagon.fill").font(.footnote).foregroundStyle(.red) }
+                Section { Label(error, systemImage: "xmark.octagon.fill").font(.archivo(.footnote)).foregroundStyle(.red) }
             }
         }
         .navigationTitle("Jellyfin")
@@ -182,7 +182,7 @@ struct AddPlexView: View {
                 serverSection
             }
             if let error {
-                Section { Label(error, systemImage: "xmark.octagon.fill").font(.footnote).foregroundStyle(.red) }
+                Section { Label(error, systemImage: "xmark.octagon.fill").font(.archivo(.footnote)).foregroundStyle(.red) }
             }
         }
         .navigationTitle("Plex")
@@ -199,12 +199,12 @@ struct AddPlexView: View {
                 }
                 HStack(spacing: 8) {
                     ProgressView()
-                    Text("Waiting for you to sign in…").font(.footnote).foregroundStyle(.secondary)
+                    Text("Waiting for you to sign in…").font(.archivo(.footnote)).foregroundStyle(.secondary)
                 }
                 Button("Cancel", role: .cancel) { task?.cancel(); self.pin = nil; busy = false }
             } else {
                 Button { signIn() } label: {
-                    Label(busy ? "Starting…" : "Sign in with Plex", systemImage: "link").font(.body.weight(.semibold))
+                    Label(busy ? "Starting…" : "Sign in with Plex", systemImage: "link").font(.archivo(.body, weight: .semibold))
                         .foregroundStyle(theme.onAccent)
                 }
                 .buttonStyle(.borderedProminent)
@@ -224,14 +224,14 @@ struct AddPlexView: View {
                 Toggle(isOn: Binding(get: { selected.contains(s.id) },
                                      set: { on in if on { selected.insert(s.id) } else { selected.remove(s.id) } })) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(s.name).font(.body.weight(.semibold))
-                        Text(s.owned ? "Yours" : "Shared with you").font(.footnote).foregroundStyle(.secondary)
+                        Text(s.name).font(.archivo(.body, weight: .semibold))
+                        Text(s.owned ? "Yours" : "Shared with you").font(.archivo(.footnote)).foregroundStyle(.secondary)
                     }
                 }
             }
             if !found.isEmpty {
                 Button { addSelected() } label: {
-                    Text(busy ? "Connecting…" : "Add selected").font(.body.weight(.semibold)).foregroundStyle(theme.onAccent)
+                    Text(busy ? "Connecting…" : "Add selected").font(.archivo(.body, weight: .semibold)).foregroundStyle(theme.onAccent)
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)

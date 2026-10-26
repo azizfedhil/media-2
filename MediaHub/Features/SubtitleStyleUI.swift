@@ -70,7 +70,7 @@ struct SubtitleStyleControls: View {
             }
 
             Button("Reset to defaults", role: .destructive) { json = "" }
-                .font(.footnote.weight(.semibold))
+                .font(.archivo(.footnote, weight: .semibold))
         }
         .tint(onDark ? .white : nil)
     }
@@ -78,9 +78,9 @@ struct SubtitleStyleControls: View {
     private func row<C: View>(_ title: String, value: String? = nil, @ViewBuilder content: () -> C) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Text(title).font(.footnote.weight(.semibold)).foregroundStyle(.secondary)
+                Text(title).font(.archivo(.footnote, weight: .semibold)).foregroundStyle(.secondary)
                 Spacer()
-                if let value { Text(value).font(.footnote.monospacedDigit()).foregroundStyle(.secondary) }
+                if let value { Text(value).font(.archivo(.footnote).monospacedDigit()).foregroundStyle(.secondary) }
             }
             content()
         }

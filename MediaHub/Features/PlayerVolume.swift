@@ -121,7 +121,7 @@ struct VolumeSliderRow: View {
             Button(action: onToggleMute) {
                 Image(systemName: shown < 0.001 ? "speaker.slash.fill" : "speaker.wave.3.fill",
                       variableValue: Double(shown))
-                    .font(.system(size: 19, weight: .semibold))
+                    .font(.archivo(size: 19, weight: .semibold))
                     .foregroundStyle(.white)
                     .contentTransition(.symbolEffect(.replace))
                     .frame(width: 46, height: 46)

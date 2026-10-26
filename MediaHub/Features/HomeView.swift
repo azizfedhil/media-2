@@ -584,20 +584,20 @@ private struct HeroPage: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
                 Label(item.typeLabel.uppercased(), systemImage: item.type == "series" ? "tv" : "film")
-                    .font(.caption2.weight(.heavy)).tracking(1.2)
+                    .font(.archivo(.caption2, weight: .heavy)).tracking(1.2)
                     .padding(.horizontal, 9).padding(.vertical, 4)
                     .background(.white.opacity(0.18), in: Capsule())
-                if let y = item.year { Text(String(y)).font(.subheadline.weight(.semibold)).opacity(0.9) }
+                if let y = item.year { Text(String(y)).font(.archivo(.subheadline, weight: .semibold)).opacity(0.9) }
             }
             // Logo when we have one, title text otherwise (text shows first, then swaps once the logo has loaded).
-            TitleArt(item: item, maxWidth: 270, maxHeight: 86, font: .system(size: 38, weight: .heavy, design: .rounded))
+            TitleArt(item: item, maxWidth: 270, maxHeight: 86, font: .archivo(size: 38, weight: .heavy))
             InlineRatings(item: item)
             if let d = item.description, !d.isEmpty {
-                Text(d).font(.subheadline).lineLimit(2).opacity(0.85)
+                Text(d).font(.archivo(.subheadline)).lineLimit(2).opacity(0.85)
             }
             // Flat on purpose: live glass over artwork that is moving would be re-sampled every frame.
             Text("Details")
-                .font(.subheadline.weight(.semibold)).padding(.horizontal, 18).padding(.vertical, 10)
+                .font(.archivo(.subheadline, weight: .semibold)).padding(.horizontal, 18).padding(.vertical, 10)
                 .background(.white.opacity(0.2), in: Capsule())
                 .overlay(Capsule().strokeBorder(.white.opacity(0.28), lineWidth: 0.5))
                 .padding(.top, 2)
@@ -780,7 +780,7 @@ struct ContinueRow: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
                 Image(systemName: "play.circle.fill").font(.system(size: 15, weight: .bold)).foregroundStyle(theme.accent2)
-                Text("Continue Watching").font(.title3.bold())
+                Text("Continue Watching").font(.archivo(.title3, weight: .bold))
             }
             .padding(.horizontal, 16)
             ScrollView(.horizontal) {
@@ -822,10 +822,10 @@ struct ContinueCard: View {
     private var imageSize: CGFloat { cardWidth ?? (wideLayout ? 270 * 1.33 : 270) }
     private var fillWidth: CGFloat? { fillsWidth ? .infinity : nil }
     private var nameFont: Font {
-        wideLayout ? .system(size: 15 * 1.2, weight: .semibold) : .subheadline.weight(.semibold)
+        wideLayout ? .archivo(size: 15 * 1.2, weight: .semibold) : .archivo(.subheadline, weight: .semibold)
     }
     private var subtitleFont: Font {
-        wideLayout ? .system(size: 12 * 1.2) : .caption
+        wideLayout ? .archivo(size: 12 * 1.2) : .archivo(.caption)
     }
 
     private var thumb: URL? {
@@ -847,7 +847,7 @@ struct ContinueCard: View {
                     .overlay { StillImage(url: thumb, size: imageSize) }
                     .overlay { LinearGradient(colors: [.clear, .black.opacity(0.5)], startPoint: .center, endPoint: .bottom) }
                     .overlay(alignment: .topTrailing) {
-                        Text(Fmt.clock(entry.position)).font(.system(size: 11, weight: .bold)).monospacedDigit()
+                        Text(Fmt.clock(entry.position)).font(.archivo(size: 11, weight: .bold)).monospacedDigit()
                             .foregroundStyle(.white).padding(.horizontal, 7).padding(.vertical, 3)
                             .background(.black.opacity(0.62), in: Capsule()).padding(8)
                     }
@@ -904,10 +904,10 @@ struct UpNextCard: View {
     private var imageSize: CGFloat { cardWidth ?? (wideLayout ? 270 * 1.33 : 270) }
     private var fillWidth: CGFloat? { fillsWidth ? .infinity : nil }
     private var nameFont: Font {
-        wideLayout ? .system(size: 15 * 1.2, weight: .semibold) : .subheadline.weight(.semibold)
+        wideLayout ? .archivo(size: 15 * 1.2, weight: .semibold) : .archivo(.subheadline, weight: .semibold)
     }
     private var subtitleFont: Font {
-        wideLayout ? .system(size: 12 * 1.2) : .caption
+        wideLayout ? .archivo(size: 12 * 1.2) : .archivo(.caption)
     }
 
     var body: some View {
@@ -919,7 +919,7 @@ struct UpNextCard: View {
                     .overlay { StillImage(url: entry.thumb, size: imageSize) }
                     .overlay { LinearGradient(colors: [.clear, .black.opacity(0.5)], startPoint: .center, endPoint: .bottom) }
                     .overlay(alignment: .topLeading) {
-                        Text("UP NEXT").font(.system(size: 10, weight: .heavy)).tracking(0.8).foregroundStyle(theme.onAccent)
+                        Text("UP NEXT").font(.archivo(size: 10, weight: .heavy)).tracking(0.8).foregroundStyle(theme.onAccent)
                             .padding(.horizontal, 8).padding(.vertical, 4)
                             .background(theme.accent, in: Capsule()).padding(8)
                     }
@@ -963,7 +963,7 @@ struct CatalogRowView: View {
                     if let s = row.symbol {
                         Image(systemName: s).font(.system(size: 15, weight: .bold)).foregroundStyle(row.accent(theme))
                     }
-                    Text(row.title).font(.title3.bold())
+                    Text(row.title).font(.archivo(.title3, weight: .bold))
                     Image(systemName: "chevron.right").font(.footnote.weight(.bold)).foregroundStyle(.secondary)
                 }
             }
@@ -977,7 +977,7 @@ struct CatalogRowView: View {
                     NavigationLink(value: row) {
                         VStack(spacing: 8) {
                             Image(systemName: "arrow.right.circle").font(.title)
-                            Text("See all").font(.footnote.weight(.semibold))
+                            Text("See all").font(.archivo(.footnote, weight: .semibold))
                         }
                         .foregroundStyle(.secondary)
                         .frame(width: 78, height: posterWidth * 1.5)   // matches the poster height
@@ -1091,9 +1091,9 @@ struct PosterCard: View {
                     }
                 if showsTitle {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(item.name).font(.footnote.weight(.semibold))
+                        Text(item.name).font(.archivo(.footnote, weight: .semibold))
                             .lineLimit(2, reservesSpace: true).multilineTextAlignment(.leading)
-                        Text(caption).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                        Text(caption).font(.archivo(.caption2)).foregroundStyle(.secondary).lineLimit(1)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }

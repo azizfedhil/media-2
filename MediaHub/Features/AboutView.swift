@@ -14,13 +14,13 @@ struct AboutView: View {
             Section {
                 VStack(alignment: .leading, spacing: 10) {
                     HStack(spacing: 10) {
-                        Text("Pear.").font(.system(size: 28, weight: .bold, design: .rounded))
-                        Text(Self.versionString).font(.footnote).foregroundStyle(.secondary)
+                        Text("Pear.").font(.archivo(size: 28, weight: .bold))
+                        Text(Self.versionString).font(.archivo(.footnote)).foregroundStyle(.secondary)
                     }
                     Text("Pear. brings what you watch into one place: your library and watch history, trending and Explore pages, recommendations, and the streams from the add-ons you install, all in a native iOS player with Picture in Picture, subtitles and skip-intro buttons. Everything is saved per profile and stays on your device unless you connect a service.")
-                        .font(.callout).foregroundStyle(.secondary)
+                        .font(.archivo(.callout)).foregroundStyle(.secondary)
                     Text("Pear. doesn't host, provide or index any media. Sources come only from the add-ons and links you choose to add.")
-                        .font(.callout).foregroundStyle(.secondary)
+                        .font(.archivo(.callout)).foregroundStyle(.secondary)
                 }
                 .padding(.vertical, 4)
             }
@@ -74,13 +74,13 @@ struct AboutView: View {
 
     private func component(_ name: String, role: String, license: String, url: String, note: String? = nil) -> some View {
         VStack(alignment: .leading, spacing: 5) {
-            Text(name).font(.headline)
-            Text(role).font(.subheadline).foregroundStyle(.secondary)
-            Text(license).font(.footnote.weight(.semibold))
-            if let note { Text(note).font(.footnote).foregroundStyle(.secondary) }
+            Text(name).font(.archivo(.headline))
+            Text(role).font(.archivo(.subheadline)).foregroundStyle(.secondary)
+            Text(license).font(.archivo(.footnote, weight: .semibold))
+            if let note { Text(note).font(.archivo(.footnote)).foregroundStyle(.secondary) }
             if let u = URL(string: url) {
                 Link(destination: u) { Label(u.host() ?? url, systemImage: "arrow.up.right.square") }
-                    .font(.footnote)
+                    .font(.archivo(.footnote))
             }
         }
         .padding(.vertical, 4)

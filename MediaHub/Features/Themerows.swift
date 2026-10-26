@@ -258,7 +258,7 @@ struct ThemeCarousel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(row.title).font(.title2.bold()).padding(.horizontal, 16)
+            Text(row.title).font(.archivo(.title2, weight: .bold)).padding(.horizontal, 16)
             ScrollView(.horizontal) {
                 LazyHStack(spacing: 14) {
                     ForEach(row.items) { ThemeCard(entry: $0) }
@@ -313,17 +313,17 @@ private struct ThemeCard: View {
     private var info: some View {
         VStack(alignment: .leading, spacing: 10) {
             if let tag {
-                Text(tag).font(.subheadline.weight(.semibold))
+                Text(tag).font(.archivo(.subheadline, weight: .semibold))
                     .padding(.horizontal, 14).padding(.vertical, 7)
                     .background(.black.opacity(0.35), in: Capsule())
                     .overlay(Capsule().strokeBorder(.white.opacity(0.25), lineWidth: 1))
             }
-            TitleArt(item: item, maxWidth: 260, maxHeight: 72, font: .system(size: 30, weight: .heavy, design: .rounded))
+            TitleArt(item: item, maxWidth: 260, maxHeight: 72, font: .archivo(size: 30, weight: .heavy))
             HStack(spacing: 8) {
                 Image(systemName: item.type == "series" ? "tv" : "film")
                     .font(.system(size: 12, weight: .bold))
                     .frame(width: 26, height: 26).background(.black.opacity(0.35), in: Circle())
-                Text(caption).font(.subheadline.weight(.medium)).lineLimit(1)
+                Text(caption).font(.archivo(.subheadline, weight: .medium)).lineLimit(1)
             }
         }
         .foregroundStyle(.white)

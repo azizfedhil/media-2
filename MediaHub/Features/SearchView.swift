@@ -131,8 +131,8 @@ struct SearchView: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
                 Image(systemName: symbol).font(.system(size: 15, weight: .bold)).foregroundStyle(.tint)
-                Text(title).font(.title3.bold())
-                Text("\(items.count)").font(.subheadline.weight(.medium)).foregroundStyle(.secondary)
+                Text(title).font(.archivo(.title3, weight: .bold))
+                Text("\(items.count)").font(.archivo(.subheadline, weight: .medium)).foregroundStyle(.secondary)
             }
             .padding(.horizontal, 16)
             LazyVGrid(columns: columns, spacing: 18) {

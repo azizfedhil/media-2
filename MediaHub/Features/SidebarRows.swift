@@ -41,7 +41,7 @@ struct SidebarNavRow: View {
                     .frame(width: 24)
                 if !compact {
                     Text(tab.title)
-                        .font(.system(size: 16, weight: titleWeight))
+                        .font(.archivo(size: 16, weight: titleWeight))
                     Spacer(minLength: 0)
                 }
             }
@@ -171,7 +171,7 @@ private struct SidebarContinueHeader: View {
         Button(action: action) {
             HStack(spacing: 6) {
                 Text("Continue Watching")
-                    .font(.subheadline.weight(.medium))
+                    .font(.archivo(.subheadline, weight: .medium))
                 Spacer(minLength: 0)
                 Image(systemName: "chevron.right")
                     .font(.system(size: 12, weight: .semibold))
@@ -231,10 +231,10 @@ private struct SidebarContinueRow: View {
                                     in: RoundedRectangle(cornerRadius: 6, style: .continuous))
                     VStack(alignment: .leading, spacing: 2) {
                         Text(entry.item.name)
-                            .font(.footnote.weight(.semibold))
+                            .font(.archivo(.footnote, weight: .semibold))
                             .lineLimit(1)
                         Text(subtitle)
-                            .font(.caption)
+                            .font(.archivo(.caption))
                             .foregroundStyle(Color.white.opacity(0.55))
                             .lineLimit(1)
                         progressBar.padding(.top, 2)
@@ -308,7 +308,7 @@ private struct SidebarPinnedRow: View {
                         .background(Color.white.opacity(0.1),
                                     in: RoundedRectangle(cornerRadius: 6, style: .continuous))
                     Text(item.name)
-                        .font(.footnote.weight(.medium))
+                        .font(.archivo(.footnote, weight: .medium))
                         .foregroundStyle(Color.white.opacity(0.85))
                         .lineLimit(1)
                     Spacer(minLength: 0)
@@ -361,7 +361,7 @@ private struct SidebarSectionLabel: View {
 
     var body: some View {
         Text(title)
-            .font(.subheadline.weight(.medium))
+            .font(.archivo(.subheadline, weight: .medium))
             .foregroundStyle(Color.white.opacity(0.5))
             .lineLimit(1)
             .padding(.leading, 14)
@@ -397,7 +397,7 @@ private struct SidebarCatalogueRow: View {
             HStack(spacing: 10) {
                 SidebarBrandBadge(title: item.title)
                 Text(item.title)
-                    .font(.footnote.weight(weight))
+                    .font(.archivo(.footnote, weight: weight))
                     .foregroundStyle(foreground)
                     .lineLimit(1)
                 Spacer(minLength: 0)
@@ -430,7 +430,7 @@ private struct SidebarBrandBadge: View {
             Circle().fill(badge.background)
             if let label = badge.label {
                 Text(label)
-                    .font(.system(size: 7, weight: .black))
+                    .font(.archivo(size: 7, weight: .black))
                     .foregroundStyle(Color.white)
                     .lineLimit(1)
                     .minimumScaleFactor(0.5)
@@ -475,7 +475,7 @@ private struct SidebarShowMoreRow: View {
         Button(action: action) {
             HStack(spacing: 6) {
                 Text(open ? "Show less" : "Show more")
-                    .font(.footnote.weight(.medium))
+                    .font(.archivo(.footnote, weight: .medium))
                     .lineLimit(1)
                 Image(systemName: open ? "chevron.up" : "chevron.down")
                     .font(.system(size: 12, weight: .semibold))

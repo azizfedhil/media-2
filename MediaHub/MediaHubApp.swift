@@ -138,6 +138,8 @@ struct MediaHubApp: App {
     @State private var showOnboarding = Onboarding.needed
 
     init() {
+        Archivo.register()
+        Archivo.installAppearance()
         // Builds the "pear." animation outlines in the background so the intro starts on its first frame.
         Task.detached(priority: .userInitiated) { _ = PearGeometry.shared }
     }
@@ -153,6 +155,7 @@ struct MediaHubApp: App {
                 .environment(shellNav)
                 .preferredColorScheme(Theme.forceDark ? .dark : nil)
                 .pearLaunchScreen()
+                .font(.archivo(.body))
         }
         .commands {
             GoCommands(shellNav: shellNav)
@@ -446,7 +449,7 @@ private struct VirtualPadWindow<Content: View>: View {
                     UserDefaults.standard.set(false, forKey: WideLayout.simulateKey)
                 } label: {
                     Label("Exit iPad mode", systemImage: "xmark.circle.fill")
-                        .font(.footnote.weight(.semibold))
+                        .font(.archivo(.footnote, weight: .semibold))
                         .padding(.horizontal, 12)
                         .padding(.vertical, 8)
                         .pearGlass(in: Capsule(), interactive: true)

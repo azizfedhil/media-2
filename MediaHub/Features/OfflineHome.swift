@@ -25,9 +25,9 @@ struct OfflineHome: View {
             Image(systemName: online ? "wifi" : "wifi.slash").font(.title3)
                 .foregroundStyle(online ? theme.accent : Color.secondary)
             VStack(alignment: .leading, spacing: 2) {
-                Text(online ? "You're back online" : "You're offline").font(.subheadline.weight(.semibold))
+                Text(online ? "You're back online" : "You're offline").font(.archivo(.subheadline, weight: .semibold))
                 Text(online ? "Open the full app whenever you like." : "Showing what's saved on this device.")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(.archivo(.caption)).foregroundStyle(.secondary)
             }
             Spacer(minLength: 0)
             if online { Button("Open Pear", action: exit).buttonStyle(.glassProminent) }

@@ -59,7 +59,7 @@ struct SettingsView: View {
                         HStack {
                             Label("Pear.pair", systemImage: "arrow.triangle.2.circlepath")
                             Spacer()
-                            Text(PairSync.shared.isSignedIn ? "On" : "Off").font(.footnote).foregroundStyle(.secondary)
+                            Text(PairSync.shared.isSignedIn ? "On" : "Off").font(.archivo(.footnote)).foregroundStyle(.secondary)
                         }
                     }
                 } footer: {
@@ -79,7 +79,7 @@ struct SettingsView: View {
                         HStack {
                             Label("Integrations", systemImage: "puzzlepiece.extension.fill")
                             Spacer()
-                            Text("\(connected) of 4 set up").font(.footnote).foregroundStyle(.secondary)
+                            Text("\(connected) of 4 set up").font(.archivo(.footnote)).foregroundStyle(.secondary)
                         }
                     }
                 } footer: {
@@ -91,7 +91,7 @@ struct SettingsView: View {
                         HStack {
                             Label("Add-ons", systemImage: "square.stack.3d.up.fill")
                             Spacer()
-                            Text(addonSummary).font(.footnote).foregroundStyle(.secondary)
+                            Text(addonSummary).font(.archivo(.footnote)).foregroundStyle(.secondary)
                         }
                     }
                 } footer: {
@@ -103,7 +103,7 @@ struct SettingsView: View {
                         HStack {
                             Label("Content & catalogues", systemImage: "line.3.horizontal.decrease.circle.fill")
                             Spacer()
-                            Text(contentSummary).font(.footnote).foregroundStyle(.secondary)
+                            Text(contentSummary).font(.archivo(.footnote)).foregroundStyle(.secondary)
                         }
                     }
                 } header: { Text("Content · \(simkl.name(for: profiles.active))") } footer: {
@@ -118,7 +118,7 @@ struct SettingsView: View {
 
                 Section {
                     VStack(alignment: .leading, spacing: 12) {
-                        Text("Accent colour").font(.subheadline.weight(.medium))
+                        Text("Accent colour").font(.archivo(.subheadline, weight: .medium))
                         LazyVGrid(columns: [GridItem(.adaptive(minimum: 40), spacing: 12)], spacing: 12) {
                             Button { theme.setAccent(hex: Theme.systemHex) } label: {
                                 Circle().fill(.black).frame(width: 36, height: 36)
@@ -191,7 +191,7 @@ struct SettingsView: View {
                             Label("Subtitles", systemImage: "captions.bubble")
                             Spacer()
                             Text(subLang == "off" ? "Off" : (SubLanguages.all.first { $0.code == subLang }?.name ?? subLang))
-                                .font(.footnote).foregroundStyle(.secondary)
+                                .font(.archivo(.footnote)).foregroundStyle(.secondary)
                         }
                     }
                     NavigationLink {
@@ -200,7 +200,7 @@ struct SettingsView: View {
                         HStack {
                             Label("Player controls", systemImage: "slider.horizontal.3")
                             Spacer()
-                            Text("\(PillItem.decode(pillPinned).count) pinned").font(.footnote).foregroundStyle(.secondary)
+                            Text("\(PillItem.decode(pillPinned).count) pinned").font(.archivo(.footnote)).foregroundStyle(.secondary)
                         }
                     }
                     Toggle("Liquid Glass controls", isOn: $glass)
@@ -245,7 +245,7 @@ struct SettingsView: View {
                     Button { pickBackup() } label: { Label("Import settings", systemImage: "square.and.arrow.down") }
                     Button { copyBackup() } label: { Label("Copy settings to clipboard", systemImage: "doc.on.doc") }
                     Button { pasteBackup() } label: { Label("Paste settings from clipboard", systemImage: "doc.on.clipboard") }
-                    if let backupNote { Text(backupNote).font(.footnote).foregroundStyle(.secondary) }
+                    if let backupNote { Text(backupNote).font(.archivo(.footnote)).foregroundStyle(.secondary) }
                 } header: { Text("Backup") } footer: {
                     Text("The file contains your API keys and add-on URLs, so keep it private. The clipboard options are a fallback if the file picker won't open a backup: the copied text includes your keys too, and is removed from the clipboard after 5 minutes. The Simkl login isn't included; reconnect it after importing.")
                 }
@@ -255,7 +255,7 @@ struct SettingsView: View {
                         HStack {
                             Label("About", systemImage: "info.circle.fill")
                             Spacer()
-                            Text(AboutView.versionString).font(.footnote).foregroundStyle(.secondary)
+                            Text(AboutView.versionString).font(.archivo(.footnote)).foregroundStyle(.secondary)
                         }
                     }
                 } footer: {

@@ -59,8 +59,8 @@ struct ProfileDetailView: View {
     private var header: some View {
         VStack(spacing: 10) {
             ProfileAvatar(profile: profiles.active, size: 96)
-            Text(simkl.name(for: profiles.active)).font(.title2.bold())
-            Text(headerSubtitle).font(.footnote).foregroundStyle(.secondary)
+            Text(simkl.name(for: profiles.active)).font(.archivo(.title2, weight: .bold))
+            Text(headerSubtitle).font(.archivo(.footnote)).foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity)
         .padding(.top, 4)
@@ -75,7 +75,7 @@ struct ProfileDetailView: View {
     private var analysing: some View {
         HStack(spacing: 10) {
             ProgressView()
-            Text("Analysing your library… \(model.done)/\(model.total)").font(.footnote).foregroundStyle(.secondary)
+            Text("Analysing your library… \(model.done)/\(model.total)").font(.archivo(.footnote)).foregroundStyle(.secondary)
             Spacer()
         }
         .padding(.horizontal, 4)
@@ -85,7 +85,7 @@ struct ProfileDetailView: View {
 
     private func card<C: View>(_ title: String, symbol: String, @ViewBuilder content: () -> C) -> some View {
         VStack(alignment: .leading, spacing: 14) {
-            Label(title, systemImage: symbol).font(.headline).foregroundStyle(.primary)
+            Label(title, systemImage: symbol).font(.archivo(.headline)).foregroundStyle(.primary)
             content()
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -118,9 +118,9 @@ struct ProfileDetailView: View {
             HStack {
                 Text(downloads.records.isEmpty ? "Nothing downloaded yet"
                      : "\(downloads.records.count) saved · \(DownloadFiles.sizeString(downloads.usedBytes)) used")
-                    .font(.footnote).foregroundStyle(.secondary)
+                    .font(.archivo(.footnote)).foregroundStyle(.secondary)
                 Spacer()
-                NavigationLink { DownloadsView() } label: { Text("Open").font(.footnote.weight(.semibold)) }
+                NavigationLink { DownloadsView() } label: { Text("Open").font(.archivo(.footnote, weight: .semibold)) }
             }
         }
     }
@@ -134,7 +134,7 @@ struct ProfileDetailView: View {
                     HStack(spacing: 8) {
                         Image(systemName: i.symbol).font(.system(size: 13, weight: .semibold))
                             .foregroundStyle(i.on ? theme.accent : .secondary).frame(width: 18)
-                        Text(i.name).font(.footnote.weight(.semibold)).lineLimit(1).minimumScaleFactor(0.8)
+                        Text(i.name).font(.archivo(.footnote, weight: .semibold)).lineLimit(1).minimumScaleFactor(0.8)
                         Spacer(minLength: 0)
                         Image(systemName: i.on ? "checkmark.circle.fill" : "circle.dashed")
                             .font(.system(size: 14)).foregroundStyle(i.on ? Color.green : Color.secondary.opacity(0.6))
@@ -147,9 +147,9 @@ struct ProfileDetailView: View {
             }
             HStack {
                 Text("\(on) of \(list.count) active · \(addons.enabledInstalledAddons.count) add-on\(addons.enabledInstalledAddons.count == 1 ? "" : "s")")
-                    .font(.footnote).foregroundStyle(.secondary)
+                    .font(.archivo(.footnote)).foregroundStyle(.secondary)
                 Spacer()
-                NavigationLink { IntegrationsView() } label: { Text("Manage").font(.footnote.weight(.semibold)) }
+                NavigationLink { IntegrationsView() } label: { Text("Manage").font(.archivo(.footnote, weight: .semibold)) }
             }
         }
     }
@@ -177,10 +177,10 @@ struct ProfileDetailView: View {
     private func tile(_ title: String, _ symbol: String, _ value: Int, _ caption: String) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Image(systemName: symbol).font(.system(size: 15, weight: .bold)).foregroundStyle(theme.accent)
-            Text(value.formatted()).font(.system(size: 34, weight: .bold, design: .rounded)).monospacedDigit()
+            Text(value.formatted()).font(.archivo(size: 34, weight: .bold)).monospacedDigit()
                 .contentTransition(.numericText())
-            Text(title).font(.subheadline.weight(.semibold))
-            Text(caption).font(.caption).foregroundStyle(.secondary).lineLimit(1).minimumScaleFactor(0.8)
+            Text(title).font(.archivo(.subheadline, weight: .semibold))
+            Text(caption).font(.archivo(.caption)).foregroundStyle(.secondary).lineLimit(1).minimumScaleFactor(0.8)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
@@ -205,13 +205,13 @@ struct ProfileDetailView: View {
         let days = minutes / 1440
         let number = days >= 10 ? String(format: "%.0f", days) : days >= 1 ? String(format: "%.1f", days) : String(format: "%.2f", days)
         return VStack(alignment: .leading, spacing: 14) {
-            Label("Total watch time", systemImage: "clock.fill").font(.headline)
+            Label("Total watch time", systemImage: "clock.fill").font(.archivo(.headline))
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(number).font(.system(size: 56, weight: .heavy, design: .rounded)).monospacedDigit()
-                Text(abs(days - 1) < 0.005 ? "day" : "days").font(.title3.weight(.semibold)).foregroundStyle(.white.opacity(0.8))
+                Text(number).font(.archivo(size: 56, weight: .heavy)).monospacedDigit()
+                Text(abs(days - 1) < 0.005 ? "day" : "days").font(.archivo(.title3, weight: .semibold)).foregroundStyle(.white.opacity(0.8))
             }
             Text("\(Int((minutes / 60).rounded()).formatted()) hours · \(Int(minutes.rounded()).formatted()) minutes")
-                .font(.subheadline).foregroundStyle(.white.opacity(0.75))
+                .font(.archivo(.subheadline)).foregroundStyle(.white.opacity(0.75))
             Divider().overlay(.white.opacity(0.25))
             HStack(alignment: .top) {
                 miniStat("Shows", duration(stats.minutes(.shows)))
@@ -224,7 +224,7 @@ struct ProfileDetailView: View {
             if let a = stats.averageDaily {
                 Text(a.tracked ? "Average per day over the last 30 days of playback."
                                : "Estimated from your library. Exact daily averages build up as you watch in the app.")
-                    .font(.caption).foregroundStyle(.white.opacity(0.65))
+                    .font(.archivo(.caption)).foregroundStyle(.white.opacity(0.65))
             }
         }
         .foregroundStyle(.white)
@@ -235,8 +235,8 @@ struct ProfileDetailView: View {
 
     private func miniStat(_ title: String, _ value: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(value).font(.title3.weight(.bold)).monospacedDigit()
-            Text(title).font(.caption).foregroundStyle(.white.opacity(0.7))
+            Text(value).font(.archivo(.title3, weight: .bold)).monospacedDigit()
+            Text(title).font(.archivo(.caption)).foregroundStyle(.white.opacity(0.7))
         }
     }
 
@@ -244,7 +244,7 @@ struct ProfileDetailView: View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: "info.circle.fill").foregroundStyle(.secondary)
             Text("Add a TMDB key under Integrations to unlock genre insights and exact episode counts and runtimes. Until then, runtimes are estimated.")
-                .font(.footnote).foregroundStyle(.secondary)
+                .font(.archivo(.footnote)).foregroundStyle(.secondary)
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -256,7 +256,7 @@ struct ProfileDetailView: View {
     private var tasteSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text("Your taste").font(.title3.bold())
+                Text("Your taste").font(.archivo(.title3, weight: .bold))
                 Spacer()
             }
             Picker("Show", selection: $kind) {
@@ -274,9 +274,9 @@ struct ProfileDetailView: View {
             ForEach(shares) { s in
                 VStack(alignment: .leading, spacing: 5) {
                     HStack {
-                        Text(s.id).font(.subheadline.weight(.medium))
+                        Text(s.id).font(.archivo(.subheadline, weight: .medium))
                         Spacer()
-                        Text("\(Int(s.percent.rounded()))%").font(.subheadline.weight(.semibold)).monospacedDigit()
+                        Text("\(Int(s.percent.rounded()))%").font(.archivo(.subheadline, weight: .semibold)).monospacedDigit()
                             .foregroundStyle(.secondary)
                     }
                     GeometryReader { g in
@@ -299,11 +299,11 @@ struct ProfileDetailView: View {
         return card("Favourite genres", symbol: "theatermasks.fill") {
             if shares.isEmpty {
                 Text(tmdbKey.isEmpty && !TMDBClient.hasProxy ? "Needs a TMDB key." : model.loading ? "Working it out…" : "Not enough watched yet.")
-                    .font(.footnote).foregroundStyle(.secondary)
+                    .font(.archivo(.footnote)).foregroundStyle(.secondary)
             } else {
                 bars(shares)
                 Text("Weighted by time spent, so a long series counts for more than a short film.")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(.archivo(.caption)).foregroundStyle(.secondary)
             }
         }
     }
@@ -316,20 +316,20 @@ struct ProfileDetailView: View {
                 Divider()
                 HStack(alignment: .top) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(verdict(era)).font(.subheadline.weight(.semibold))
+                        Text(verdict(era)).font(.archivo(.subheadline, weight: .semibold))
                         Text("\(Int((era.recentShare * 100).rounded()))% of your watching is from the last 5 years")
-                            .font(.caption).foregroundStyle(.secondary)
+                            .font(.archivo(.caption)).foregroundStyle(.secondary)
                     }
                     Spacer()
                     if let m = era.medianYear {
                         VStack(alignment: .trailing, spacing: 2) {
-                            Text(String(m)).font(.title3.bold()).monospacedDigit()
-                            Text("median year").font(.caption).foregroundStyle(.secondary)
+                            Text(String(m)).font(.archivo(.title3, weight: .bold)).monospacedDigit()
+                            Text("median year").font(.archivo(.caption)).foregroundStyle(.secondary)
                         }
                     }
                 }
             } else {
-                Text("Not enough watched yet.").font(.footnote).foregroundStyle(.secondary)
+                Text("Not enough watched yet.").font(.archivo(.footnote)).foregroundStyle(.secondary)
             }
         }
     }
@@ -356,7 +356,7 @@ struct ProfileDetailView: View {
             let peakValue = weights.max() ?? 0
             if stats.hoursSource == .none || peakValue <= 0 {
                 Text("Watch something and your favourite times of day will show up here.")
-                    .font(.footnote).foregroundStyle(.secondary)
+                    .font(.archivo(.footnote)).foregroundStyle(.secondary)
             } else {
                 let peak = stats.peakHour
                 HStack(alignment: .bottom, spacing: 3) {
@@ -370,10 +370,10 @@ struct ProfileDetailView: View {
                 HStack {
                     Text("12a"); Spacer(); Text("6a"); Spacer(); Text("12p"); Spacer(); Text("6p"); Spacer(); Text("11p")
                 }
-                .font(.caption2).foregroundStyle(.secondary)
+                .font(.archivo(.caption2)).foregroundStyle(.secondary)
 
                 if let peak {
-                    Text("Peak hour: \(hourLabel(peak)) – \(hourLabel((peak + 1) % 24))").font(.subheadline.weight(.semibold))
+                    Text("Peak hour: \(hourLabel(peak)) – \(hourLabel((peak + 1) % 24))").font(.archivo(.subheadline, weight: .semibold))
                 }
                 let parts = stats.dayParts
                 let best = parts.max { $0.percent < $1.percent }
@@ -383,8 +383,8 @@ struct ProfileDetailView: View {
                             Image(systemName: p.symbol).font(.system(size: 16, weight: .semibold))
                                 .foregroundStyle(p.id == best?.id ? theme.accent : .secondary).frame(width: 22)
                             VStack(alignment: .leading, spacing: 1) {
-                                Text("\(p.id) · \(Int(p.percent.rounded()))%").font(.footnote.weight(.semibold))
-                                Text(p.range).font(.caption2).foregroundStyle(.secondary)
+                                Text("\(p.id) · \(Int(p.percent.rounded()))%").font(.archivo(.footnote, weight: .semibold))
+                                Text(p.range).font(.archivo(.caption2)).foregroundStyle(.secondary)
                             }
                             Spacer(minLength: 0)
                         }
@@ -395,7 +395,7 @@ struct ProfileDetailView: View {
                 }
                 Text(stats.hoursSource == .tracked ? "Based on the time you've actually spent playing in the app."
                                                    : "Based on when you last watched each title. Gets more precise as you watch.")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(.archivo(.caption)).foregroundStyle(.secondary)
             }
         }
     }

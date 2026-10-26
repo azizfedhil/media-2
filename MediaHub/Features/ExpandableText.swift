@@ -6,7 +6,7 @@ import SwiftUI
 struct ExpandableText: View {
     let text: String
     var lines = 2
-    var font: Font = .subheadline
+    var font: Font = .archivo(.subheadline)
 
     @State private var expanded = false
     @State private var truncated = false

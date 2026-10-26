@@ -116,14 +116,14 @@ struct DownloadsView: View {
         return Section {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text(DownloadFiles.sizeString(used)).font(.title.bold())
+                    Text(DownloadFiles.sizeString(used)).font(.archivo(.title, weight: .bold))
                     Text("used").foregroundStyle(.secondary)
                     Spacer()
-                    Text("\(count) item\(count == 1 ? "" : "s")").font(.footnote).foregroundStyle(.secondary)
+                    Text("\(count) item\(count == 1 ? "" : "s")").font(.archivo(.footnote)).foregroundStyle(.secondary)
                 }
                 if let free {
                     ProgressView(value: Double(used), total: Double(max(used + free, 1))).tint(theme.accent)
-                    Text("\(DownloadFiles.sizeString(free)) free on this device").font(.footnote).foregroundStyle(.secondary)
+                    Text("\(DownloadFiles.sizeString(free)) free on this device").font(.archivo(.footnote)).foregroundStyle(.secondary)
                 }
             }
             .padding(.vertical, 4)
@@ -152,8 +152,8 @@ struct DownloadsView: View {
                 .background(Color.white.opacity(0.08))
                 .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
             VStack(alignment: .leading, spacing: 2) {
-                Text(show.item.name).font(.headline).foregroundStyle(.primary).lineLimit(2)
-                Text(sub).font(.caption).foregroundStyle(.secondary)
+                Text(show.item.name).font(.archivo(.headline)).foregroundStyle(.primary).lineLimit(2)
+                Text(sub).font(.archivo(.caption)).foregroundStyle(.secondary)
             }
             Spacer(minLength: 0)
             Menu {
@@ -170,9 +170,9 @@ struct DownloadsView: View {
         let n = sn.records.count
         return HStack {
             VStack(alignment: .leading, spacing: 2) {
-                Text(sn.number == 0 ? "Specials" : "Season \(sn.number)").font(.headline)
+                Text(sn.number == 0 ? "Specials" : "Season \(sn.number)").font(.archivo(.headline))
                 Text("\(n) episode\(n == 1 ? "" : "s") · \(DownloadFiles.sizeString(sn.bytes))")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(.archivo(.caption)).foregroundStyle(.secondary)
             }
             Spacer()
             Menu {
@@ -254,7 +254,7 @@ struct DownloadsView: View {
                     }
                 }
             VStack(alignment: .leading, spacing: 4) {
-                Text(title(r)).font(.subheadline.weight(.semibold)).lineLimit(2).multilineTextAlignment(.leading)
+                Text(title(r)).font(.archivo(.subheadline, weight: .semibold)).lineLimit(2).multilineTextAlignment(.leading)
                 status(r)
             }
             Spacer(minLength: 0)
@@ -267,7 +267,7 @@ struct DownloadsView: View {
         switch r.state {
         case .done:
             Label(DownloadFiles.sizeString(r.bytes), systemImage: "arrow.down.circle.fill")
-                .font(.caption).foregroundStyle(.secondary)
+                .font(.archivo(.caption)).foregroundStyle(.secondary)
         case .downloading:
             VStack(alignment: .leading, spacing: 4) {
                 ProgressView(value: r.progress).tint(theme.accent)
@@ -278,7 +278,7 @@ struct DownloadsView: View {
                     Spacer(minLength: 0)
                     DownloadSpeedText(id: r.id)
                 }
-                .font(.caption).monospacedDigit().foregroundStyle(.secondary)
+                .font(.archivo(.caption)).monospacedDigit().foregroundStyle(.secondary)
                 .lineLimit(1).minimumScaleFactor(0.8)
             }
         case .paused:
@@ -287,14 +287,14 @@ struct DownloadsView: View {
                 Text(r.progress > 0 && r.expectedBytes > 0
                      ? "Paused · \(Int(r.progress * 100))% · \(DownloadFiles.sizeString(r.bytes)) of \(DownloadFiles.sizeString(r.expectedBytes))"
                      : "Paused · tap to resume")
-                    .font(.caption).monospacedDigit().foregroundStyle(.secondary)
+                    .font(.archivo(.caption)).monospacedDigit().foregroundStyle(.secondary)
                     .lineLimit(1).minimumScaleFactor(0.8)
             }
         case .queued:
             Text(connectivity.isOnline == false ? "Waiting for connection" : "Waiting…")
-                .font(.caption).foregroundStyle(.secondary)
+                .font(.archivo(.caption)).foregroundStyle(.secondary)
         case .failed:
-            Text("\(r.error ?? "Failed") · tap to retry").font(.caption).foregroundStyle(.red)
+            Text("\(r.error ?? "Failed") · tap to retry").font(.archivo(.caption)).foregroundStyle(.red)
         }
     }
 

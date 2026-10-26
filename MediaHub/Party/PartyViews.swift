@@ -91,7 +91,7 @@ struct PartyView: View {
         Section {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Party code").font(.footnote).foregroundStyle(.secondary)
+                    Text("Party code").font(.archivo(.footnote)).foregroundStyle(.secondary)
                     Text(party.code ?? "").font(.system(.title2, design: .monospaced).weight(.bold))
                 }
                 Spacer()
@@ -116,9 +116,9 @@ struct PartyView: View {
                     Text(member.name)
                     Spacer()
                     if member.role == "host" {
-                        Text("Host").font(.caption).foregroundStyle(.secondary)
+                        Text("Host").font(.archivo(.caption)).foregroundStyle(.secondary)
                     } else if !member.connected {
-                        Text("Offline").font(.caption).foregroundStyle(.secondary)
+                        Text("Offline").font(.archivo(.caption)).foregroundStyle(.secondary)
                     }
                 }
             }
@@ -137,9 +137,9 @@ struct PartyView: View {
             Section("Suggestions") {
                 ForEach(party.suggestions) { s in
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(s.source.title).font(.body.weight(.semibold))
-                        Text("From \(memberName(s.from))").font(.footnote).foregroundStyle(.secondary)
-                        if let note = s.note { Text(note).font(.footnote) }
+                        Text(s.source.title).font(.archivo(.body, weight: .semibold))
+                        Text("From \(memberName(s.from))").font(.archivo(.footnote)).foregroundStyle(.secondary)
+                        if let note = s.note { Text(note).font(.archivo(.footnote)) }
                     }
                 }
             }
@@ -240,7 +240,7 @@ struct PartyRoomPanel: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
-                Text("Watch party").font(.title3.weight(.semibold))
+                Text("Watch party").font(.archivo(.title3, weight: .semibold))
                 Spacer()
                 Button(action: onClose) {
                     Image(systemName: "xmark")
@@ -254,14 +254,14 @@ struct PartyRoomPanel: View {
 
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("CODE").font(.caption.weight(.bold)).tracking(1).foregroundStyle(.white.opacity(0.6))
+                    Text("CODE").font(.archivo(.caption, weight: .bold)).tracking(1).foregroundStyle(.white.opacity(0.6))
                     Text(party.code ?? "").font(.system(.title2, design: .monospaced).weight(.bold))
                 }
                 Spacer()
                 Button {
                     UIPasteboard.general.string = party.code
                 } label: {
-                    Label("Copy", systemImage: "doc.on.doc").font(.footnote.weight(.semibold))
+                    Label("Copy", systemImage: "doc.on.doc").font(.archivo(.footnote, weight: .semibold))
                 }
                 .buttonStyle(.bordered)
             }
@@ -291,16 +291,16 @@ struct PartyRoomPanel: View {
 
     private var membersBlock: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("MEMBERS").font(.caption.weight(.bold)).tracking(1).foregroundStyle(.white.opacity(0.6))
+            Text("MEMBERS").font(.archivo(.caption, weight: .bold)).tracking(1).foregroundStyle(.white.opacity(0.6))
             ForEach(party.members) { m in
                 HStack(spacing: 10) {
                     Circle().fill(m.ready ? Color.green : Color.white.opacity(0.3)).frame(width: 9, height: 9)
-                    Text(m.name).font(.body.weight(.medium)).lineLimit(1)
+                    Text(m.name).font(.archivo(.body, weight: .medium)).lineLimit(1)
                     Spacer()
                     if m.role == "host" {
-                        Text("Host").font(.caption).foregroundStyle(.white.opacity(0.6))
+                        Text("Host").font(.archivo(.caption)).foregroundStyle(.white.opacity(0.6))
                     } else if !m.connected {
-                        Text("Offline").font(.caption).foregroundStyle(.white.opacity(0.6))
+                        Text("Offline").font(.archivo(.caption)).foregroundStyle(.white.opacity(0.6))
                     }
                 }
             }
@@ -314,13 +314,13 @@ struct PartyRoomPanel: View {
         }
         if !party.requests.isEmpty {
             VStack(alignment: .leading, spacing: 10) {
-                Text("REQUESTS").font(.caption.weight(.bold)).tracking(1).foregroundStyle(.white.opacity(0.6))
+                Text("REQUESTS").font(.archivo(.caption, weight: .bold)).tracking(1).foregroundStyle(.white.opacity(0.6))
                 ForEach(party.requests) { r in
                     HStack(spacing: 10) {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(memberName(r.from)).font(.body.weight(.semibold)).lineLimit(1)
+                            Text(memberName(r.from)).font(.archivo(.body, weight: .semibold)).lineLimit(1)
                             Text(r.action == "play" ? "Asks to play" : "Asks to pause")
-                                .font(.footnote).foregroundStyle(.white.opacity(0.65))
+                                .font(.archivo(.footnote)).foregroundStyle(.white.opacity(0.65))
                         }
                         Spacer()
                         Button("Deny") { decide(r, approve: false) }.buttonStyle(.bordered)
@@ -333,12 +333,12 @@ struct PartyRoomPanel: View {
 
     private var suggestionsBlock: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("SUGGESTIONS").font(.caption.weight(.bold)).tracking(1).foregroundStyle(.white.opacity(0.6))
+            Text("SUGGESTIONS").font(.archivo(.caption, weight: .bold)).tracking(1).foregroundStyle(.white.opacity(0.6))
             ForEach(party.suggestions) { s in
                 HStack(spacing: 10) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(s.source.title).font(.body.weight(.semibold)).lineLimit(2)
-                        Text("From \(memberName(s.from))").font(.footnote).foregroundStyle(.white.opacity(0.65))
+                        Text(s.source.title).font(.archivo(.body, weight: .semibold)).lineLimit(2)
+                        Text("From \(memberName(s.from))").font(.archivo(.footnote)).foregroundStyle(.white.opacity(0.65))
                     }
                     Spacer()
                     if party.isHost {

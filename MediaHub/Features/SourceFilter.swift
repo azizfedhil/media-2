@@ -39,7 +39,7 @@ struct AddonFilterMenu: View {
                 Text(selectedName).lineLimit(1)
                 Image(systemName: "chevron.up.chevron.down").font(.caption2.weight(.bold))
             }
-            .font(.footnote.weight(.semibold))
+            .font(.archivo(.footnote, weight: .semibold))
             .foregroundStyle(onDark ? Color.white : Color.primary)
             .padding(.horizontal, 12).padding(.vertical, 7)
             .background(onDark ? Color.white.opacity(0.14) : Color.secondary.opacity(0.18), in: Capsule())

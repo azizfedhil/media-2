@@ -23,11 +23,11 @@ struct LibrarySourceControls: View {
             Text(PairSync.shared.isSignedIn
                  ? "Your library is kept in step with your other devices over Pear.pair."
                  : "Sign in to Pear.pair to keep this library in step with your other devices.")
-                .font(.footnote).foregroundStyle(.secondary)
+                .font(.archivo(.footnote)).foregroundStyle(.secondary)
 
             if connected {
                 Text("Import adds Simkl's titles that are missing here. It never sends anything to Simkl and never removes anything here.")
-                    .font(.footnote).foregroundStyle(.secondary)
+                    .font(.archivo(.footnote)).foregroundStyle(.secondary)
 
                 Button {
                     Task { await prefs.importFromSimkl(simkl: simkl, library: library, history: history, force: true) }
@@ -41,18 +41,18 @@ struct LibrarySourceControls: View {
                 .disabled(prefs.isSyncing)
 
                 if let report = prefs.report {
-                    Text(report).font(.footnote).foregroundStyle(.secondary)
+                    Text(report).font(.archivo(.footnote)).foregroundStyle(.secondary)
                 }
             } else {
                 Text("Connect Simkl in Integrations to import its lists.")
-                    .font(.footnote).foregroundStyle(.secondary)
+                    .font(.archivo(.footnote)).foregroundStyle(.secondary)
             }
         } else if connected {
             let expl = source == .local
                 ? "Your own library and watch tracking on this device. Nothing is sent to Simkl."
                 : "Simkl's lists are your library, and what you watch is scrobbled to Simkl."
             Text(expl)
-                .font(.footnote).foregroundStyle(.secondary)
+                .font(.archivo(.footnote)).foregroundStyle(.secondary)
 
             Toggle("Keep in sync automatically", isOn: Binding(get: { prefs.autoSync }, set: { prefs.setAutoSync($0) }))
 
@@ -66,13 +66,13 @@ struct LibrarySourceControls: View {
             .disabled(prefs.isSyncing)
 
             if let report = prefs.report {
-                Text(report).font(.footnote).foregroundStyle(.secondary)
+                Text(report).font(.archivo(.footnote)).foregroundStyle(.secondary)
             } else if let last = prefs.lastSync {
-                Text("Last synced \(last.formatted(.relative(presentation: .named)))").font(.footnote).foregroundStyle(.secondary)
+                Text("Last synced \(last.formatted(.relative(presentation: .named)))").font(.archivo(.footnote)).foregroundStyle(.secondary)
             }
         } else {
             Text("Your library stays on this device. It is not synced to other devices. Connect Simkl in Integrations to use it as your library or to sync with it.")
-                .font(.footnote).foregroundStyle(.secondary)
+                .font(.archivo(.footnote)).foregroundStyle(.secondary)
         }
     }
 

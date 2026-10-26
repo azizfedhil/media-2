@@ -13,40 +13,40 @@ struct SimklConnectControls: View {
         VStack(alignment: .leading, spacing: 12) {
             if simkl.isConnected {
                 Label("Connected to Simkl", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
-                    .font(compact ? .subheadline.weight(.semibold) : .body)
+                    .font(compact ? .archivo(.subheadline, weight: .semibold) : .archivo(.body))
                 if let e = simkl.syncError {
-                    Label(e, systemImage: "exclamationmark.triangle.fill").font(.footnote).foregroundStyle(.orange)
+                    Label(e, systemImage: "exclamationmark.triangle.fill").font(.archivo(.footnote)).foregroundStyle(.orange)
                 }
                 HStack(spacing: 16) {
                     Button(simkl.isSyncing ? "Syncing…" : "Sync now") { Task { await simkl.sync(force: true) } }
                         .disabled(simkl.isSyncing)
                     if !compact { Button("Disconnect", role: .destructive) { simkl.disconnect() } }
                 }
-                .font(.subheadline)
+                .font(.archivo(.subheadline))
             } else if let pin = simkl.pin {
                 pinSteps(pin)
             } else {
                 Button { simkl.connect() } label: {
-                    Label("Connect to Simkl", systemImage: "link").font(.body.weight(.semibold))
+                    Label("Connect to Simkl", systemImage: "link").font(.archivo(.body, weight: .semibold))
                         .foregroundStyle(theme.onAccent)
                         .frame(maxWidth: compact ? .infinity : nil)
                 }
                 .buttonStyle(.borderedProminent)
-                if let s = simkl.loginStatus { Text(s).font(.footnote).foregroundStyle(.secondary) }
+                if let s = simkl.loginStatus { Text(s).font(.archivo(.footnote)).foregroundStyle(.secondary) }
             }
             if let e = simkl.loginError {
-                Label(e, systemImage: "xmark.octagon.fill").font(.footnote).foregroundStyle(.red)
+                Label(e, systemImage: "xmark.octagon.fill").font(.archivo(.footnote)).foregroundStyle(.red)
             }
         }
     }
 
     private func pinSteps(_ pin: DeviceAuthorization) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("1. Open this page on any device").font(.footnote).foregroundStyle(.secondary)
+            Text("1. Open this page on any device").font(.archivo(.footnote)).foregroundStyle(.secondary)
             if let u = URL(string: pin.verificationUrl) {
-                Link(pin.verificationUrl, destination: u).font(.subheadline.weight(.semibold))
-            } else { Text(pin.verificationUrl).font(.subheadline.weight(.semibold)) }
-            Text("2. Enter this code").font(.footnote).foregroundStyle(.secondary)
+                Link(pin.verificationUrl, destination: u).font(.archivo(.subheadline, weight: .semibold))
+            } else { Text(pin.verificationUrl).font(.archivo(.subheadline, weight: .semibold)) }
+            Text("2. Enter this code").font(.archivo(.footnote)).foregroundStyle(.secondary)
             HStack {
                 Text(pin.userCode).font(.system(size: 34, weight: .bold, design: .monospaced)).textSelection(.enabled)
                 Spacer()
@@ -55,13 +55,13 @@ struct SimklConnectControls: View {
             }
             if let u = pin.completeURL ?? URL(string: pin.verificationUrl) {
                 Button { openURL(u) } label: { Label("Open Simkl", systemImage: "safari") }
-                    .buttonStyle(.bordered).font(.subheadline)
+                    .buttonStyle(.bordered).font(.archivo(.subheadline))
             }
             HStack(spacing: 8) {
                 ProgressView()
-                Text(simkl.loginStatus ?? "Waiting for authorisation…").font(.footnote).foregroundStyle(.secondary)
+                Text(simkl.loginStatus ?? "Waiting for authorisation…").font(.archivo(.footnote)).foregroundStyle(.secondary)
             }
-            Button("Cancel", role: .cancel) { simkl.cancelLogin() }.font(.footnote)
+            Button("Cancel", role: .cancel) { simkl.cancelLogin() }.font(.archivo(.footnote))
         }
         .padding(.vertical, 4)
     }
@@ -80,7 +80,7 @@ struct SimklLoginPage: View {
                     .padding(16)
                     .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
                 Text("Tap Connect to Simkl, then enter the code at simkl.com/pin. No account setup, keys or redirects needed. Your library syncs when the app opens and only downloads what changed.")
-                    .font(.footnote).foregroundStyle(.secondary)
+                    .font(.archivo(.footnote)).foregroundStyle(.secondary)
                     .padding(.horizontal, 4)
             }
             .padding(16)

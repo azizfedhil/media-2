@@ -92,25 +92,25 @@ struct EpisodeCard<Actions: View>: View {
     private var text: some View {
         VStack(alignment: .leading, spacing: 4 * scale) {
             HStack(spacing: 6 * scale) {
-                Text("EPISODE \(ep.id)").font(.system(size: 12 * scale, weight: .semibold)).tracking(0.8 * scale)
+                Text("EPISODE \(ep.id)").font(.archivo(size: 12 * scale, weight: .semibold)).tracking(0.8 * scale)
                     .foregroundStyle(.white.opacity(0.65))
                 if ep.isTopRated {
-                    Text("·").font(.system(size: 12 * scale, weight: .semibold)).foregroundStyle(.white.opacity(0.4))
+                    Text("·").font(.archivo(size: 12 * scale, weight: .semibold)).foregroundStyle(.white.opacity(0.4))
                     ShimmerText(text: "TOP RATED", symbol: "star.fill", color: Color(red: 1.0, green: 0.78, blue: 0.2),
                                 size: 12 * scale)
                 }
             }
             .lineLimit(1)
-            Text(ep.name).font(.system(size: 18 * scale, weight: .bold)).lineLimit(1)
+            Text(ep.name).font(.archivo(size: 18 * scale, weight: .bold)).lineLimit(1)
                 .opacity(upcoming ? 0.7 : 1)
             if let o = ep.overview, !o.isEmpty {
-                Text(o).font(.system(size: 13 * scale)).foregroundStyle(.white.opacity(upcoming ? 0.5 : 0.7)).lineLimit(3)
+                Text(o).font(.archivo(size: 13 * scale)).foregroundStyle(.white.opacity(upcoming ? 0.5 : 0.7)).lineLimit(3)
                     .multilineTextAlignment(.leading)
             }
             Group {
                 if let airs = ep.airsOn {
                     Label("Airs on \(airs)", systemImage: "calendar")
-                        .font(.system(size: 14 * scale, weight: .semibold)).foregroundStyle(.white.opacity(0.9))
+                        .font(.archivo(size: 14 * scale, weight: .semibold)).foregroundStyle(.white.opacity(0.9))
                 } else {
                     // New episodes announce themselves in words until you've watched them, like "Airs on" does.
                     let fresh = watched ? nil : ep.freshness
@@ -119,10 +119,10 @@ struct EpisodeCard<Actions: View>: View {
                             ShimmerText(text: f.text, symbol: "sparkles", color: Color(red: 1.0, green: 0.55, blue: 0.5),
                                         size: 14 * scale, weight: .semibold, tracking: 0)
                             if runtime != nil {
-                                Text("·").font(.system(size: 17 * scale)).foregroundStyle(.white.opacity(0.4))
+                                Text("·").font(.archivo(size: 17 * scale)).foregroundStyle(.white.opacity(0.4))
                             }
                         }
-                        Text(runtime ?? (fresh == nil ? " " : "")).font(.system(size: 14 * scale, weight: .medium))
+                        Text(runtime ?? (fresh == nil ? " " : "")).font(.archivo(size: 14 * scale, weight: .medium))
                             .foregroundStyle(.white.opacity(0.85))
                     }
                     .lineLimit(1)
@@ -142,7 +142,7 @@ struct EpisodeCard<Actions: View>: View {
             RatingLogo(label: "TMDB", height: 11 * scale)
             Text(String(format: "%.1f", r)).monospacedDigit()
         }
-        .font(.system(size: 11 * scale, weight: .bold)).foregroundStyle(.white)
+        .font(.archivo(size: 11 * scale, weight: .bold)).foregroundStyle(.white)
         .padding(.horizontal, 8 * scale).padding(.vertical, 4 * scale)
         .background(.black.opacity(0.55), in: Capsule())
         .padding(10 * scale)
@@ -161,7 +161,7 @@ struct EpisodeCard<Actions: View>: View {
         }
         let done = d.state == .done
         return HStack(spacing: 4 * scale) { Image(systemName: symbol); Text(label).monospacedDigit() }
-            .font(.system(size: 11 * scale, weight: .bold)).foregroundStyle(done ? theme.onAccent : .white)
+            .font(.archivo(size: 11 * scale, weight: .bold)).foregroundStyle(done ? theme.onAccent : .white)
             .padding(.horizontal, 8 * scale).padding(.vertical, 4 * scale)
             .background(done ? theme.accent : Color.black.opacity(0.55), in: Capsule())
             .padding(.leading, 10 * scale).padding(.top, below ? 0 : 10 * scale)
@@ -173,7 +173,7 @@ struct EpisodeCard<Actions: View>: View {
             if let symbol { Image(systemName: symbol) }
             Text(label)
         }
-        .font(.system(size: 11 * scale, weight: .bold)).foregroundStyle(text)
+        .font(.archivo(size: 11 * scale, weight: .bold)).foregroundStyle(text)
         .padding(.horizontal, 8 * scale).padding(.vertical, 4 * scale)
         .background(fill, in: Capsule())
         .padding(10 * scale)
@@ -205,7 +205,7 @@ private struct ShimmerText: View {
             if let symbol { Image(systemName: symbol) }
             Text(text)
         }
-        .font(.system(size: size, weight: weight)).tracking(tracking)
+        .font(.archivo(size: size, weight: weight)).tracking(tracking)
     }
 
     var body: some View {

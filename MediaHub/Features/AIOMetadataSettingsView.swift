@@ -126,7 +126,7 @@ struct AIOMetadataSettingsView: View {
                     Toggle(isOn: Binding(get: { rules.isRowAdded(key) }, set: { prefs.setRowAdded(key, $0) })) {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(cat.name ?? cat.id)
-                            Text(cat.id).font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
+                            Text(cat.id).font(.archivo(.caption2)).foregroundStyle(.tertiary).lineLimit(1)
                         }
                     }
                 }

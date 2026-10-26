@@ -64,7 +64,7 @@ struct OnboardingView: View {
             Spacer()
             if step != .done {
                 Button("Skip setup") { complete() }
-                    .font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
+                    .font(.archivo(.subheadline, weight: .semibold)).foregroundStyle(.secondary)
             }
         }
         .padding(.horizontal, 20).frame(height: 44)
@@ -84,7 +84,7 @@ struct OnboardingView: View {
                     Button { move(-1) } label: { Text("Back").frame(maxWidth: 110) }
                         .buttonStyle(.glass).controlSize(.large)
                 }
-                Button { next() } label: { Text(primaryTitle).font(.headline).frame(maxWidth: .infinity) }
+                Button { next() } label: { Text(primaryTitle).font(.archivo(.headline)).frame(maxWidth: .infinity) }
                     .buttonStyle(.glassProminent).controlSize(.large)
                     .disabled(step == .profile && !canContinueProfile)
             }
@@ -155,8 +155,8 @@ struct OnboardingView: View {
 
     private func header(_ title: String, _ subtitle: String) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(title).font(.system(size: 30, weight: .bold, design: .rounded))
-            Text(subtitle).font(.callout).foregroundStyle(.secondary)
+            Text(title).font(.archivo(size: 30, weight: .bold))
+            Text(subtitle).font(.archivo(.callout)).foregroundStyle(.secondary)
         }
         .padding(.bottom, 4)
     }
@@ -175,7 +175,7 @@ struct OnboardingView: View {
             Spacer(minLength: 0)
             PearWordmark(height: 64)
             Text("Everything you watch, in one place.\nA minute of setup makes it yours.")
-                .font(.title3).multilineTextAlignment(.center).foregroundStyle(.secondary)
+                .font(.archivo(.title3)).multilineTextAlignment(.center).foregroundStyle(.secondary)
             VStack(alignment: .leading, spacing: 14) {
                 welcomeRow("person.crop.circle.fill", "Sign in or pick a name")
                 welcomeRow("paintpalette.fill", "Choose your colour")
@@ -190,7 +190,7 @@ struct OnboardingView: View {
     }
 
     private func welcomeRow(_ symbol: String, _ text: String) -> some View {
-        Label { Text(text).font(.body.weight(.medium)) } icon: {
+        Label { Text(text).font(.archivo(.body, weight: .medium)) } icon: {
             Image(systemName: symbol).foregroundStyle(theme.accent).frame(width: 28)
         }
     }
@@ -224,33 +224,33 @@ struct OnboardingView: View {
                 .padding(.vertical, 4)
 
             card {
-                Label("Sign in with Simkl", systemImage: "arrow.triangle.2.circlepath").font(.headline)
+                Label("Sign in with Simkl", systemImage: "arrow.triangle.2.circlepath").font(.archivo(.headline))
                 if simkl.isConnected {
-                    Label("Connected", systemImage: "checkmark.circle.fill").font(.subheadline.weight(.semibold)).foregroundStyle(.green)
+                    Label("Connected", systemImage: "checkmark.circle.fill").font(.archivo(.subheadline, weight: .semibold)).foregroundStyle(.green)
                     if let a = simkl.account {
                         Toggle(isOn: $useSimkl) {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text("Use my Simkl name and picture")
-                                Text(a.name).font(.footnote).foregroundStyle(.secondary)
+                                Text(a.name).font(.archivo(.footnote)).foregroundStyle(.secondary)
                             }
                         }
                     }
                 } else {
                     Text("Syncs your library and watch history, and uses your Simkl name and picture. You enter a code on simkl.com/pin; no account setup needed.")
-                        .font(.footnote).foregroundStyle(.secondary)
+                        .font(.archivo(.footnote)).foregroundStyle(.secondary)
                     SimklConnectControls(compact: true)
                 }
             }
 
             card {
-                Label("Pick a name", systemImage: "person.fill").font(.headline)
+                Label("Pick a name", systemImage: "person.fill").font(.archivo(.headline))
                 TextField("Name", text: $name)
                     .textInputAutocapitalization(.words).submitLabel(.done)
                     .padding(12)
                     .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                     .onChange(of: name) { _, v in if v.count > 20 { name = String(v.prefix(20)) } }
                 Text(simklActive ? "Optional while your Simkl name is in use. It is kept as a fallback." : "This is how your profile is shown. You can add more profiles later.")
-                    .font(.footnote).foregroundStyle(.secondary)
+                    .font(.archivo(.footnote)).foregroundStyle(.secondary)
             }
         }
     }
@@ -287,11 +287,11 @@ struct OnboardingView: View {
                             supportsOpacity: false)
             }
             card {
-                Text("Preview").font(.footnote.weight(.semibold)).foregroundStyle(.secondary)
+                Text("Preview").font(.archivo(.footnote, weight: .semibold)).foregroundStyle(.secondary)
                 HStack(spacing: 12) {
-                    Label("Play", systemImage: "play.fill").font(.subheadline.weight(.bold)).foregroundStyle(theme.onAccent)
+                    Label("Play", systemImage: "play.fill").font(.archivo(.subheadline, weight: .bold)).foregroundStyle(theme.onAccent)
                         .padding(.horizontal, 18).padding(.vertical, 10).background(theme.accent, in: Capsule())
-                    Text("UP NEXT").font(.system(size: 10, weight: .heavy)).tracking(0.8).foregroundStyle(theme.onAccent)
+                    Text("UP NEXT").font(.archivo(size: 10, weight: .heavy)).tracking(0.8).foregroundStyle(theme.onAccent)
                         .padding(.horizontal, 8).padding(.vertical, 4).background(theme.accent, in: Capsule())
                 }
                 Capsule().fill(.white.opacity(0.25)).frame(height: 5)
@@ -306,15 +306,15 @@ struct OnboardingView: View {
         scroller {
             header("What do you want to see?", "Switch off anything you don't want suggested. It is hidden from Home, Explore and recommendations.")
             card {
-                Text("Where it's from").font(.footnote.weight(.semibold)).foregroundStyle(.secondary)
+                Text("Where it's from").font(.archivo(.footnote, weight: .semibold)).foregroundStyle(.secondary)
                 ForEach(ContentCategory.regions) { categoryToggle($0) }
             }
             card {
-                Text("Kinds of titles").font(.footnote.weight(.semibold)).foregroundStyle(.secondary)
+                Text("Kinds of titles").font(.archivo(.footnote, weight: .semibold)).foregroundStyle(.secondary)
                 ForEach(ContentCategory.kinds) { categoryToggle($0) }
             }
             Text("Chosen per profile. Find it again in Settings → Content & catalogues.")
-                .font(.footnote).foregroundStyle(.secondary)
+                .font(.archivo(.footnote)).foregroundStyle(.secondary)
         }
     }
 
@@ -332,19 +332,19 @@ struct OnboardingView: View {
         scroller {
             header("Build your Home", "Choose the rows you want, and add Stremio add-ons for more catalogues.")
             card {
-                Text("Home rows").font(.footnote.weight(.semibold)).foregroundStyle(.secondary)
+                Text("Home rows").font(.archivo(.footnote, weight: .semibold)).foregroundStyle(.secondary)
                 rowToggle("Trending Movies", ContentRules.Builtin.trendingMovies, "flame.fill")
                 rowToggle("Trending Shows", ContentRules.Builtin.trendingShows, "flame.fill")
                 rowToggle("Because you watched", ContentRules.Builtin.because, "sparkles")
                 rowToggle("Themed collections", ContentRules.Builtin.themes, "square.stack.fill")
             }
             card {
-                Label("Add-ons", systemImage: "puzzlepiece.extension.fill").font(.headline)
+                Label("Add-ons", systemImage: "puzzlepiece.extension.fill").font(.archivo(.headline))
                 if store.addons.isEmpty {
-                    Text("Loading…").font(.footnote).foregroundStyle(.secondary)
+                    Text("Loading…").font(.archivo(.footnote)).foregroundStyle(.secondary)
                 }
                 ForEach(store.addons) { a in
-                    Label(a.manifest.name, systemImage: "checkmark.circle.fill").font(.subheadline).foregroundStyle(.green)
+                    Label(a.manifest.name, systemImage: "checkmark.circle.fill").font(.archivo(.subheadline)).foregroundStyle(.green)
                 }
                 TextField("Add-on link (https:// or stremio://)", text: $urlText)
                     .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL).submitLabel(.go)
@@ -353,10 +353,10 @@ struct OnboardingView: View {
                     .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 Button(adding ? "Adding…" : "Add add-on") { addAddon() }
                     .buttonStyle(.bordered).disabled(urlText.isEmpty || adding)
-                if let addError { Text(addError).font(.footnote).foregroundStyle(.red) }
+                if let addError { Text(addError).font(.archivo(.footnote)).foregroundStyle(.red) }
                 else {
                     Text("Paste an add-on's manifest link, for example your AIOMetadata. Catalogues from AIOMetadata only show on Home once you pick them below.")
-                        .font(.footnote).foregroundStyle(.secondary)
+                        .font(.archivo(.footnote)).foregroundStyle(.secondary)
                 }
             }
             ForEach(pickerAddons) { a in catalogueCard(a) }
@@ -368,20 +368,20 @@ struct OnboardingView: View {
         let keys = all.map { ContentRules.rowKey(a, $0) }
         return card {
             HStack {
-                Text("\(a.manifest.name) catalogues").font(.headline)
+                Text("\(a.manifest.name) catalogues").font(.archivo(.headline))
                 Spacer()
-                Button("All") { prefs.setRowsAdded(keys, true) }.font(.subheadline)
-                Button("None") { prefs.setRowsAdded(keys, false) }.font(.subheadline)
+                Button("All") { prefs.setRowsAdded(keys, true) }.font(.archivo(.subheadline))
+                Button("None") { prefs.setRowsAdded(keys, false) }.font(.archivo(.subheadline))
             }
             ForEach(Array(all.prefix(60)), id: \.self) { cat in
                 let key = ContentRules.rowKey(a, cat)
                 Toggle(isOn: Binding(get: { rules.isRowAdded(key) }, set: { prefs.setRowAdded(key, $0) })) {
                     Text("\(cat.name ?? cat.id) · \(cat.type == "movie" ? "Movies" : cat.type == "series" ? "Series" : cat.type.capitalized)")
-                        .font(.subheadline)
+                        .font(.archivo(.subheadline))
                 }
             }
             if all.count > 60 {
-                Text("\(all.count - 60) more in Settings → Content & catalogues.").font(.footnote).foregroundStyle(.secondary)
+                Text("\(all.count - 60) more in Settings → Content & catalogues.").font(.archivo(.footnote)).foregroundStyle(.secondary)
             }
         }
     }
@@ -442,22 +442,22 @@ struct OnboardingView: View {
     private var tmdbBuiltInCard: some View {
         card {
             HStack(spacing: 8) {
-                Label("TMDB", systemImage: "film.stack").font(.headline)
-                Text("Built in").font(.system(size: 10, weight: .heavy)).foregroundStyle(theme.onAccent)
+                Label("TMDB", systemImage: "film.stack").font(.archivo(.headline))
+                Text("Built in").font(.archivo(size: 10, weight: .heavy)).foregroundStyle(theme.onAccent)
                     .padding(.horizontal, 8).padding(.vertical, 3).background(theme.accent, in: Capsule())
                 Spacer()
                 Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
             }
             Text("You don't need to provide a key. Pear. already includes one, so trending, Explore, recommendations, episode thumbnails, title logos and skip-intro matching work out of the box. If something doesn't load, turn on the switch below and add your own free key.")
-                .font(.footnote).foregroundStyle(.secondary)
+                .font(.archivo(.footnote)).foregroundStyle(.secondary)
             Toggle("Use my own TMDB key", isOn: ownTMDBBinding)
-                .font(.subheadline.weight(.semibold))
+                .font(.archivo(.subheadline, weight: .semibold))
             if ownTMDBBinding.wrappedValue {
                 SecureField("TMDB API key", text: $tmdbKey)
                     .textInputAutocapitalization(.never).autocorrectionDisabled().submitLabel(.done)
                     .padding(12).background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 if let u = URL(string: "https://www.themoviedb.org/settings/api") {
-                    Link("Get a free key", destination: u).font(.subheadline.weight(.semibold))
+                    Link("Get a free key", destination: u).font(.archivo(.subheadline, weight: .semibold))
                 }
             }
         }
@@ -474,20 +474,20 @@ struct OnboardingView: View {
                                           @ViewBuilder extra: () -> Extra) -> some View {
         card {
             HStack(spacing: 8) {
-                Label(title, systemImage: symbol).font(.headline)
+                Label(title, systemImage: symbol).font(.archivo(.headline))
                 if let badge {
-                    Text(badge).font(.system(size: 10, weight: .heavy)).foregroundStyle(theme.onAccent)
+                    Text(badge).font(.archivo(size: 10, weight: .heavy)).foregroundStyle(theme.onAccent)
                         .padding(.horizontal, 8).padding(.vertical, 3).background(theme.accent, in: Capsule())
                 }
                 Spacer()
                 if !binding.wrappedValue.isEmpty { Image(systemName: "checkmark.circle.fill").foregroundStyle(.green) }
             }
-            Text(text).font(.footnote).foregroundStyle(.secondary)
+            Text(text).font(.archivo(.footnote)).foregroundStyle(.secondary)
             SecureField(placeholder, text: binding)
                 .textInputAutocapitalization(.never).autocorrectionDisabled().submitLabel(.done)
                 .padding(12).background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             extra()
-            if let u = URL(string: link) { Link(linkTitle, destination: u).font(.subheadline.weight(.semibold)) }
+            if let u = URL(string: link) { Link(linkTitle, destination: u).font(.archivo(.subheadline, weight: .semibold)) }
         }
     }
 
@@ -498,7 +498,7 @@ struct OnboardingView: View {
             Spacer(minLength: 0)
             ProfileAvatar(profile: draftProfile, size: 96)
             Text("You're all set, \(shownName)")
-                .font(.system(size: 28, weight: .bold, design: .rounded)).multilineTextAlignment(.center)
+                .font(.archivo(size: 28, weight: .bold)).multilineTextAlignment(.center)
             VStack(alignment: .leading, spacing: 10) {
                 summary("Simkl", simkl.isConnected ? "Connected" : "Not connected", simkl.isConnected)
                 summary("TMDB key", tmdbKey.isEmpty ? (TMDBClient.hasProxy ? "Built in" : "Not added") : "Added", !tmdbKey.isEmpty || TMDBClient.hasProxy)
@@ -507,7 +507,7 @@ struct OnboardingView: View {
             }
             .padding(16).frame(maxWidth: 420)
             .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-            Text("Everything here can be changed in Settings.").font(.footnote).foregroundStyle(.secondary)
+            Text("Everything here can be changed in Settings.").font(.archivo(.footnote)).foregroundStyle(.secondary)
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 24).frame(maxWidth: .infinity)
@@ -516,9 +516,9 @@ struct OnboardingView: View {
     private func summary(_ title: String, _ value: String, _ on: Bool) -> some View {
         HStack {
             Image(systemName: on ? "checkmark.circle.fill" : "circle.dashed").foregroundStyle(on ? Color.green : Color.secondary)
-            Text(title).font(.subheadline.weight(.semibold))
+            Text(title).font(.archivo(.subheadline, weight: .semibold))
             Spacer()
-            Text(value).font(.subheadline).foregroundStyle(.secondary)
+            Text(value).font(.archivo(.subheadline)).foregroundStyle(.secondary)
         }
     }
 }

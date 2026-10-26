@@ -875,7 +875,7 @@ struct PlayerScreen: View {
             }
             if partyGuest {
                 Text(transportIsPlaying ? "Ask host to pause" : "Ask host to play")
-                    .font(.footnote.weight(.semibold)).foregroundStyle(.white.opacity(0.8))
+                    .font(.archivo(.footnote, weight: .semibold)).foregroundStyle(.white.opacity(0.8))
             }
         }
     }
@@ -917,11 +917,11 @@ struct PlayerScreen: View {
         Button { openInfo() } label: {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 8) {
-                    Text(current.item.name).font(.system(size: 24, weight: .bold)).lineLimit(1)
+                    Text(current.item.name).font(.archivo(size: 24, weight: .bold)).lineLimit(1)
                     Image(systemName: "chevron.up").font(.system(size: 14, weight: .bold)).opacity(0.85)
                 }
                 if let l = subtitleLine {
-                    Text(l).font(.system(size: 17, weight: .medium)).foregroundStyle(.white.opacity(0.75)).lineLimit(1)
+                    Text(l).font(.archivo(size: 17, weight: .medium)).foregroundStyle(.white.opacity(0.75)).lineLimit(1)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -1118,7 +1118,7 @@ struct PlayerScreen: View {
     private var pipPlaceholder: some View {
         VStack(spacing: 10) {
             Image(systemName: "pip").font(.system(size: 36, weight: .regular))
-            Text("Playing in Picture in Picture").font(.headline)
+            Text("Playing in Picture in Picture").font(.archivo(.headline))
         }
         .foregroundStyle(.white.opacity(0.7))
         .allowsHitTesting(false)
@@ -1252,7 +1252,7 @@ struct PlayerScreen: View {
             Spacer(minLength: 0)
             VStack(alignment: .leading, spacing: 14) {
                 HStack {
-                    Text("Subtitles").font(.title3.weight(.semibold))
+                    Text("Subtitles").font(.archivo(.title3, weight: .semibold))
                     Spacer()
                     circleButton("xmark", size: 34, icon: 13) { closeSubtitles() }
                 }
@@ -1265,7 +1265,7 @@ struct PlayerScreen: View {
                             }
                         }
                         onlineSubtitles
-                        Text("APPEARANCE").font(.caption.weight(.bold)).tracking(1).foregroundStyle(.white.opacity(0.6))
+                        Text("APPEARANCE").font(.archivo(.caption, weight: .bold)).tracking(1).foregroundStyle(.white.opacity(0.6))
                         SubtitleStyleControls(showsPreview: false, onDark: true)
                     }
                     .padding(.bottom, 6)
@@ -1285,7 +1285,7 @@ struct PlayerScreen: View {
         if model.loadingOnline || !choices.isEmpty {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 8) {
-                    Text("OPENSUBTITLES").font(.caption.weight(.bold)).tracking(1).foregroundStyle(.white.opacity(0.6))
+                    Text("OPENSUBTITLES").font(.archivo(.caption, weight: .bold)).tracking(1).foregroundStyle(.white.opacity(0.6))
                     if model.loadingOnline { ProgressView().controlSize(.small).tint(.white) }
                 }
                 VStack(spacing: 6) {
@@ -1302,7 +1302,7 @@ struct PlayerScreen: View {
     private func trackRow(_ title: String, on: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack {
-                Text(title).font(.body.weight(.medium)).lineLimit(1)
+                Text(title).font(.archivo(.body, weight: .medium)).lineLimit(1)
                 Spacer()
                 if on { Image(systemName: "checkmark").font(.subheadline.weight(.bold)).foregroundStyle(theme.accent) }
             }
@@ -1343,9 +1343,9 @@ struct PlayerScreen: View {
     private var speedPanel: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
-                Text("Playback speed").font(.title3.weight(.semibold))
+                Text("Playback speed").font(.archivo(.title3, weight: .semibold))
                 Spacer()
-                Text(rateText(model.rate)).font(.title3.weight(.bold).monospacedDigit())
+                Text(rateText(model.rate)).font(.archivo(.title3, weight: .bold).monospacedDigit())
                     .foregroundStyle(model.rate == 1 ? Color.white : theme.accent)
                 circleButton("xmark", size: 34, icon: 13) { closeSpeed() }
             }
@@ -1364,7 +1364,7 @@ struct PlayerScreen: View {
                 Spacer()
                 Text("2×")
             }
-            .font(.subheadline.monospacedDigit()).foregroundStyle(.white.opacity(0.75))
+            .font(.archivo(.subheadline).monospacedDigit()).foregroundStyle(.white.opacity(0.75))
         }
         .foregroundStyle(.white)
         .padding(18)
@@ -1533,7 +1533,7 @@ struct PlayerScreen: View {
             Spacer(minLength: 0)
             VStack(alignment: .leading, spacing: 14) {
                 HStack {
-                    Text("Sources").font(.title3.weight(.semibold))
+                    Text("Sources").font(.archivo(.title3, weight: .semibold))
                     Spacer()
                     if sourceGroups.count > 1 {
                         AddonFilterMenu(groups: sourceGroups, selection: $sourceFilter, onDark: true)
@@ -1548,26 +1548,26 @@ struct PlayerScreen: View {
                         if loadingSources && !sourceGroups.isEmpty {
                             HStack(spacing: 8) {
                                 ProgressView().controlSize(.small).tint(.white)
-                                Text("Checking more add-ons…").font(.footnote).foregroundStyle(.white.opacity(0.6))
+                                Text("Checking more add-ons…").font(.archivo(.footnote)).foregroundStyle(.white.opacity(0.6))
                             }
                             .frame(maxWidth: .infinity)
                         }
                         ForEach(SourceFilter.apply(sourceGroups, sourceFilter), id: \.0.id) { addon, items in
                             VStack(alignment: .leading, spacing: 6) {
-                                Text(addon.manifest.name.uppercased()).font(.caption.weight(.bold)).tracking(1)
+                                Text(addon.manifest.name.uppercased()).font(.archivo(.caption, weight: .bold)).tracking(1)
                                     .foregroundStyle(.white.opacity(0.6))
                                 ForEach(items) { s in sourceRow(addon, s) }
                                 if let n = p2pOffCounts[addon.id], n > 0 {
                                     Label("\(n) torrent source\(n == 1 ? "" : "s") unavailable: P2P is off (Settings → Peer-to-peer)",
                                           systemImage: "antenna.radiowaves.left.and.right.slash")
-                                        .font(.footnote).foregroundStyle(.white.opacity(0.6))
+                                        .font(.archivo(.footnote)).foregroundStyle(.white.opacity(0.6))
                                         .padding(.horizontal, 4)
                                 }
                             }
                         }
                         if !loadingSources && sourceGroups.isEmpty {
                             Text("No playable sources found for this title.")
-                                .font(.subheadline).foregroundStyle(.white.opacity(0.7))
+                                .font(.archivo(.subheadline)).foregroundStyle(.white.opacity(0.7))
                         }
                     }
                     .padding(.bottom, 6)
@@ -1588,9 +1588,9 @@ struct PlayerScreen: View {
         return Button { selectSource(addon, s) } label: {
             HStack(alignment: .top, spacing: 8) {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(s.name ?? s.title ?? "Stream").font(.body.weight(.semibold)).lineLimit(2)
+                    Text(s.name ?? s.title ?? "Stream").font(.archivo(.body, weight: .semibold)).lineLimit(2)
                     if let d = detail, d != s.name {
-                        Text(d).font(.footnote).foregroundStyle(.white.opacity(0.65)).lineLimit(3)
+                        Text(d).font(.archivo(.footnote)).foregroundStyle(.white.opacity(0.65)).lineLimit(3)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -1717,7 +1717,7 @@ struct PlayerScreen: View {
 
     private func toast(_ message: String) -> some View {
         VStack {
-            Text(message).font(.subheadline.weight(.semibold)).foregroundStyle(.white)
+            Text(message).font(.archivo(.subheadline, weight: .semibold)).foregroundStyle(.white)
                 .padding(.horizontal, 16).padding(.vertical, 10)
                 .background(.black.opacity(0.78), in: Capsule())
                 .padding(.top, 18)
@@ -1771,10 +1771,10 @@ struct PlayerScreen: View {
     private func errorCard(_ message: String) -> some View {
         VStack(spacing: 14) {
             Image(systemName: "exclamationmark.triangle.fill").font(.largeTitle).foregroundStyle(.yellow)
-            Text("Couldn't play this source").font(.headline)
-            Text(message).font(.footnote).multilineTextAlignment(.center).textSelection(.enabled)
+            Text("Couldn't play this source").font(.archivo(.headline))
+            Text(message).font(.archivo(.footnote)).multilineTextAlignment(.center).textSelection(.enabled)
             Text("The link may have expired or the server may be refusing the request. Try another source, or open this one in another player.")
-                .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                .font(.archivo(.caption)).foregroundStyle(.secondary).multilineTextAlignment(.center)
             HStack {
                 Button("Open in VLC") { open("vlc-x-callback://x-callback-url/stream?url=") }
                 Button("Open in Infuse") { open("infuse://x-callback-url/play?url=") }
@@ -1853,7 +1853,7 @@ struct PlayerScreen: View {
         if let chip = partyChip {
             Button { openSources() } label: {
                 Label("Your source: \(chip)", systemImage: "rectangle.stack")
-                    .font(.footnote.weight(.semibold)).lineLimit(1)
+                    .font(.archivo(.footnote, weight: .semibold)).lineLimit(1)
                     .padding(.horizontal, 12).padding(.vertical, 7)
                     .background(.black.opacity(0.35), in: Capsule())
             }
@@ -1881,19 +1881,19 @@ struct PlayerScreen: View {
         VStack(spacing: 14) {
             if case .ended = party.phase {
                 Image(systemName: "person.2.slash").font(.largeTitle)
-                Text(party.notice ?? "The party has ended.").font(.headline).multilineTextAlignment(.center)
+                Text(party.notice ?? "The party has ended.").font(.archivo(.headline)).multilineTextAlignment(.center)
             } else if guestAdapter?.sourceStatus == .unavailable {
                 Image(systemName: "questionmark.folder").font(.largeTitle).foregroundStyle(.yellow)
-                Text("No source on your device").font(.headline)
+                Text("No source on your device").font(.archivo(.headline))
                 Text(partyReason ?? "Nothing playable for this title here.")
-                    .font(.footnote).multilineTextAlignment(.center).foregroundStyle(.white.opacity(0.7))
+                    .font(.archivo(.footnote)).multilineTextAlignment(.center).foregroundStyle(.white.opacity(0.7))
                 HStack(spacing: 12) {
                     Button("Pick a source") { openSources() }.buttonStyle(.borderedProminent)
                     Button("Try again") { guestAdapter?.retrySource() }.buttonStyle(.bordered)
                 }
             } else {
                 ProgressView().controlSize(.large).tint(.white)
-                Text(partyWaitingText).font(.headline)
+                Text(partyWaitingText).font(.archivo(.headline))
             }
             Button("Leave party") { close() }.buttonStyle(.bordered)
         }
@@ -2291,7 +2291,7 @@ private struct SeekBar: View {
                         .allowsHitTesting(false)
                     if let f = hoverFrac, let bx = bubbleX {
                         Text(Fmt.clock(Double(f) * dur))
-                            .font(.caption)
+                            .font(.archivo(.caption))
                             .monospacedDigit()
                             .foregroundStyle(.white)
                             .padding(.horizontal, 8).padding(.vertical, 4)
@@ -2330,7 +2330,7 @@ private struct SeekBar: View {
             .frame(height: 40)
             Text("-" + Fmt.clock(max(dur - shown, 0))).frame(width: 62, alignment: .trailing)
         }
-        .font(.system(size: 14, weight: .semibold).monospacedDigit())
+        .font(.archivo(size: 14, weight: .semibold).monospacedDigit())
         .foregroundStyle(.white.opacity(0.85))
     }
 }
@@ -2389,7 +2389,7 @@ private struct SkipOverlay: View {
                     if let t = c.target { onSeek(t) } else { onNext() }
                 } label: {
                     Label(c.title, systemImage: c.symbol)
-                        .font(.system(size: 17, weight: .semibold)).foregroundStyle(.white)
+                        .font(.archivo(size: 17, weight: .semibold)).foregroundStyle(.white)
                         .padding(.horizontal, 22).frame(height: 48)
                         .modifier(GlassCapsule(on: glass))
                         .contentShape(Capsule())
@@ -2444,7 +2444,7 @@ private struct EpisodePanel: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text(showName).font(.system(size: 22, weight: .bold)).lineLimit(1)
+                Text(showName).font(.archivo(size: 22, weight: .bold)).lineLimit(1)
                 Spacer()
                 Button(action: onClose) {
                     Image(systemName: "chevron.down").font(.system(size: 13, weight: .bold))
@@ -2483,7 +2483,7 @@ private struct EpisodePanel: View {
             HStack(spacing: 8) {
                 ForEach(provider.seasons) { s in
                     Button { season = s.id } label: {
-                        Text(s.title).font(.system(size: 16, weight: .semibold))
+                        Text(s.title).font(.archivo(size: 16, weight: .semibold))
                             .padding(.horizontal, 16).padding(.vertical, 8)
                             .foregroundStyle(s.id == season ? theme.onAccent : Color.white)
                             .background(s.id == season ? theme.accent : Color.white.opacity(0.14), in: Capsule())
@@ -2506,7 +2506,7 @@ private struct EpisodePanel: View {
                     ForEach(episodes) { ep in card(ep).id(ep.id) }
                     if !loading && episodes.isEmpty {
                         Text("No episode list available for this season")
-                            .font(.subheadline).foregroundStyle(.white.opacity(0.7)).frame(height: cardHeight)
+                            .font(.archivo(.subheadline)).foregroundStyle(.white.opacity(0.7)).frame(height: cardHeight)
                     }
                 }
                 .padding(.horizontal, 24)
@@ -2528,13 +2528,13 @@ private struct EpisodePanel: View {
                     .frame(width: cardWidth, height: cardHeight)
                     .overlay { LinearGradient(colors: [.clear, .black.opacity(0.5)], startPoint: .center, endPoint: .bottom) }
                     .overlay(alignment: .bottomLeading) {
-                        Text("E\(ep.id)").font(.system(size: 13, weight: .bold))
+                        Text("E\(ep.id)").font(.archivo(size: 13, weight: .bold))
                             .padding(.horizontal, 7).padding(.vertical, 3)
                             .background(.black.opacity(0.6), in: Capsule()).padding(8)
                     }
                     .overlay(alignment: .topTrailing) {
                         if isCurrent {
-                            Label("Playing", systemImage: "waveform").font(.system(size: 13, weight: .bold))
+                            Label("Playing", systemImage: "waveform").font(.archivo(size: 13, weight: .bold))
                                 .foregroundStyle(theme.onAccent)
                                 .padding(.horizontal, 8).padding(.vertical, 4)
                                 .background(theme.accent, in: Capsule()).padding(8)
@@ -2547,9 +2547,9 @@ private struct EpisodePanel: View {
                     }
                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                     .selectionRing(isCurrent, radius: 12)
-                Text(ep.name).font(.system(size: 16, weight: .semibold)).lineLimit(1)
+                Text(ep.name).font(.archivo(size: 16, weight: .semibold)).lineLimit(1)
                     .frame(width: cardWidth, alignment: .leading)
-                Text(extras.isEmpty ? " " : extras).font(.system(size: 13))
+                Text(extras.isEmpty ? " " : extras).font(.archivo(size: 13))
                     .foregroundStyle(.white.opacity(0.65)).lineLimit(1)
             }
         }

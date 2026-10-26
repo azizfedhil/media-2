@@ -92,7 +92,7 @@ struct PlayerInfoCard: View {
                 StillImage(url: info.image, size: stacked ? 480 : Self.thumbWidth)
                 LinearGradient(colors: [.black.opacity(0.4), .clear], startPoint: .top, endPoint: .center)
                 if let tag = info.episodeTag {
-                    Text(tag).font(.caption2.bold()).monospacedDigit().foregroundStyle(.white)
+                    Text(tag).font(.archivo(.caption2, weight: .bold)).monospacedDigit().foregroundStyle(.white)
                         .padding(.horizontal, 8).padding(.vertical, 4)
                         .background(.black.opacity(0.55), in: Capsule())
                         .padding(8)
@@ -122,10 +122,10 @@ struct PlayerInfoCard: View {
         HStack(alignment: .top, spacing: 8) {
             VStack(alignment: .leading, spacing: 4) {
                 if let k = info.kicker {
-                    Text(k.uppercased()).font(.caption.weight(.bold)).tracking(0.9)
+                    Text(k.uppercased()).font(.archivo(.caption, weight: .bold)).tracking(0.9)
                         .foregroundStyle(.white.opacity(0.6)).lineLimit(1)
                 }
-                Text(info.title).font(.system(size: 23, weight: .bold)).lineLimit(2)
+                Text(info.title).font(.archivo(size: 23, weight: .bold)).lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 0)
@@ -156,7 +156,7 @@ struct PlayerInfoCard: View {
 
     private func chip(_ text: String, symbol: String) -> some View {
         Label(text, systemImage: symbol)
-            .font(.system(size: 13, weight: .semibold)).lineLimit(1)
+            .font(.archivo(size: 13, weight: .semibold)).lineLimit(1)
             .foregroundStyle(.white.opacity(0.9))
             .padding(.horizontal, 11).padding(.vertical, 7)
             .background(.white.opacity(0.12), in: Capsule())
@@ -165,7 +165,7 @@ struct PlayerInfoCard: View {
     private func ratingChip(_ r: MDBListClient.Rating) -> some View {
         HStack(spacing: 6) {
             RatingLogo(label: r.label, score: r.score, height: 15)
-            Text(r.text).font(.system(size: 13, weight: .bold)).monospacedDigit()
+            Text(r.text).font(.archivo(size: 13, weight: .bold)).monospacedDigit()
         }
         .foregroundStyle(.white)
         .padding(.horizontal, 11).padding(.vertical, 6)
@@ -179,7 +179,7 @@ struct PlayerInfoCard: View {
     private var synopsis: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text((info.overviewNote ?? "Synopsis").uppercased())
-                .font(.caption2.weight(.bold)).tracking(0.9).foregroundStyle(.white.opacity(0.5))
+                .font(.archivo(.caption2, weight: .bold)).tracking(0.9).foregroundStyle(.white.opacity(0.5))
             if let o = info.overview, !o.isEmpty {
                 // Plain text when it fits; scrolls when a long synopsis would push the card off a landscape phone.
                 ScrollView {
@@ -192,14 +192,14 @@ struct PlayerInfoCard: View {
             } else if info.isLoading {
                 skeleton
             } else {
-                Text("No synopsis available yet.").font(.system(size: 15).italic()).foregroundStyle(.white.opacity(0.5))
+                Text("No synopsis available yet.").font(.archivo(size: 15, italic: true)).foregroundStyle(.white.opacity(0.5))
             }
         }
     }
 
     private func text(_ s: String) -> some View {
         Text(s)
-            .font(.system(size: 15, weight: .regular)).lineSpacing(3)
+            .font(.archivo(size: 15, weight: .regular)).lineSpacing(3)
             .foregroundStyle(.white.opacity(0.9))
             .frame(maxWidth: .infinity, alignment: .leading)
             .fixedSize(horizontal: false, vertical: true)

@@ -12,7 +12,7 @@ struct MDBListPicker: View {
             Toggle(isOn: Binding(get: { ids.contains(l.id) }, set: { toggle(l.id, $0) })) {
                 VStack(alignment: .leading) {
                     Text(l.name)
-                    if let n = l.items { Text("\(n) titles").font(.caption).foregroundStyle(.secondary) }
+                    if let n = l.items { Text("\(n) titles").font(.archivo(.caption)).foregroundStyle(.secondary) }
                 }
             }
         }

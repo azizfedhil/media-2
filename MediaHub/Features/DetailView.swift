@@ -300,7 +300,7 @@ struct DetailView: View {
                 .mask { posterRightFade }
                 .mask { posterBottomFade }
                 VStack(alignment: .leading, spacing: 12) {
-                    TitleArt(item: item, maxWidth: 300, maxHeight: compact ? 58 : 100, font: .largeTitle.bold())
+                    TitleArt(item: item, maxWidth: 300, maxHeight: compact ? 58 : 100, font: .archivo(.largeTitle, weight: .bold))
                     if !metaLine.isEmpty || networkText != nil { metaRow }
                     if !allRatings.isEmpty { ratingsRow }
                     actionBar
@@ -354,7 +354,7 @@ struct DetailView: View {
     /// Title, facts and ratings: anchored to the bottom of the parallax hero, over the fade into the page.
     private var heroInfo: some View {
         VStack(alignment: .leading, spacing: 10) {
-            TitleArt(item: item, maxWidth: 280, maxHeight: 100, font: .largeTitle.bold())
+            TitleArt(item: item, maxWidth: 280, maxHeight: 100, font: .archivo(.largeTitle, weight: .bold))
             if !metaLine.isEmpty || networkText != nil { metaRow }
             if !allRatings.isEmpty { ratingsRow }
         }
@@ -377,7 +377,7 @@ struct DetailView: View {
     private var synopsis: some View {
         VStack(alignment: .leading, spacing: 8) {
             if let t = details?.tagline, !t.isEmpty {
-                Text(t).font(.footnote.italic()).foregroundStyle(.tertiary)
+                Text(t).font(.archivo(.footnote, italic: true)).foregroundStyle(.tertiary)
             }
             if let d = descriptionText { ExpandableText(text: d, lines: 2) }
         }
@@ -390,7 +390,7 @@ struct DetailView: View {
         return Group {
             if let n = networkText { Text("\(lead)\(Image(systemName: icon)) \(n)") } else { Text(metaLine) }
         }
-        .font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
+        .font(.archivo(.subheadline)).foregroundStyle(.secondary).lineLimit(2)
     }
 
     private var descriptionText: String? {
@@ -404,7 +404,7 @@ struct DetailView: View {
         HStack(spacing: 10) {
             Button { showSources = true } label: {
                 Label(isSeries ? "Play S\(season):E\(episode)" : "Play", systemImage: "play.fill")
-                    .font(.headline).frame(maxWidth: .infinity)
+                    .font(.archivo(.headline)).frame(maxWidth: .infinity)
                     .foregroundStyle(theme.onAccent)
             }
             .buttonStyle(.glassProminent).controlSize(.large)
@@ -517,7 +517,7 @@ struct DetailView: View {
     private var seasonSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text("Seasons").font(.title3.bold())
+                Text("Seasons").font(.archivo(.title3, weight: .bold))
                 Spacer()
                 if seasonChips.contains(where: { $0.poster != nil }) {
                     Button { withAnimation(.snappy) { seasonsExpanded.toggle() } } label: {
@@ -525,7 +525,7 @@ struct DetailView: View {
                             Text("Artwork")
                             Image(systemName: "chevron.down").rotationEffect(.degrees(seasonsExpanded ? 180 : 0))
                         }
-                        .font(.subheadline)
+                        .font(.archivo(.subheadline))
                     }
                 }
             }
@@ -550,7 +550,7 @@ struct DetailView: View {
                 HStack(spacing: 8) {
                     ForEach(seasonChips) { c in
                         Button { select(season: c.id) } label: {
-                            Text(c.title).font(.subheadline.weight(.semibold))
+                            Text(c.title).font(.archivo(.subheadline, weight: .semibold))
                                 .padding(.horizontal, 16).padding(.vertical, 9)
                                 .foregroundStyle(c.id == season ? theme.onAccent : Color.primary)
                                 .glassEffect(c.id == season ? .regular.tint(theme.accent).interactive() : .regular.interactive(),
@@ -619,8 +619,8 @@ struct DetailView: View {
                                     }
                                 }
                                 .selectionRing(c.id == season, radius: 8, width: 1)
-                            Text(c.title).font(.caption.weight(.medium)).lineLimit(1)
-                            if let n = c.count { Text("\(n) episodes").font(.caption2).foregroundStyle(.secondary) }
+                            Text(c.title).font(.archivo(.caption, weight: .medium)).lineLimit(1)
+                            if let n = c.count { Text("\(n) episodes").font(.archivo(.caption2)).foregroundStyle(.secondary) }
                         }
                         .frame(width: 84, alignment: .leading)
                     }
@@ -800,7 +800,7 @@ struct DetailView: View {
             Label(text, systemImage: symbol)
             if r.state == .downloading { DownloadSpeedText(id: r.id, prefix: " · ") }
         }
-        .font(.footnote.weight(.medium))
+        .font(.archivo(.footnote, weight: .medium))
         .foregroundStyle(r.state == .done ? theme.accent : Color.secondary)
     }
 
@@ -808,7 +808,7 @@ struct DetailView: View {
 
     private var trailersSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Trailers & Extras").font(.title3.bold()).padding(.horizontal, 20)
+            Text("Trailers & Extras").font(.archivo(.title3, weight: .bold)).padding(.horizontal, 20)
             ScrollView(.horizontal) {
                 LazyHStack(spacing: 12) {
                     ForEach(trailers) { v in TrailerCard(video: v) { openTrailer = v } }
@@ -875,11 +875,11 @@ struct DetailView: View {
         let rows = detailRows
         if !rows.isEmpty {
             VStack(alignment: .leading, spacing: 0) {
-                Text(isSeries ? "About the show" : "About the movie").font(.title3.bold()).padding(.bottom, 8)
+                Text(isSeries ? "About the show" : "About the movie").font(.archivo(.title3, weight: .bold)).padding(.bottom, 8)
                 ForEach(rows, id: \.0) { row in
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(row.0).font(.caption).foregroundStyle(.secondary)
-                        Text(row.1).font(.subheadline)
+                        Text(row.0).font(.archivo(.caption)).foregroundStyle(.secondary)
+                        Text(row.1).font(.archivo(.subheadline))
                     }
                     .frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 8)
                     Divider()
@@ -963,13 +963,13 @@ struct DetailView: View {
             } label: {
                 HStack {
                     VStack(alignment: .leading) {
-                        Text(s.name ?? s.title ?? "Stream").font(.headline)
-                        if let t = s.description ?? s.title { Text(t).font(.caption).foregroundStyle(.secondary) }
+                        Text(s.name ?? s.title ?? "Stream").font(.archivo(.headline))
+                        if let t = s.description ?? s.title { Text(t).font(.archivo(.caption)).foregroundStyle(.secondary) }
                     }
                     Spacer()
                     if s.p2pOff {
                         Label("P2P off", systemImage: "antenna.radiowaves.left.and.right.slash")
-                            .font(.caption).foregroundStyle(.secondary)
+                            .font(.archivo(.caption)).foregroundStyle(.secondary)
                     } else if s.isTorrent {
                         Image(systemName: s.p2pLocked ? "lock.fill" : "antenna.radiowaves.left.and.right").foregroundStyle(.secondary)
                     }
@@ -1025,7 +1025,7 @@ struct DetailView: View {
                 if loadingStreams && !streams.isEmpty {
                     HStack(spacing: 8) {
                         ProgressView().controlSize(.small)
-                        Text("Checking more add-ons…").font(.footnote).foregroundStyle(.secondary)
+                        Text("Checking more add-ons…").font(.archivo(.footnote)).foregroundStyle(.secondary)
                     }
                     .frame(maxWidth: .infinity).padding(.vertical, 8)
                     .background(.bar)
@@ -1140,26 +1140,26 @@ struct DetailView: View {
                            startPoint: .top, endPoint: .bottom)
                 .allowsHitTesting(false)
             VStack(alignment: .leading, spacing: 12) {
-                TitleArt(item: item, maxWidth: 420, maxHeight: 64, font: .largeTitle.bold())
+                TitleArt(item: item, maxWidth: 420, maxHeight: 64, font: .archivo(.largeTitle, weight: .bold))
                 Text(wideSourceKicker)
-                    .font(.caption2.weight(.bold))
+                    .font(.archivo(.caption2, weight: .bold))
                     .foregroundStyle(.tertiary)
                     .lineLimit(1)
                 if let name = wideSourceEpisodeName {
                     Text(name)
-                        .font(.title3.weight(.semibold))
+                        .font(.archivo(.title3, weight: .semibold))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
                 if !allRatings.isEmpty { ratingsRow }
                 if let text = descriptionText {
                     Text(text)
-                        .font(.subheadline)
+                        .font(.archivo(.subheadline))
                         .lineLimit(4)
                 }
                 if !wideSourceFacts.isEmpty {
                     Text(wideSourceFacts)
-                        .font(.footnote)
+                        .font(.archivo(.footnote))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
@@ -1215,9 +1215,9 @@ struct DetailView: View {
             HStack(alignment: .top, spacing: 10) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(downloadTarget != nil ? "Download from…" : "Sources")
-                        .font(.title3.bold())
+                        .font(.archivo(.title3, weight: .bold))
                     Text("\(streams.reduce(0) { $0 + $1.1.count }) found")
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(.archivo(.caption)).foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 0)
                 if streams.count > 1 {
@@ -1236,7 +1236,7 @@ struct DetailView: View {
             if loadingStreams && !streams.isEmpty {
                 HStack(spacing: 8) {
                     ProgressView().controlSize(.small)
-                    Text("Checking more add-ons…").font(.footnote).foregroundStyle(.secondary)
+                    Text("Checking more add-ons…").font(.archivo(.footnote)).foregroundStyle(.secondary)
                 }
                 .transition(.opacity)
             }
@@ -1269,9 +1269,9 @@ struct DetailView: View {
                 else if !loadingStreams && streams.isEmpty {
                     VStack(spacing: 8) {
                         Image(systemName: "play.slash").font(.title2).foregroundStyle(.secondary)
-                        Text("No sources").font(.headline)
+                        Text("No sources").font(.archivo(.headline))
                         Text("Add a stream add-on or connect a media server in Settings.")
-                            .font(.footnote).foregroundStyle(.secondary)
+                            .font(.archivo(.footnote)).foregroundStyle(.secondary)
                             .multilineTextAlignment(.center)
                     }
                     .padding()

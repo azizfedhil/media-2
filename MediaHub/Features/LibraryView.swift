@@ -173,8 +173,8 @@ struct LibraryView: View {
         return Button { withAnimation(.snappy(duration: 0.3)) { filter = id } } label: {
             HStack(spacing: 6) {
                 Image(systemName: symbol).font(.system(size: 13, weight: .bold))
-                Text(title).font(.subheadline.weight(.semibold))
-                Text("\(count)").font(.subheadline.weight(.medium)).opacity(0.65)
+                Text(title).font(.archivo(.subheadline, weight: .semibold))
+                Text("\(count)").font(.archivo(.subheadline, weight: .medium)).opacity(0.65)
             }
             .foregroundStyle(on ? theme.onAccent : Color.primary)
             .padding(.horizontal, 14).padding(.vertical, 9)
@@ -190,8 +190,8 @@ struct LibraryView: View {
         Button { toggle(sec.id) } label: {
             HStack(spacing: 8) {
                 Image(systemName: sec.symbol).font(.system(size: 15, weight: .bold)).foregroundStyle(theme.accent)
-                Text(sec.title).font(.title3.bold())
-                Text("\(sec.items.count)").font(.subheadline.weight(.medium)).foregroundStyle(.secondary)
+                Text(sec.title).font(.archivo(.title3, weight: .bold))
+                Text("\(sec.items.count)").font(.archivo(.subheadline, weight: .medium)).foregroundStyle(.secondary)
                 Spacer()
                 if collapsible {
                     Image(systemName: "chevron.down").font(.footnote.weight(.bold)).foregroundStyle(.secondary)

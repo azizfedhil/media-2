@@ -168,7 +168,7 @@ struct ExploreView: View {
                 HStack(spacing: 8) {
                     Image(systemName: model.isTrending ? "flame.fill" : "line.3.horizontal.decrease.circle.fill")
                         .foregroundStyle(model.isTrending ? .orange : Color.accentColor)
-                    Text(heading).font(.title3.bold())
+                    Text(heading).font(.archivo(.title3, weight: .bold))
                 }
                 .padding(.horizontal, 16)
 
@@ -248,7 +248,7 @@ struct ExploreView: View {
                 }
                 if model.hasFilters {
                     Button { Task { await model.clearFilters() } } label: {
-                        Label("Reset", systemImage: "xmark.circle.fill").font(.footnote.weight(.semibold))
+                        Label("Reset", systemImage: "xmark.circle.fill").font(.archivo(.footnote, weight: .semibold))
                     }
                     .buttonStyle(.plain).foregroundStyle(.secondary)
                 }
@@ -260,7 +260,7 @@ struct ExploreView: View {
 
     private func chip(_ title: String, on: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Text(title).font(.footnote.weight(.semibold))
+            Text(title).font(.archivo(.footnote, weight: .semibold))
                 .padding(.horizontal, 14).padding(.vertical, 8)
                 .background(on ? Color.accentColor : Color.white.opacity(0.1), in: Capsule())
                 .foregroundStyle(on ? theme.onAccent : Color.primary)
@@ -271,7 +271,7 @@ struct ExploreView: View {
 
     private func menuLabel(_ title: String, symbol: String, on: Bool) -> some View {
         Label(title, systemImage: symbol)
-            .font(.footnote.weight(.semibold))
+            .font(.archivo(.footnote, weight: .semibold))
             .padding(.horizontal, 12).padding(.vertical, 8)
             .background(on ? Color.accentColor.opacity(0.25) : Color.white.opacity(0.1), in: Capsule())
             .foregroundStyle(on ? Color.accentColor : Color.primary)

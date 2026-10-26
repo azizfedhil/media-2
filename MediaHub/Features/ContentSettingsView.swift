@@ -55,7 +55,7 @@ struct ContentSettingsView: View {
                     HStack {
                         Label("AIOMetadata catalogues", systemImage: "square.grid.2x2.fill")
                         Spacer()
-                        Text(pickerSummary).font(.footnote).foregroundStyle(.secondary)
+                        Text(pickerSummary).font(.archivo(.footnote)).foregroundStyle(.secondary)
                     }
                 }
             } header: {
@@ -115,7 +115,7 @@ struct ContentSettingsView: View {
         Toggle(isOn: shown(c)) {
             VStack(alignment: .leading, spacing: 3) {
                 Label(c.title, systemImage: c.symbol)
-                Text(c.detail).font(.caption).foregroundStyle(.secondary)
+                Text(c.detail).font(.archivo(.caption)).foregroundStyle(.secondary)
             }
         }
     }

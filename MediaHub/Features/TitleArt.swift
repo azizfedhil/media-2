@@ -6,7 +6,7 @@ struct TitleArt: View {
     let item: MetaPreview
     var maxWidth: CGFloat = 260
     var maxHeight: CGFloat = 90
-    var font: Font = .largeTitle.bold()
+    var font: Font = .archivo(.largeTitle, weight: .bold)
     var tracking: CGFloat = 0
     var alignment: Alignment = .leading
     @State private var image: UIImage?

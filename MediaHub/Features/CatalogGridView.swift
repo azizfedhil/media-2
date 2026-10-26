@@ -126,8 +126,8 @@ struct CatalogGridView: View {
 
     private func header(_ sec: YearSection) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text(sec.title).font(.title3.bold())
-            Text("\(sec.items.count)").font(.subheadline.weight(.medium)).foregroundStyle(.secondary)
+            Text(sec.title).font(.archivo(.title3, weight: .bold))
+            Text("\(sec.items.count)").font(.archivo(.subheadline, weight: .medium)).foregroundStyle(.secondary)
             Spacer()
         }
         .padding(.horizontal, 16).padding(.vertical, 8)

@@ -139,7 +139,7 @@ struct PairSettingsView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(device.name)
                         Text(device.current ? "\(device.platform) · this device" : device.platform)
-                            .font(.footnote)
+                            .font(.archivo(.footnote))
                             .foregroundStyle(.secondary)
                     }
                     Spacer()
@@ -216,7 +216,7 @@ private struct PairCodeView: View {
                     .font(.system(size: 34, weight: .bold, design: .monospaced))
                     .textSelection(.enabled)
                 Text(left > 0 ? "Expires in \(left / 60):\(String(format: "%02d", left % 60))" : "Expired. Make a new code.")
-                    .font(.footnote)
+                    .font(.archivo(.footnote))
                     .foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity)

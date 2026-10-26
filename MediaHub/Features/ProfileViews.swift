@@ -14,7 +14,7 @@ struct ProfileAvatar: View {
             Circle().fill(LinearGradient(colors: [base, base.opacity(0.62)], startPoint: .topLeading, endPoint: .bottomTrailing))
             if profile.symbol.isEmpty {
                 Text(profile.initial)
-                    .font(.system(size: size * 0.46, weight: .bold, design: .rounded))
+                    .font(.archivo(size: size * 0.46, weight: .bold))
                     .foregroundStyle(base.contrastingForeground)
             } else {
                 Image(systemName: profile.symbol)
@@ -213,7 +213,7 @@ struct ProfileSheet: View {
                         if profiles.canAdd { addTile }
                     }
                     Text(footnote)
-                        .font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                        .font(.archivo(.footnote)).foregroundStyle(.secondary).multilineTextAlignment(.center)
                     Button(managing ? "Done Editing" : "Manage Profiles") {
                         withAnimation(.snappy) { managing.toggle() }
                     }
@@ -245,8 +245,8 @@ struct ProfileSheet: View {
             HStack(spacing: 12) {
                 ProfileAvatar(profile: profiles.active, size: 44)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("View \(simkl.name(for: profiles.active))'s profile").font(.headline)
-                    Text("Stats, integrations and taste").font(.caption).foregroundStyle(.secondary)
+                    Text("View \(simkl.name(for: profiles.active))'s profile").font(.archivo(.headline))
+                    Text("Stats, integrations and taste").font(.archivo(.caption)).foregroundStyle(.secondary)
                 }
                 Spacer()
                 Image(systemName: "chevron.right").font(.footnote.weight(.bold)).foregroundStyle(.secondary)
@@ -266,9 +266,9 @@ struct ProfileSheet: View {
                 Image(systemName: "arrow.triangle.2.circlepath").font(.title3.weight(.semibold))
                     .foregroundStyle(theme.accent).frame(width: 44, height: 44)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Simkl").font(.headline)
+                    Text("Simkl").font(.archivo(.headline))
                     Text(simkl.isConnected ? "Connected" : "Log in to sync your library")
-                        .font(.caption).foregroundStyle(simkl.isConnected ? Color.green : Color.secondary)
+                        .font(.archivo(.caption)).foregroundStyle(simkl.isConnected ? Color.green : Color.secondary)
                 }
                 Spacer()
                 Image(systemName: "chevron.right").font(.footnote.weight(.bold)).foregroundStyle(.secondary)
@@ -288,9 +288,9 @@ struct ProfileSheet: View {
                 Image(systemName: "link").font(.title3.weight(.semibold))
                     .foregroundStyle(theme.accent).frame(width: 44, height: 44)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Pear.pair").font(.headline)
+                    Text("Pear.pair").font(.archivo(.headline))
                     Text(PairSync.shared.isSignedIn ? "Signed in on this device" : "Sync across devices")
-                        .font(.caption).foregroundStyle(PairSync.shared.isSignedIn ? Color.green : Color.secondary)
+                        .font(.archivo(.caption)).foregroundStyle(PairSync.shared.isSignedIn ? Color.green : Color.secondary)
                 }
                 Spacer()
                 Image(systemName: "chevron.right").font(.footnote.weight(.bold)).foregroundStyle(.secondary)
@@ -310,8 +310,8 @@ struct ProfileSheet: View {
                 Image(systemName: "person.2.fill").font(.title3.weight(.semibold))
                     .foregroundStyle(theme.accent).frame(width: 44, height: 44)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Watch Party").font(.headline)
-                    Text("Watch together").font(.caption).foregroundStyle(.secondary)
+                    Text("Watch Party").font(.archivo(.headline))
+                    Text("Watch together").font(.archivo(.caption)).foregroundStyle(.secondary)
                 }
                 Spacer()
                 Image(systemName: "chevron.right").font(.footnote.weight(.bold)).foregroundStyle(.secondary)
@@ -330,9 +330,9 @@ struct ProfileSheet: View {
             HStack(spacing: 12) {
                 Image(systemName: "arrow.down.circle.fill").font(.title2).foregroundStyle(theme.accent).frame(width: 44, height: 44)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Downloads").font(.headline)
+                    Text("Downloads").font(.archivo(.headline))
                     Text(downloads.records.isEmpty ? "Watch offline" : "\(downloads.records.count) saved · \(DownloadFiles.sizeString(downloads.usedBytes))")
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(.archivo(.caption)).foregroundStyle(.secondary)
                 }
                 Spacer()
                 Image(systemName: "chevron.right").font(.footnote.weight(.bold)).foregroundStyle(.secondary)
@@ -373,7 +373,7 @@ struct ProfileSheet: View {
                     }
                     .padding(4)
                     .overlay { if active && !managing { Circle().strokeBorder(theme.accent, lineWidth: 3) } }
-                Text(simkl.name(for: p)).font(.subheadline.weight(.semibold)).lineLimit(1)
+                Text(simkl.name(for: p)).font(.archivo(.subheadline, weight: .semibold)).lineLimit(1)
             }
             .frame(maxWidth: .infinity)
         }
@@ -390,7 +390,7 @@ struct ProfileSheet: View {
                     .frame(width: 76, height: 76)
                     .glassEffect(.regular.interactive(), in: .circle)
                     .padding(4)
-                Text("Add Profile").font(.subheadline.weight(.semibold)).foregroundStyle(.secondary).lineLimit(1)
+                Text("Add Profile").font(.archivo(.subheadline, weight: .semibold)).foregroundStyle(.secondary).lineLimit(1)
             }
             .frame(maxWidth: .infinity)
         }
@@ -456,7 +456,7 @@ struct ProfileEditor: View {
                         Toggle(isOn: $useSimkl) {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text("Use my Simkl name and picture")
-                                Text(a.name).font(.footnote).foregroundStyle(.secondary)
+                                Text(a.name).font(.archivo(.footnote)).foregroundStyle(.secondary)
                             }
                         }
                     } footer: {
@@ -528,7 +528,7 @@ struct ProfileEditor: View {
             ZStack {
                 Circle().fill(fill)
                 if s.isEmpty {
-                    Text(draft.initial).font(.system(size: 17, weight: .bold, design: .rounded))
+                    Text(draft.initial).font(.archivo(size: 17, weight: .bold))
                 } else {
                     Image(systemName: s).font(.system(size: 17, weight: .bold))
                 }

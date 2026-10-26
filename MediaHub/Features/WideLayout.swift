@@ -691,12 +691,12 @@ struct SidebarShell: View {
                     ProfileAvatar(profile: profiles.active, size: 34)
                     if !compact {
                         Text(simkl.name(for: profiles.active))
-                            .font(.system(size: 16, weight: .semibold))
+                            .font(.archivo(size: 16, weight: .semibold))
                             .lineLimit(1)
                         Spacer(minLength: 4)
                         TimelineView(.everyMinute) { ctx in
                             Text(ctx.date.formatted(date: .omitted, time: .shortened))
-                                .font(.footnote)
+                                .font(.archivo(.footnote))
                                 .foregroundStyle(.secondary)
                                 .monospacedDigit()
                         }
@@ -1138,7 +1138,7 @@ struct WideHeroPanel: View {
         VStack(alignment: .leading, spacing: 16) {
             typePill(item)
             TitleArt(item: item, maxWidth: 420, maxHeight: compact ? 68 : 96,
-                     font: .system(size: compact ? 32 : 40, weight: .black), tracking: 1)
+                     font: .archivo(size: compact ? 32 : 40, weight: .black), tracking: 1)
             ScrollView(.horizontal) {
                 InlineRatings(item: item)
                     .pointerDragScroll()
@@ -1159,10 +1159,10 @@ struct WideHeroPanel: View {
             Image(systemName: item.type == "series" ? "tv" : "film")
                 .font(.system(size: 13, weight: .semibold))
             Text(item.typeLabel.uppercased())
-                .font(.system(size: 12, weight: .bold))
+                .font(.archivo(size: 12, weight: .bold))
             if let y = item.year {
                 Text(String(y))
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.archivo(size: 13, weight: .semibold))
                     .opacity(0.85)
             }
         }
@@ -1175,7 +1175,7 @@ struct WideHeroPanel: View {
         if let d = item.description, !d.isEmpty {
             VStack(alignment: .leading, spacing: 6) {
                 Text(d)
-                    .font(.system(size: 17, weight: .medium))
+                    .font(.archivo(size: 17, weight: .medium))
                     .lineSpacing(3)
                     .foregroundStyle(.white.opacity(0.92))
                     .lineLimit(expanded ? nil : 3)
@@ -1183,7 +1183,7 @@ struct WideHeroPanel: View {
                 if d.count > 160 {
                     Button(action: toggleExpanded) {
                         Text(expanded ? "Less" : "More")
-                            .font(.subheadline.weight(.semibold))
+                            .font(.archivo(.subheadline, weight: .semibold))
                             .foregroundStyle(.white)
                     }
                     .buttonStyle(.plain)
@@ -1207,7 +1207,7 @@ struct WideHeroPanel: View {
             Image(systemName: "info.circle")
                 .font(.system(size: 16, weight: .semibold))
             Text("Details")
-                .font(.subheadline.weight(.semibold))
+                .font(.archivo(.subheadline, weight: .semibold))
         }
         .foregroundStyle(theme.onAccent)
         .padding(.horizontal, 18)

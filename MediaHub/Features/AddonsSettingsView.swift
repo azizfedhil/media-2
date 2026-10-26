@@ -30,7 +30,7 @@ struct AddonsSettingsView: View {
                 Section {
                     Button { reloadAll() } label: { Label("Reload all add-ons", systemImage: "arrow.clockwise") }
                         .disabled(!reloading.isEmpty)
-                    if let note { Text(note).font(.footnote).foregroundStyle(.secondary) }
+                    if let note { Text(note).font(.archivo(.footnote)).foregroundStyle(.secondary) }
                 }
             }
 
@@ -68,14 +68,14 @@ struct AddonsSettingsView: View {
     private func row(_ a: Addon) -> some View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
-                Text(a.manifest.name).font(.headline).lineLimit(1)
+                Text(a.manifest.name).font(.archivo(.headline)).lineLimit(1)
                 if let d = a.manifest.description, !d.isEmpty {
-                    Text(d).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                    Text(d).font(.archivo(.caption)).foregroundStyle(.secondary).lineLimit(2)
                 }
-                Text(detailLine(a)).font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
+                Text(detailLine(a)).font(.archivo(.caption2)).foregroundStyle(.tertiary).lineLimit(1)
                 if a.needsConfiguration {
                     Label("Needs setup", systemImage: "exclamationmark.circle.fill")
-                        .font(.caption2.weight(.semibold)).foregroundStyle(.orange)
+                        .font(.archivo(.caption2, weight: .semibold)).foregroundStyle(.orange)
                 }
             }
             .opacity(store.isEnabled(a) ? 1 : 0.45)

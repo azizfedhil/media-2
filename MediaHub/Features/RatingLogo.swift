@@ -16,7 +16,7 @@ struct RatingLogo: View {
         case "Metacritic": metacritic
         case "Letterboxd": letterboxd
         case "Trakt": trakt
-        default: Text(label).font(.caption2.weight(.semibold)).lineLimit(1)
+        default: Text(label).font(.archivo(.caption2, weight: .semibold)).lineLimit(1)
         }
     }
 
@@ -112,7 +112,7 @@ struct RatingBadge: View {
     var body: some View {
         HStack(spacing: flat ? 6 : 7) {
             RatingLogo(label: rating.label, score: rating.score, height: flat ? 15 : 18)
-            Text(rating.text).font(flat ? .footnote.weight(.semibold) : .subheadline.weight(.semibold)).monospacedDigit()
+            Text(rating.text).font(flat ? .archivo(.footnote, weight: .semibold) : .archivo(.subheadline, weight: .semibold)).monospacedDigit()
         }
         .padding(.horizontal, flat ? 0 : 12).padding(.vertical, flat ? 2 : 8)
         .background { if !flat { Capsule().fill(.quaternary) } }
@@ -128,7 +128,7 @@ struct RatingPill: View {
     var body: some View {
         HStack(spacing: 6) {
             RatingLogo(label: rating.label, score: rating.score, height: 16)
-            Text(rating.text).font(.subheadline.weight(.bold)).monospacedDigit()
+            Text(rating.text).font(.archivo(.subheadline, weight: .bold)).monospacedDigit()
         }
         .foregroundStyle(.white)
         .padding(.horizontal, 10).padding(.vertical, 6)

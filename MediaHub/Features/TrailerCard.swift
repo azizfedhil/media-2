@@ -32,9 +32,9 @@ struct TrailerCard: View {
         .frame(width: Self.width, height: Self.height)
         .overlay(alignment: .bottomLeading) {
             VStack(alignment: .leading, spacing: 4) {
-                Text(video.type.uppercased()).font(.system(size: 12, weight: .semibold)).tracking(0.8)
+                Text(video.type.uppercased()).font(.archivo(size: 12, weight: .semibold)).tracking(0.8)
                     .foregroundStyle(.white.opacity(0.65))
-                Text(video.name).font(.system(size: 17, weight: .bold)).lineLimit(2).multilineTextAlignment(.leading)
+                Text(video.name).font(.archivo(size: 17, weight: .bold)).lineLimit(2).multilineTextAlignment(.leading)
             }
             .foregroundStyle(.white)
             .padding(.horizontal, 16).padding(.bottom, 14)
