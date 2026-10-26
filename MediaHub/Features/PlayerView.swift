@@ -686,6 +686,8 @@ struct PlayerScreen: View {
             if pausedDim { pausedOverlay }
             if model.showSpinner && model.error == nil && !showControls && !showEpisodes && !launching {
                 ProgressView().controlSize(.large).tint(.white)
+                // A torrent: phrases while peers are found, then peers, speed and progress.
+                if current.p2p != nil { P2PStatusLabel().padding(.top, 90).padding(.horizontal, 24) }
             }
             if partyWaiting { partyWaitingCard.transition(.opacity) }
             if launching && model.error == nil && !partyWaiting { launchOverlay.transition(.opacity) }
@@ -813,6 +815,7 @@ struct PlayerScreen: View {
         ZStack {
             Color.black.ignoresSafeArea()
             PearAnimationView(mode: .loader).frame(maxWidth: 340).padding(.horizontal, 24)
+            if current.p2p != nil { P2PStatusLabel().padding(.top, 140).padding(.horizontal, 24) }
             VStack {
                 HStack { circleButton("xmark", size: 42, icon: 16) { close() }; Spacer() }
                 Spacer()

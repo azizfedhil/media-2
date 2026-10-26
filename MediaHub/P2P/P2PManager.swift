@@ -137,6 +137,14 @@ final class P2PManager {
 
     func stats() -> EngineStats? { engine?.stats() }
 
+    /// The same numbers read off the main thread: the engine's stats lock can be held while a stream is being opened.
+    func statsAsync() async -> EngineStats? {
+        guard let e = engine else { return nil }
+        return await withCheckedContinuation { c in
+            DispatchQueue.global(qos: .utility).async { c.resume(returning: e.stats()) }
+        }
+    }
+
     // MARK: Helpers
 
     private func onWorker<T: Sendable>(_ body: @escaping @Sendable () throws -> T) async throws -> T {

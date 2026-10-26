@@ -58,6 +58,9 @@ struct PearAnimationView: View {
 /// Black screen with the intro on top of the app. The app loads underneath while it plays, then it fades out.
 private struct PearLaunchScreen: ViewModifier {
     @State private var showing = true
+    /// A playful line under the animation, a different one each launch. It fades in a moment after the animation starts.
+    @State private var phrase = LaunchPhrases.pick()
+    @State private var phraseShown = false
 
     func body(content: Content) -> some View {
         content.overlay {
@@ -67,8 +70,22 @@ private struct PearLaunchScreen: ViewModifier {
                     PearAnimationView(mode: .intro, onFinish: dismiss)
                         .frame(maxWidth: 520)
                         .padding(.horizontal, 28)
+                    // In its own spot at the bottom, so the animation stays exactly where it was.
+                    Text(phrase)
+                        .font(.archivo(.callout))
+                        .foregroundStyle(Brand.cream.opacity(0.6))
+                        .multilineTextAlignment(.center)
+                        .lineLimit(2)
+                        .padding(.horizontal, 28).padding(.bottom, 72)
+                        .frame(maxHeight: .infinity, alignment: .bottom)
+                        .opacity(phraseShown ? 1 : 0)
+                        .allowsHitTesting(false)
                 }
                 .transition(.opacity)
+                .task {
+                    try? await Task.sleep(for: .milliseconds(500))
+                    withAnimation(.easeIn(duration: 0.4)) { phraseShown = true }
+                }
             }
         }
     }
