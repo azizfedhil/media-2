@@ -317,7 +317,7 @@ struct RootView: View {
         .sheet(item: $router.openTitle) { item in
             NavigationStack { DetailView(item: item) }
         }
-        .onChange(of: connectivity.isOnline) { _, on in if on == true { downloads.networkReturned() } }
+        .onChange(of: connectivity.isOnline) { _, on in if on == true { downloads.networkReturned(); PairSync.shared.networkReturned() } }
         .onChange(of: phase) { _, p in
             P2PManager.shared.scenePhaseChanged(p)
             if p == .active {
@@ -328,6 +328,7 @@ struct RootView: View {
                 Task { await refreshLibrary() }
             } else {
                 watchLog.flush()
+                PairSync.shared.background()
                 ArtworkPool.shared.flush()
                 Task { await TMDBClient.shared.flushPending(); await LogoResolver.shared.flush() }
             }

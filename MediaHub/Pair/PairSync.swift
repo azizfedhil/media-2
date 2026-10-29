@@ -43,6 +43,8 @@ final class PairSync {
     private var timersRunning = false
     private var pushScheduled = false
     private var cycleRunning = false
+    /// True while the running cycle is a full one (push and pull), so a return to the app does not queue a second.
+    private var fullCycleRunning = false
     private var cycleAgain = false
     private var pendingReplace = false
     /// True only while a replace pull runs: the default profile the device synthesizes must not be kept.
@@ -94,8 +96,30 @@ final class PairSync {
     /// Syncs now: pushes what changed here, then pulls what changed elsewhere.
     func syncNow() { run(full: true) }
 
-    /// The app came to the foreground.
-    func foreground() { syncNow() }
+    /// The app came to the foreground. A sync that just finished (or is running) is not repeated for a quick return, such
+    /// as a system dialog or the control centre, unless something here is waiting to go out.
+    func foreground() {
+        guard store.isSignedIn else { return }
+        if fullCycleRunning { return }
+        if dirty.isEmpty, let last = lastFullSyncAt, Date.now.timeIntervalSince(last) < SyncRules.freshSeconds { return }
+        syncNow()
+    }
+
+    /// The app is leaving the screen. What is waiting goes out now instead of after the debounce, because the app may be
+    /// suspended before the timer fires. The cycle asks the system for time to finish.
+    func background() {
+        guard store.isSignedIn, !dirty.isEmpty || !forced.isEmpty else { return }
+        run(full: false)
+    }
+
+    /// The connection came back. When the last sync failed, or changes are waiting, it runs now instead of waiting out
+    /// the backoff.
+    func networkReturned() {
+        guard store.isSignedIn, state.pausedUntil == nil || Date.now >= state.pausedUntil! else { return }
+        guard state.error != nil || !dirty.isEmpty else { return }
+        retryGen += 1       // the pending backoff is replaced by this sync
+        syncNow()
+    }
 
     /// Brings this device up to date before a title opens, so its resume point is the account's and not an older one from
     /// here. Waits at most `timeout` seconds: offline or slow, it gives up and the title opens with what is on the device.
@@ -338,6 +362,7 @@ final class PairSync {
         let replace = replaceLocal || pendingReplace
         pendingReplace = false
         cycleRunning = true
+        fullCycleRunning = full
         let taken = dirty
         dirty.removeAll()
         if full { state.syncing = true }
@@ -348,6 +373,7 @@ final class PairSync {
         if full { fullCyclesEnded += 1 }
 
         cycleRunning = false
+        fullCycleRunning = false
         if cycleAgain {
             cycleAgain = false
             await cycle(full: true)
@@ -398,7 +424,8 @@ final class PairSync {
             dirty.formUnion(taken)
             state.syncing = false
             state.error = "Sync failed. It will try again."
-            retryIn(seconds: retrySeconds)
+            retryIn(seconds: SyncRules.jittered(retrySeconds))
+            retrySeconds = min(retrySeconds * 2, SyncRules.retryMaxSeconds)
         }
     }
 
@@ -416,18 +443,22 @@ final class PairSync {
             retryGen += 1
             state = PairSyncState(error: "This device was signed out of Pear.pair. Pair it again to sync.",
                                   needsSignIn: true)
-        case .rejected(let status, _, let message) where status < 500:
+        case .rejected(let status, _, let message) where status < 500 && !SyncRules.isTransient(status: status):
             state.syncing = false
             state.error = message
         default:
-            // Network trouble, a bad answer, or a 5xx: back off, then try again.
+            // Network trouble, a "try later" answer (408, 425, 429), a bad answer, or a 5xx: back off, then try again.
             state.syncing = false
+            var offline = false
             if case .network = error {
+                offline = true
                 state.error = "No connection to Pear.pair. It will try again."
+            } else if case .rejected(let status, _, _) = error, SyncRules.isTransient(status: status) {
+                state.error = "Pear.pair is busy. It will try again."
             } else {
                 state.error = "Pear.pair had a problem. It will try again."
             }
-            retryIn(seconds: retrySeconds)
+            retryIn(seconds: SyncRules.jittered(offline ? min(retrySeconds, SyncRules.retryNetworkMaxSeconds) : retrySeconds))
             retrySeconds = min(retrySeconds * 2, SyncRules.retryMaxSeconds)
         }
     }

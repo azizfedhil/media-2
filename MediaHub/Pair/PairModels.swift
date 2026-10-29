@@ -17,8 +17,16 @@ enum SyncRules {
     static let progressMovedSeconds: Double = 15
     static let retryMinSeconds: Double = 30
     static let retryMaxSeconds: Double = 600
+    /// Offline retries stay short: a request that never leaves the device costs the server nothing.
+    static let retryNetworkMaxSeconds: Double = 90
+    /// A full sync that finished this recently counts as fresh: none starts again for a quick return to the app.
+    static let freshSeconds: Double = 20
     static let historyLiveCap = 30
     static let maxPages = 1_000
+    /// A 4xx that says "later", not "no": request timeout, too early, too many requests. Retried with backoff.
+    static func isTransient(status: Int) -> Bool { status == 408 || status == 425 || status == 429 }
+    /// A retry delay spread by up to 20% either way, so devices that failed together do not all come back together.
+    static func jittered(_ seconds: Double) -> Double { seconds * Double.random(in: 0.8...1.2) }
     /// The profile id of the account-wide settings records (ACCOUNT_SCOPE in Kotlin).
     static let accountScope = "_account"
     /// A profile's watch log goes out at most this often.
