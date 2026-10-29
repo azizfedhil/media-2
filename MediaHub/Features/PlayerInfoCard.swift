@@ -62,6 +62,59 @@ struct PlayerInfoCard: View {
             }
         }
         .onGeometryChange(for: Bool.self) { $0.size.width < Self.stackBelow } action: { stacked = $0 }
+        // The card's own inset lives here (the player no longer pads it) so the still can bleed to the card's edges.
+        .padding(Self.inset)
+        .background(alignment: .topLeading) { bleed }
+    }
+
+    // MARK: Bleeding still
+
+    private static let inset: CGFloat = 20
+    /// Same corner radius as the glass card the player puts this on.
+    private static let cardRadius: CGFloat = 26
+
+    /// The still drawn from the card's top-leading corner, fading out to the right and downwards into the glass, the
+    /// way the desktop source picker's artwork does. It only paints: the thumbnail slot above keeps its size, so the
+    /// layout is the same as before.
+    @ViewBuilder private var bleed: some View {
+        if info.image != nil {
+            GeometryReader { geo in
+                let w = stacked ? geo.size.width : min(Self.bleedWidth, geo.size.width)
+                let h = w * 9.0 / 16.0
+                ZStack {
+                    StillImage(url: info.image, size: max(w, 1))
+                    LinearGradient(colors: [.black.opacity(0.4), .clear], startPoint: .top, endPoint: .center)
+                    // Calms the part of the picture that sits behind the title and chips.
+                    LinearGradient(stops: [.init(color: .clear, location: 0.45), .init(color: .black.opacity(0.35), location: 1)],
+                                   startPoint: .leading, endPoint: .trailing)
+                }
+                .frame(width: w, height: h)
+                .clipped()
+                .mask { rightFade }
+                .mask { bottomFade }
+                .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
+            }
+            .clipShape(RoundedRectangle(cornerRadius: Self.cardRadius, style: .continuous))
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+        }
+    }
+
+    private static let bleedWidth: CGFloat = 350
+
+    /// Beside the text the still fades out to the right; stacked above it, it runs the full width of the card.
+    private var rightFade: LinearGradient {
+        LinearGradient(stops: stacked
+                       ? [.init(color: .black, location: 0), .init(color: .black, location: 1)]
+                       : [.init(color: .black, location: 0), .init(color: .black, location: 0.45),
+                          .init(color: .clear, location: 0.95)],
+                       startPoint: .leading, endPoint: .trailing)
+    }
+
+    private var bottomFade: LinearGradient {
+        LinearGradient(stops: [.init(color: .black, location: 0), .init(color: .black, location: 0.3),
+                               .init(color: .clear, location: 1)],
+                       startPoint: .top, endPoint: .bottom)
     }
 
     // MARK: Thumbnail
@@ -85,12 +138,11 @@ struct PlayerInfoCard: View {
         }
     }
 
+    /// Keeps the still's slot (and the episode tag on it); the picture itself is drawn by `bleed`.
     @ViewBuilder private var thumbnail: some View {
         if info.image != nil {
             ZStack(alignment: .topLeading) {
-                Color.white.opacity(0.08)
-                StillImage(url: info.image, size: stacked ? 480 : Self.thumbWidth)
-                LinearGradient(colors: [.black.opacity(0.4), .clear], startPoint: .top, endPoint: .center)
+                Color.clear
                 if let tag = info.episodeTag {
                     Text(tag).font(.archivo(.caption2, weight: .bold)).monospacedDigit().foregroundStyle(.white)
                         .padding(.horizontal, 8).padding(.vertical, 4)
@@ -101,9 +153,6 @@ struct PlayerInfoCard: View {
             .aspectRatio(16.0 / 9.0, contentMode: .fit)
             .frame(width: stacked ? nil : Self.thumbWidth)
             .frame(maxWidth: stacked ? .infinity : nil)
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(.white.opacity(0.12), lineWidth: 1))
-            .accessibilityHidden(true)
         }
     }
 

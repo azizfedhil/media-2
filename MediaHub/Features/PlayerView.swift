@@ -92,6 +92,8 @@ final class PlayerModel {
     @ObservationIgnored private var isShutDown = false
     @ObservationIgnored private var preferredSubtitleLanguage: String?
     @ObservationIgnored private var autoSelectSubtitle = false
+    @ObservationIgnored private var preferredAudioLanguage: String?
+    @ObservationIgnored private var autoSelectAudio = false
     @ObservationIgnored private var rateTask: Task<Void, Never>?
     /// The engine may drop back to 1x on a (re)load, seek or pause; the chosen speed is pushed again on the next `.playing`.
     @ObservationIgnored private var rateStale = false
@@ -99,6 +101,12 @@ final class PlayerModel {
     /// The viewer's default subtitle language (nil = off). Applied when tracks become available.
     func configure(defaultSubtitleLanguage lang: String?) {
         if preferredSubtitleLanguage == nil { preferredSubtitleLanguage = lang }
+    }
+
+    /// The viewer's favourite audio language (nil = whatever the file starts with). Applied once per item, when tracks
+    /// become available; picking a track by hand in the player only changes that item.
+    func configure(defaultAudioLanguage lang: String?) {
+        preferredAudioLanguage = lang
     }
 
     /// `replacing`: the engine is already playing something else (episode switch).
@@ -174,6 +182,7 @@ final class PlayerModel {
         onlineSubs = []; addedOnline = [:]; onlineFor = nil; loadingOnline = false
         // Default language on first start, then whatever the viewer picked, across episodes.
         autoSelectSubtitle = preferredSubtitleLanguage != nil
+        autoSelectAudio = preferredAudioLanguage != nil
         rateStale = rate != 1
     }
 
@@ -314,6 +323,13 @@ final class PlayerModel {
         subtitleTracks = engine.subtitleTracks
         activeAudioID = Reflect.int(engine.activeAudioTrackIndex)
         activeSubtitleID = Reflect.int(engine.activeSubtitleTrackIndex)
+        if autoSelectAudio, !audioTracks.isEmpty {
+            autoSelectAudio = false
+            if let lang = preferredAudioLanguage, let t = bestAudio(for: lang),
+               Reflect.int(t.id) != activeAudioID {
+                selectAudio(t)
+            }
+        }
         if autoSelectSubtitle, !subtitleTracks.isEmpty {
             autoSelectSubtitle = false
             if activeSubtitleID == nil, let lang = preferredSubtitleLanguage, let t = bestSubtitle(for: lang) {
@@ -323,6 +339,18 @@ final class PlayerModel {
         }
         syncCueClock()
         refreshActiveCues()
+    }
+
+    /// First audio track in the favourite language; commentary / descriptive tracks only when nothing else matches.
+    private func bestAudio(for lang: String) -> TrackInfo? {
+        let hits = audioTracks.filter {
+            SubLanguages.matches(Reflect.string($0, "language"), lang) || SubLanguages.matches(Reflect.string($0, "name"), lang)
+        }
+        func extra(_ t: TrackInfo) -> Bool {
+            let n = (Reflect.trackTitle(t)).lowercased()
+            return n.contains("commentary") || n.contains("descriptive") || n.contains("audio description")
+        }
+        return hits.first { !extra($0) } ?? hits.first
     }
 
     /// Prefers a normal track, then a non-forced one, then anything in that language.
@@ -561,6 +589,7 @@ struct PlayerScreen: View {
     @Environment(\.scenePhase) private var scenePhase
     @AppStorage(SubtitleStyle.storageKey) private var subJSON = ""
     @AppStorage("sub.lang") private var subLang = "off"
+    @AppStorage("audio.lang") private var audioLang = "auto"
     @AppStorage("player.glass") private var glassPref = true
     @AppStorage("player.autoplayNext") private var autoplayNext = true
     /// Pill buttons that stay visible while it is folded (Settings → Playback → Player controls).
@@ -574,6 +603,7 @@ struct PlayerScreen: View {
     @State private var showSubtitles = false
     @State private var showSources = false
     @State private var showSpeed = false
+    @State private var showDisplay = false
     /// The controls pill is showing the volume slider instead of its icons.
     @State private var showVolume = false
     @State private var volume = SystemVolume()
@@ -692,11 +722,12 @@ struct PlayerScreen: View {
             if partyWaiting { partyWaitingCard.transition(.opacity) }
             if launching && model.error == nil && !partyWaiting { launchOverlay.transition(.opacity) }
             if (model.error != nil || (showControls && !launching)) && !partyWaiting { controls.transition(.opacity) }
-            if !showEpisodes && !showSubtitles && !showSources && !showSpeed && !showInfo && !showParty && !partyGuest && model.error == nil { skipLayer }
+            if !showEpisodes && !showSubtitles && !showSources && !showSpeed && !showDisplay && !showInfo && !showParty && !partyGuest && model.error == nil { skipLayer }
             if showEpisodes, let provider { episodePanel(provider).transition(.move(edge: .bottom).combined(with: .opacity)) }
             if showSubtitles { subtitlePanel.transition(.move(edge: .trailing).combined(with: .opacity)) }
             if showSources { sourcesPanel.transition(.move(edge: .trailing).combined(with: .opacity)) }
             if showSpeed { speedLayer.transition(.move(edge: .bottom).combined(with: .opacity)) }
+            if showDisplay { displayLayer.transition(.move(edge: .bottom).combined(with: .opacity)) }
             if showInfo, let info { infoPanel(info).transition(.scale(scale: 0.94).combined(with: .opacity)) }
             if showParty, party.code != nil { partyPanel.transition(.move(edge: .trailing).combined(with: .opacity)) }
             if let e = model.error { errorCard(e) }
@@ -774,7 +805,7 @@ struct PlayerScreen: View {
         }
         .onChange(of: anyPanelOpen) { _, _ in focusTick += 1 }
         // Another panel takes over: the pill goes back to its icons.
-        .onChange(of: showEpisodes || showSubtitles || showSources || showSpeed || showInfo || showParty) { _, open in
+        .onChange(of: showEpisodes || showSubtitles || showSources || showSpeed || showDisplay || showInfo || showParty) { _, open in
             if open { volumeTask?.cancel(); pillTask?.cancel(); showVolume = false; pillExpanded = false }
         }
         // Hardware buttons (or the mute tap) while the pill is open count as adjusting: the 3 s countdown restarts.
@@ -1184,27 +1215,76 @@ struct PlayerScreen: View {
         .tint(.white)
     }
 
-    /// Video fit: Fit / Stretch / Zoom / Fill. A button in the pill that opens a menu, no gestures.
+    /// Video fit: a pill button that opens the Display card (Picture: Fit / Fill / Stretch), no gestures.
     private var fitMenu: some View {
-        Menu {
-            ForEach(VideoFit.allCases) { fit in
-                Button {
-                    withAnimation(.snappy(duration: 0.25)) { videoFit = fit }
-                    if pillExpanded { bumpPill() } else { scheduleHide() }
-                } label: {
-                    if fit == videoFit { Label(fit.title, systemImage: "checkmark") }
-                    else { Label(fit.title, systemImage: fit.symbol) }
-                }
-            }
-        } label: {
+        Button { toggleDisplay() } label: {
             Image(systemName: "aspectratio").font(.system(size: 19, weight: .semibold)).foregroundStyle(.white)
                 .frame(width: 46, height: 46)
-                .background { if videoFit != .fit { Circle().fill(theme.accent.opacity(0.6)) } }
+                .background { if videoFit != .fit || showDisplay { Circle().fill(theme.accent.opacity(0.6)) } }
                 .contentShape(Circle())
         }
-        .menuIndicator(.hidden)
-        .tint(.white)
+        .buttonStyle(PressableStyle())
         .accessibilityLabel("Video fit")
+    }
+
+    // MARK: Display panel
+
+    /// Floats above the icon row like the speed panel; the video keeps playing and the controls stay up.
+    private var displayLayer: some View {
+        VStack {
+            Spacer()
+            HStack {
+                Spacer()
+                displayPanel
+            }
+            .padding(.trailing, 20)
+            .padding(.bottom, 118)
+        }
+    }
+
+    private var displayPanel: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack {
+                Text("Display").font(.archivo(.title2, weight: .bold))
+                Spacer()
+                circleButton("xmark", size: 34, icon: 13) { closeDisplay() }
+            }
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Picture").font(.archivo(.subheadline)).foregroundStyle(.white.opacity(0.6))
+                HStack(spacing: 4) {
+                    ForEach(Self.displayFits) { fit in
+                        let on = fit == videoFit
+                        Button {
+                            withAnimation(.snappy(duration: 0.25)) { videoFit = fit }
+                        } label: {
+                            Text(fit.title).font(.archivo(.body, weight: .bold))
+                                .foregroundStyle(on ? theme.onAccent : .white)
+                                .frame(maxWidth: .infinity).frame(height: 46)
+                                .background { if on { Capsule().fill(theme.accent) } }
+                                .contentShape(Capsule())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+        .foregroundStyle(.white)
+        .padding(20)
+        .frame(width: 360)
+        .modifier(GlassCard(on: glass))
+    }
+
+    private static let displayFits: [VideoFit] = [.fit, .fill, .stretch]
+
+    private func toggleDisplay() {
+        hideTask?.cancel()
+        if showDisplay { closeDisplay(); return }
+        withAnimation(.snappy(duration: 0.3)) { showDisplay = true; showSpeed = false; showSubtitles = false; showSources = false; showEpisodes = false; showInfo = false }
+    }
+
+    private func closeDisplay() {
+        withAnimation(.snappy(duration: 0.3)) { showDisplay = false }
+        scheduleHide()
     }
 
     @ViewBuilder private func checkLabel(_ title: String, _ on: Bool) -> some View {
@@ -1320,7 +1400,7 @@ struct PlayerScreen: View {
         hideTask?.cancel()
         if showSubtitles { closeSubtitles(); return }
         // Controls get out of the way so the subtitles can be judged where they will really appear.
-        withAnimation(.snappy(duration: 0.3)) { showSubtitles = true; showEpisodes = false; showSources = false; showSpeed = false; showInfo = false; showControls = false }
+        withAnimation(.snappy(duration: 0.3)) { showSubtitles = true; showEpisodes = false; showSources = false; showSpeed = false; showDisplay = false; showInfo = false; showControls = false }
     }
 
     private func closeSubtitles() {
@@ -1385,7 +1465,7 @@ struct PlayerScreen: View {
     private func toggleSpeed() {
         hideTask?.cancel()
         if showSpeed { closeSpeed(); return }
-        withAnimation(.snappy(duration: 0.3)) { showSpeed = true; showSubtitles = false; showSources = false; showEpisodes = false; showInfo = false }
+        withAnimation(.snappy(duration: 0.3)) { showSpeed = true; showDisplay = false; showSubtitles = false; showSources = false; showEpisodes = false; showInfo = false }
     }
 
     private func closeSpeed() {
@@ -1402,7 +1482,6 @@ struct PlayerScreen: View {
             Spacer(minLength: 0)
             PlayerInfoCard(info: info, logo: pausedLogo, onClose: { closeInfo() })
                 .foregroundStyle(.white)
-                .padding(20)
                 .frame(maxWidth: 720)
                 .modifier(GlassCard(on: glass))
                 .padding(.horizontal, 20).padding(.vertical, 10)
@@ -1416,7 +1495,7 @@ struct PlayerScreen: View {
         // Filled in before the card animates in, so it slides up with content instead of popping in afterwards.
         info = basicInfo()
         withAnimation(.snappy(duration: 0.3)) {
-            showInfo = true; showEpisodes = false; showSubtitles = false; showSources = false; showSpeed = false; showControls = false
+            showInfo = true; showEpisodes = false; showSubtitles = false; showSources = false; showSpeed = false; showDisplay = false; showControls = false
         }
     }
 
@@ -1499,7 +1578,7 @@ struct PlayerScreen: View {
         hideTask?.cancel()                      // controls stay up while the slider is open
         volume.refresh()
         pillTask?.cancel()
-        withAnimation(.snappy(duration: 0.3)) { showVolume = true; showSpeed = false; pillExpanded = false }
+        withAnimation(.snappy(duration: 0.3)) { showVolume = true; showSpeed = false; showDisplay = false; pillExpanded = false }
         bumpVolume()
     }
 
@@ -1611,7 +1690,7 @@ struct PlayerScreen: View {
         sourceGroups = []
         sourceFilter = nil
         p2pOffCounts = [:]
-        withAnimation(.snappy(duration: 0.3)) { showSources = true; showSubtitles = false; showEpisodes = false; showSpeed = false; showInfo = false; showControls = false }
+        withAnimation(.snappy(duration: 0.3)) { showSources = true; showSubtitles = false; showEpisodes = false; showSpeed = false; showDisplay = false; showInfo = false; showControls = false }
         Task { await loadSources() }
     }
 
@@ -1681,7 +1760,7 @@ struct PlayerScreen: View {
     private func openEpisodes() {
         guard provider != nil else { return }
         hideTask?.cancel()
-        withAnimation(.snappy(duration: 0.3)) { showEpisodes = true; showSubtitles = false; showSources = false; showSpeed = false; showInfo = false; showControls = false }
+        withAnimation(.snappy(duration: 0.3)) { showEpisodes = true; showSubtitles = false; showSources = false; showSpeed = false; showDisplay = false; showInfo = false; showControls = false }
     }
 
     private func closeEpisodes() {
@@ -1734,7 +1813,7 @@ struct PlayerScreen: View {
 
     /// Paused with the controls up and nothing else open.
     private var pausedDim: Bool {
-        model.isPaused && model.error == nil && showControls && !showEpisodes && !showSubtitles && !showSources && !showSpeed && !showInfo && !showParty
+        model.isPaused && model.error == nil && showControls && !showEpisodes && !showSubtitles && !showSources && !showSpeed && !showDisplay && !showInfo && !showParty
     }
 
     /// Dims the frozen frame with one flat gradient. A real blur would have to snapshot the video surface and
@@ -1794,6 +1873,7 @@ struct PlayerScreen: View {
 
     private func begin() async {
         model.configure(defaultSubtitleLanguage: subLang == "off" ? nil : subLang)
+        model.configure(defaultAudioLanguage: ["", "auto", "off"].contains(audioLang) ? nil : audioLang)
         attachParty()
         // A guest's source comes from the room (see loadRoomSource), so the player waits for that here.
         if partyGuest { return }
@@ -1922,7 +2002,7 @@ struct PlayerScreen: View {
     private func openParty() {
         hideTask?.cancel()
         withAnimation(.snappy(duration: 0.3)) {
-            showParty = true; showSources = false; showSubtitles = false; showEpisodes = false; showSpeed = false; showInfo = false
+            showParty = true; showSources = false; showSubtitles = false; showEpisodes = false; showSpeed = false; showDisplay = false; showInfo = false
             showControls = true
         }
     }
@@ -1956,7 +2036,7 @@ struct PlayerScreen: View {
     // MARK: Keyboard
 
     private var anyPanelOpen: Bool {
-        showEpisodes || showSubtitles || showSources || showSpeed || showInfo || showParty || showVolume || pillExpanded
+        showEpisodes || showSubtitles || showSources || showSpeed || showDisplay || showInfo || showParty || showVolume || pillExpanded
     }
 
     private var keyActions: PlayerKeyActions {
@@ -2135,6 +2215,10 @@ struct PlayerScreen: View {
             withAnimation(.snappy(duration: 0.3)) { showSpeed = false }
             return true
         }
+        if showDisplay {
+            withAnimation(.snappy(duration: 0.3)) { showDisplay = false }
+            return true
+        }
         if showInfo {
             withAnimation(.snappy(duration: 0.3)) { showInfo = false }
             return true
@@ -2172,7 +2256,7 @@ struct PlayerScreen: View {
         guard model.isPlaying, !pip.isActive, !controlsHovered else { return }
         hideTask = Task {
             try? await Task.sleep(for: .seconds(3.5))
-            guard !Task.isCancelled, !controlsHovered, !model.playhead.scrubbing, !showEpisodes, !showSubtitles, !showSources, !showSpeed, !showVolume, !pillExpanded, !showInfo, !showParty else { return }
+            guard !Task.isCancelled, !controlsHovered, !model.playhead.scrubbing, !showEpisodes, !showSubtitles, !showSources, !showSpeed, !showDisplay, !showVolume, !pillExpanded, !showInfo, !showParty else { return }
             withAnimation(.easeInOut(duration: 0.25)) { showControls = false }
         }
     }
