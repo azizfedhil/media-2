@@ -76,7 +76,8 @@ struct PairClient {
         let rejectedRaw = answer["rejected"] as? [[String: Any]] ?? []
         let reasons = rejectedRaw.compactMap { $0["reason"] as? String }
         let serverTs = try answer.double("serverTs")
-        return PushResult(accepted: accepted, rejectedReasons: reasons, serverTs: serverTs)
+        let ignored = (answer["ignored"] as? [Any] ?? []).compactMap { readChange($0, needsServerTs: false) }
+        return PushResult(accepted: accepted, rejectedReasons: reasons, serverTs: serverTs, ignored: ignored)
     }
 
     /// One page of the account's changes after `since` (Unix ms), oldest first.
@@ -85,28 +86,42 @@ struct PairClient {
             URLQueryItem(name: "since", value: String(Int64(since))),
             URLQueryItem(name: "limit", value: String(SyncRules.pullLimit)),
         ])
-        var changes: [RemoteChange] = []
-        for item in try answer.array("changes") {
-            guard let c = item as? [String: Any],
-                  let profileID = c["profileId"] as? String,
-                  let kindName = c["kind"] as? String,
-                  let kind = SyncKind(rawValue: kindName),
-                  let key = c["key"] as? String,
-                  let updatedAt = (c["updatedAt"] as? NSNumber)?.doubleValue,
-                  let serverTs = (c["serverTs"] as? NSNumber)?.doubleValue else { continue }
-            changes.append(RemoteChange(
-                serverTs: serverTs,
-                profileID: profileID,
-                kind: kind,
-                key: key,
-                updatedAt: updatedAt,
-                deleted: c["deleted"] as? Bool ?? false,
-                data: c["data"] as? [String: Any]
-            ))
-        }
+        let changes = try answer.array("changes").compactMap { readChange($0, needsServerTs: true) }
         let serverTs = try answer.double("serverTs")
         let more = answer["more"] as? Bool ?? false
         return PullPage(changes: changes, serverTs: serverTs, more: more)
+    }
+
+    /// This device's "currently watching" beat (cloud/CLOUD_API.md §2.3). The server keeps it in memory only.
+    func sendPresence(bearer: String, beat: [String: Any]) async throws {
+        _ = try await cloud.send("PUT", "/v1/pair/presence", bearer: bearer, body: beat)
+    }
+
+    /// What the devices of the account are playing now: one object per device.
+    func presence(bearer: String) async throws -> [[String: Any]] {
+        let answer = try await cloud.send("GET", "/v1/pair/presence", bearer: bearer)
+        return (answer["devices"] ?? answer["presence"] ?? answer["items"]) as? [[String: Any]] ?? []
+    }
+
+    /// One record as the server sends it, in a pull or in the `ignored` list of a push. Nil when it is not the expected shape.
+    private func readChange(_ item: Any, needsServerTs: Bool) -> RemoteChange? {
+        guard let c = item as? [String: Any],
+              let profileID = c["profileId"] as? String,
+              let kindName = c["kind"] as? String,
+              let kind = SyncKind(rawValue: kindName),
+              let key = c["key"] as? String,
+              let updatedAt = (c["updatedAt"] as? NSNumber)?.doubleValue else { return nil }
+        let serverTs = (c["serverTs"] as? NSNumber)?.doubleValue
+        if needsServerTs && serverTs == nil { return nil }
+        return RemoteChange(
+            serverTs: serverTs ?? 0,
+            profileID: profileID,
+            kind: kind,
+            key: key,
+            updatedAt: updatedAt,
+            deleted: c["deleted"] as? Bool ?? false,
+            data: c["data"] as? [String: Any]
+        )
     }
 
     private func readCredentials(_ answer: [String: Any]) throws -> PairCredentials {

@@ -43,8 +43,6 @@ final class PairSync {
     private var timersRunning = false
     private var pushScheduled = false
     private var cycleRunning = false
-    /// True while the running cycle is a full one (push and pull), so a return to the app does not queue a second.
-    private var fullCycleRunning = false
     private var cycleAgain = false
     private var pendingReplace = false
     /// True only while a replace pull runs: the default profile the device synthesizes must not be kept.
@@ -53,6 +51,13 @@ final class PairSync {
     private var rePullSettings = false
     /// Unix ms of the last push, for the one-push-per-15-seconds rule.
     private var lastPushAt: Double = 0
+    /// How far the server's clock is ahead of this device's, in ms, learned on every pull. Times that cross devices (a record's
+    /// `updatedAt`) are compared and stamped on the server's clock, so a device with a wrong clock cannot win or lose by it.
+    /// Zero until the first pull, and for a difference under two seconds (that is noise from the request itself).
+    private(set) var clockOffsetMs: Double = 0
+    /// Keys (see RecordKey) of server records this device adopts over its own unsent change: the server refused that change
+    /// because it holds a newer record. Only set while `adoptBeaten` runs.
+    private var adopting = Set<String>()
     /// When the last full sync finished without error, and how many full cycles have ended (any outcome). See `freshen`.
     private var lastFullSyncAt: Date?
     private var fullCyclesEnded = 0
@@ -75,9 +80,15 @@ final class PairSync {
     private struct PushOutcome {
         let sent: Int
         let refused: String?
+        /// A record the server refused was replaced by the server's newer one, so the screens must re-read.
+        var adopted = false
     }
 
     var isSignedIn: Bool { store.isSignedIn }
+
+    /// This device's token and id, for the presence calls (PresenceService). Nil when the device is not signed in.
+    var bearer: String? { store.credentials?.bearer }
+    var deviceID: String? { store.credentials?.deviceID }
 
     /// Whether this device syncs the shared settings (SyncedSettings). Off until the person turns it on, on this device.
     var syncSettingsOn: Bool { UserDefaults.standard.bool(forKey: Self.settingsFlagKey) }
@@ -96,38 +107,16 @@ final class PairSync {
     /// Syncs now: pushes what changed here, then pulls what changed elsewhere.
     func syncNow() { run(full: true) }
 
-    /// The app came to the foreground. A sync that just finished (or is running) is not repeated for a quick return, such
-    /// as a system dialog or the control centre, unless something here is waiting to go out.
-    func foreground() {
-        guard store.isSignedIn else { return }
-        if fullCycleRunning { return }
-        if dirty.isEmpty, let last = lastFullSyncAt, Date.now.timeIntervalSince(last) < SyncRules.freshSeconds { return }
-        syncNow()
-    }
-
-    /// The app is leaving the screen. What is waiting goes out now instead of after the debounce, because the app may be
-    /// suspended before the timer fires. The cycle asks the system for time to finish.
-    func background() {
-        guard store.isSignedIn, !dirty.isEmpty || !forced.isEmpty else { return }
-        run(full: false)
-    }
-
-    /// The connection came back. When the last sync failed, or changes are waiting, it runs now instead of waiting out
-    /// the backoff.
-    func networkReturned() {
-        guard store.isSignedIn, state.pausedUntil == nil || Date.now >= state.pausedUntil! else { return }
-        guard state.error != nil || !dirty.isEmpty else { return }
-        retryGen += 1       // the pending backoff is replaced by this sync
-        syncNow()
-    }
+    /// The app came to the foreground.
+    func foreground() { syncNow() }
 
     /// Brings this device up to date before a title opens, so its resume point is the account's and not an older one from
     /// here. Waits at most `timeout` seconds: offline or slow, it gives up and the title opens with what is on the device.
-    /// The sync carries on by itself. Does nothing without an account, while paused, or right after a full sync.
-    func freshen(timeout: Double = 2.5) async {
+    /// The sync carries on by itself. Does nothing without an account, while paused, or within 5 seconds of a full sync.
+    func freshen(timeout: Double = 4) async {
         guard store.isSignedIn else { return }
         if let until = state.pausedUntil, Date.now < until { return }
-        if let last = lastFullSyncAt, Date.now.timeIntervalSince(last) < 20 { return }
+        if let last = lastFullSyncAt, Date.now.timeIntervalSince(last) < 5 { return }
         let before = fullCyclesEnded
         if cycleRunning { cycleAgain = true } else { run(full: true) }
         let deadline = Date.now.addingTimeInterval(timeout)
@@ -362,7 +351,6 @@ final class PairSync {
         let replace = replaceLocal || pendingReplace
         pendingReplace = false
         cycleRunning = true
-        fullCycleRunning = full
         let taken = dirty
         dirty.removeAll()
         if full { state.syncing = true }
@@ -373,7 +361,6 @@ final class PairSync {
         if full { fullCyclesEnded += 1 }
 
         cycleRunning = false
-        fullCycleRunning = false
         if cycleAgain {
             cycleAgain = false
             await cycle(full: true)
@@ -406,7 +393,7 @@ final class PairSync {
             }
 
             // A replace wipes local data even when the account sends nothing back, so the screens must re-read.
-            if changed || replace { NotificationCenter.default.post(name: Self.remoteApplied, object: nil) }
+            if changed || replace || outcome.adopted { NotificationCenter.default.post(name: Self.remoteApplied, object: nil) }
             retrySeconds = SyncRules.retryMinSeconds
             if full || outcome.sent > 0 { store.lastSyncAt = Date.now }
             if full { lastFullSyncAt = Date.now }
@@ -424,8 +411,7 @@ final class PairSync {
             dirty.formUnion(taken)
             state.syncing = false
             state.error = "Sync failed. It will try again."
-            retryIn(seconds: SyncRules.jittered(retrySeconds))
-            retrySeconds = min(retrySeconds * 2, SyncRules.retryMaxSeconds)
+            retryIn(seconds: retrySeconds)
         }
     }
 
@@ -443,22 +429,18 @@ final class PairSync {
             retryGen += 1
             state = PairSyncState(error: "This device was signed out of Pear.pair. Pair it again to sync.",
                                   needsSignIn: true)
-        case .rejected(let status, _, let message) where status < 500 && !SyncRules.isTransient(status: status):
+        case .rejected(let status, _, let message) where status < 500:
             state.syncing = false
             state.error = message
         default:
-            // Network trouble, a "try later" answer (408, 425, 429), a bad answer, or a 5xx: back off, then try again.
+            // Network trouble, a bad answer, or a 5xx: back off, then try again.
             state.syncing = false
-            var offline = false
             if case .network = error {
-                offline = true
                 state.error = "No connection to Pear.pair. It will try again."
-            } else if case .rejected(let status, _, _) = error, SyncRules.isTransient(status: status) {
-                state.error = "Pear.pair is busy. It will try again."
             } else {
                 state.error = "Pear.pair had a problem. It will try again."
             }
-            retryIn(seconds: SyncRules.jittered(offline ? min(retrySeconds, SyncRules.retryNetworkMaxSeconds) : retrySeconds))
+            retryIn(seconds: retrySeconds)
             retrySeconds = min(retrySeconds * 2, SyncRules.retryMaxSeconds)
         }
     }
@@ -507,7 +489,8 @@ final class PairSync {
 
     /// Pushes what differs from the snapshot in `targets`, in batches of SyncRules.pushBatch.
     private func pushScopes(bearer: String, targets: Set<SyncScope>, allProgress: Bool) async throws -> PushOutcome {
-        let now = Date().unixMs
+        // The server's clock: every time that is sent is on it (see clockOffsetMs).
+        let now = Date().unixMs + clockOffsetMs
         var snapshot = store.readSnapshot()
         var pending: [Pending] = []
 
@@ -525,7 +508,7 @@ final class PairSync {
                     if !dueNow { continue }
                     queuedWatchLog = true
                 }
-                let updatedAt = stamp(record.intrinsicAt, old: old, now: now)
+                let updatedAt = stamp(record.intrinsicAt.map { $0 + clockOffsetMs }, old: old, now: now)
                 pending.append(Pending(
                     key: key,
                     change: changeObject(profile: record.profile, kind: record.kind, key: record.key,
@@ -553,6 +536,7 @@ final class PairSync {
 
         var sent = 0
         var refused: String?
+        var adopted = false
         var start = 0
         while start < pending.count {
             let end = min(start + SyncRules.pushBatch, pending.count)
@@ -560,7 +544,12 @@ final class PairSync {
             start = end
             lastPushAt = Date().unixMs
             let result = try await client.push(bearer: bearer, changes: chunk.map { $0.change })
+            // A write the server took but did not apply (it holds a newer record) is not in sync. It must not enter the snapshot.
+            let sentKeys = Set(chunk.map(\.key))
+            let beaten = result.ignored.filter { sentKeys.contains(RecordKey.make($0.profileID, $0.kind, $0.key)) }
+            let beatenKeys = Set(beaten.map { RecordKey.make($0.profileID, $0.kind, $0.key) })
             for (index, item) in chunk.enumerated() where result.accepted.contains(index) {
+                if beatenKeys.contains(item.key) { continue }
                 sent += 1
                 if let fingerprint = item.fingerprint {
                     snapshot[item.key] = SyncedRecord(fingerprint: fingerprint, updatedAt: item.updatedAt)
@@ -570,8 +559,21 @@ final class PairSync {
             }
             if let reason = result.rejectedReasons.first { refused = reason }
             store.writeSnapshot(snapshot)
+            // The server's record replaces this device's. The apply functions read and write the snapshot themselves, so it is read again after.
+            if !beaten.isEmpty, adoptBeaten(beaten) { adopted = true }
+            snapshot = store.readSnapshot()
         }
-        return PushOutcome(sent: sent, refused: refused)
+        return PushOutcome(sent: sent, refused: refused, adopted: adopted)
+    }
+
+    /// Takes the server's records over this device's unsent changes to the same keys. Without this, a refused write left the
+    /// device and the account apart for good: the snapshot said "in sync", so nothing was pushed or pulled again.
+    /// A merged result that still differs from the server's (a watched marker that is further here) goes out on the next push,
+    /// with a time past the server's, so it wins and the loop ends there.
+    private func adoptBeaten(_ records: [RemoteChange]) -> Bool {
+        adopting = Set(records.map { RecordKey.make($0.profileID, $0.kind, $0.key) })
+        defer { adopting = [] }
+        return applyPage(records)
     }
 
     private func changeObject(profile: String, kind: SyncKind, key: String, updatedAt: Double, data: [String: Any]?) -> [String: Any] {
@@ -639,7 +641,9 @@ final class PairSync {
         while more {
             pages += 1
             if pages > SyncRules.maxPages { throw CloudError.badResponse }
+            let sentAt = Date().unixMs
             let page = try await client.pull(bearer: bearer, since: cursor)
+            learnClock(serverTs: page.serverTs, sentAt: sentAt, receivedAt: Date().unixMs)
             if applyPage(page.changes) { changed = true }
             more = page.more
             if more {
@@ -649,6 +653,14 @@ final class PairSync {
             }
         }
         return changed
+    }
+
+    /// How far the server's clock is ahead of this device's: the server's time against the middle of the request. A difference
+    /// under two seconds is taken as none, so network delay never moves the order of two records.
+    private func learnClock(serverTs: Double, sentAt: Double, receivedAt: Double) {
+        guard serverTs > 0 else { return }
+        let offset = serverTs - (sentAt + receivedAt) / 2
+        clockOffsetMs = abs(offset) < 2_000 ? 0 : offset.rounded()
     }
 
     /// Applies one page. Profiles first, then settings, then history, library, progress and the watch log, so a title
@@ -727,16 +739,23 @@ final class PairSync {
 
         for change in changes {
             let key = RecordKey.make(profile, .history, change.key)
-            if pending.contains(key) { continue }
-            guard !change.deleted, let data = change.data else {
-                lists.remove(change.key)
+            // The entry this record belongs to here may have another id (tt… here, tmdb:… there): its own record is the one that counts.
+            let decoded = change.deleted ? nil : change.data.flatMap { SyncJSON.decode(WatchHistory.Entry.self, $0) }
+            let localID = decoded.flatMap { lists.localEntry($0.id, alias: $0.alias)?.id } ?? change.key
+            let localKey = RecordKey.make(profile, .history, localID)
+            if pending.contains(key) || pending.contains(localKey) { continue }
+            guard !change.deleted, change.data != nil else {
+                for id in lists.remove(change.key) { snapshot.removeValue(forKey: RecordKey.make(profile, .history, id)) }
                 snapshot.removeValue(forKey: key)
                 changed = true
                 continue
             }
-            guard let remote = SyncJSON.decode(WatchHistory.Entry.self, data), remote.id == change.key else { continue }
-            lists.upsert(remote)
-            snapshot[key] = SyncedRecord(fingerprint: Fingerprint.history(SyncJSON.object(remote)), updatedAt: change.updatedAt)
+            guard let remote = decoded, remote.id == change.key else { continue }
+            let kept = lists.upsert(remote, force: adopting.contains(key))
+            // The snapshot holds what the server holds, under the key this device sends the record with.
+            snapshot[RecordKey.make(profile, .history, kept)] = SyncedRecord(
+                fingerprint: Fingerprint.history(SyncJSON.object(remote)), updatedAt: change.updatedAt)
+            if kept != remote.id { snapshot.removeValue(forKey: key) }
             changed = true
         }
         guard changed else { return false }
@@ -780,19 +799,22 @@ final class PairSync {
     private func applyProgress(_ profile: String, _ changes: [RemoteChange]) -> Bool {
         let stored = LocalStore.history(profile)
         guard stored.complete else { return false }
-        let pending = pendingKeys(SyncScope(profile: profile, kind: .progress))
         var snapshot = store.readSnapshot()
         var lists = HistoryLists(live: stored.live, archive: stored.archive)
         var changed = false
 
         for change in changes {
             let key = RecordKey.make(profile, .progress, change.key)
-            if pending.contains(key) { continue }
             // A deleted progress record leaves the local position alone: the history delete handles the title.
             guard !change.deleted, let data = change.data else { continue }
             guard let progress = SyncJSON.decode(ProgressData.self, data) else { continue }
-            guard lists.applyProgress(change.key, progress, updatedAt: change.updatedAt) else { continue }
-            snapshot[key] = SyncedRecord(fingerprint: Fingerprint.json(SyncJSON.object(progress)), updatedAt: change.updatedAt)
+            // Decided by time alone (on the server's clock): the newer position wins, a newer local one stays and is pushed.
+            // An unsent local change is no reason to skip: a pulled history record rewrites the same entry, which used to make
+            // the newest position look like an unsent edit, and it was thrown away.
+            guard let kept = lists.applyProgress(change.key, progress, updatedAt: change.updatedAt,
+                                                 localShiftMs: clockOffsetMs, force: adopting.contains(key)) else { continue }
+            snapshot[RecordKey.make(profile, .progress, kept)] = SyncedRecord(
+                fingerprint: Fingerprint.json(SyncJSON.object(progress)), updatedAt: change.updatedAt)
             changed = true
         }
         guard changed else { return false }
@@ -925,7 +947,8 @@ final class PairSync {
                 out.insert(key)
             }
         }
-        return out
+        // A key the server just refused is taken from the server, so it is not a local change any more.
+        return out.subtracting(adopting)
     }
 
     /// Before a replace: this device's synced data goes, and the snapshot with it. The account's data comes in by the pull.

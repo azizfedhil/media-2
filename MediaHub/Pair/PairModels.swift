@@ -17,16 +17,8 @@ enum SyncRules {
     static let progressMovedSeconds: Double = 15
     static let retryMinSeconds: Double = 30
     static let retryMaxSeconds: Double = 600
-    /// Offline retries stay short: a request that never leaves the device costs the server nothing.
-    static let retryNetworkMaxSeconds: Double = 90
-    /// A full sync that finished this recently counts as fresh: none starts again for a quick return to the app.
-    static let freshSeconds: Double = 20
     static let historyLiveCap = 30
     static let maxPages = 1_000
-    /// A 4xx that says "later", not "no": request timeout, too early, too many requests. Retried with backoff.
-    static func isTransient(status: Int) -> Bool { status == 408 || status == 425 || status == 429 }
-    /// A retry delay spread by up to 20% either way, so devices that failed together do not all come back together.
-    static func jittered(_ seconds: Double) -> Double { seconds * Double.random(in: 0.8...1.2) }
     /// The profile id of the account-wide settings records (ACCOUNT_SCOPE in Kotlin).
     static let accountScope = "_account"
     /// A profile's watch log goes out at most this often.
@@ -35,6 +27,9 @@ enum SyncRules {
     static let maxHourSeconds = 2 * 3_600 + 120
     /// Fields of a history entry that move with playback. They travel as `progress`, so they are left out of the change check.
     static let playbackFields: Set<String> = ["position", "duration", "updated"]
+    /// How often a device that is playing announces itself, and how often Home looks for a device that is.
+    static let presenceBeatSeconds: Double = 15
+    static let presencePollSeconds: Double = 20
 }
 
 /// Playback progress as a `progress` record carries it (cloud/CLOUD_API.md §2.2).
@@ -96,6 +91,9 @@ struct PushResult {
     let accepted: Set<Int>
     let rejectedReasons: [String]
     let serverTs: Double
+    /// Records the server already held in a newer form, so it refused this device's write. Empty when the server sends none
+    /// (an older Worker): the client then behaves as before. Same shape as a pulled change.
+    var ignored: [RemoteChange] = []
 }
 
 /// One scope: a kind of record for one profile. `profile` is "" for the profile list, which is global.

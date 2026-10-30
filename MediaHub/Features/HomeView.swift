@@ -307,6 +307,8 @@ struct HomeView: View {
                 .task(id: listsTaskID) { await model.loadLists(selected: selectedLists, rules: contentPrefs.rules, key: listsTaskID) }
                 .task(id: suggestionsTaskID) { await model.loadSuggestions(last: history.lastWatched, rules: contentPrefs.rules, key: suggestionsTaskID) }
                 .task(id: history.finishedSeries) { await model.loadUpNext(history.finishedEntries, key: history.finishedSeries.sorted().joined(separator: ",")) }
+                // "Currently watching": looks for what the other devices are playing while Home is up and the app is in front.
+                .task(id: phase) { if phase == .active { await PresenceService.shared.poll() } }
         }
         .onReceive(NotificationCenter.default.publisher(for: Notification.Name("pear.refresh"))) { _ in
             Task { await refresh() }
@@ -391,8 +393,9 @@ struct HomeView: View {
 
     /// Everything under the hero: continue watching, themed collections and the catalogue rows.
     @ViewBuilder private var feedRows: some View {
-        if !history.continueEntries.isEmpty || !model.upNext.isEmpty {
-            ContinueRow(entries: history.continueEntries, upNext: model.upNext)
+        let live: [LivePresence] = PresenceService.shared.others
+        if !history.continueEntries.isEmpty || !model.upNext.isEmpty || !live.isEmpty {
+            ContinueRow(entries: history.continueEntries, upNext: model.upNext, live: live)
         }
         if let t = themeRow(0) { ThemeCarousel(row: t) }
         ForEach(visible(model.suggested)) { CatalogRowView(row: $0) }
@@ -749,23 +752,28 @@ struct InlineRatings: View {
 
 // MARK: - Continue Watching
 
-/// One carousel holds both in-progress titles and the next episode of finished ones, most recent first.
+/// One carousel holds both in-progress titles and the next episode of finished ones, most recent first. A title that another
+/// device is playing right now comes first, and replaces that title's saved card and its Up Next card.
 struct ContinueRow: View {
     let entries: [WatchHistory.Entry]
     let upNext: [UpNextItem]
+    var live: [LivePresence] = []
     @Environment(ThemeStore.self) private var theme
 
     private enum Card: Identifiable {
+        case playing(LivePresence)
         case resume(WatchHistory.Entry)
         case next(UpNextItem)
         var id: String {
             switch self {
+            case .playing(let p): return "l-\(p.id)"
             case .resume(let e): return "r-\(e.id)"
             case .next(let n): return "n-\(n.id)"
             }
         }
         var date: Date {
             switch self {
+            case .playing: return .distantFuture
             case .resume(let e): return e.updated
             case .next(let n): return n.updated
             }
@@ -773,7 +781,10 @@ struct ContinueRow: View {
     }
 
     private var cards: [Card] {
-        (entries.map(Card.resume) + upNext.map(Card.next)).sorted { $0.date > $1.date }
+        let saved: [WatchHistory.Entry] = entries.filter { e in !live.contains { e.matches($0.item.id) } }
+        let next: [UpNextItem] = upNext.filter { n in !live.contains { $0.item.id == n.item.id } }
+        let rest: [Card] = (saved.map(Card.resume) + next.map(Card.next)).sorted { $0.date > $1.date }
+        return live.map(Card.playing) + rest
     }
 
     var body: some View {
@@ -787,6 +798,7 @@ struct ContinueRow: View {
                 LazyHStack(spacing: 14) {
                     ForEach(cards) { card in
                         switch card {
+                        case .playing(let p): LiveCard(live: p)
                         case .resume(let e): ContinueCard(entry: e)
                         case .next(let n): UpNextCard(entry: n)
                         }
@@ -882,6 +894,87 @@ struct ContinueCard: View {
             }
         }
         .frame(height: 4)
+    }
+}
+
+// MARK: - Currently watching
+
+/// Like a Continue Watching card, for a title another device is playing now: a green badge names the device, and the position
+/// moves on while it plays. Opens the title at that episode; the player then starts at the live position.
+struct LiveCard: View {
+    let live: LivePresence
+    @Environment(ThemeStore.self) private var theme
+    @Environment(\.wideLayout) private var wideLayout
+
+    private var cardWidth: CGFloat { wideLayout ? 270 * 1.33 : 270 }
+    private var nameFont: Font {
+        wideLayout ? .archivo(size: 15 * 1.2, weight: .semibold) : .archivo(.subheadline, weight: .semibold)
+    }
+    private var subtitleFont: Font {
+        wideLayout ? .archivo(size: 12 * 1.2) : .archivo(.caption)
+    }
+    private var thumb: URL? {
+        live.thumb.flatMap(URL.init(string:)) ?? live.item.backdropURL ?? live.item.posterURL
+    }
+    private var badge: String {
+        (live.paused ? "PAUSED ON " : "PLAYING ON ") + live.deviceName.uppercased()
+    }
+
+    var body: some View {
+        // A paused device does not move, so its clock only needs to tick rarely.
+        TimelineView(.periodic(from: .now, by: live.paused ? 3600 : 1)) { context in
+            let position = live.position(at: context.date)
+            let progress: Double = live.duration > 0 ? min(max(position / live.duration, 0), 1) : 0
+            NavigationLink(value: ResumeTarget(item: live.item, season: live.season, episode: live.episode)) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Color.clear
+                        .aspectRatio(16.0 / 9.0, contentMode: .fit)
+                        .frame(width: cardWidth)
+                        .overlay { StillImage(url: thumb, size: cardWidth) }
+                        .overlay { LinearGradient(colors: [.clear, .black.opacity(0.5)], startPoint: .center, endPoint: .bottom) }
+                        .overlay(alignment: .topLeading) {
+                            HStack(spacing: 5) {
+                                Circle().fill(Color.green).frame(width: 7, height: 7)
+                                Text(badge).font(.archivo(size: 10, weight: .heavy)).tracking(0.8).lineLimit(1)
+                            }
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 8).padding(.vertical, 4)
+                            .background(.black.opacity(0.62), in: Capsule())
+                            .padding(8)
+                            .frame(maxWidth: cardWidth - 70, alignment: .leading)
+                        }
+                        .overlay(alignment: .topTrailing) {
+                            Text(Fmt.clock(position)).font(.archivo(size: 11, weight: .bold)).monospacedDigit()
+                                .foregroundStyle(.white).padding(.horizontal, 7).padding(.vertical, 3)
+                                .background(.black.opacity(0.62), in: Capsule()).padding(8)
+                        }
+                        .overlay(alignment: .bottom) {
+                            GeometryReader { g in
+                                ZStack(alignment: .leading) {
+                                    Rectangle().fill(.white.opacity(0.3))
+                                    Rectangle().fill(theme.gradient).frame(width: g.size.width * progress)
+                                }
+                            }
+                            .frame(height: 4)
+                        }
+                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(live.item.name).font(nameFont).lineLimit(1)
+                        Text(subtitle(position)).font(subtitleFont).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                    .frame(width: cardWidth, alignment: .leading)
+                }
+                .contentShape(Rectangle())
+                .hoverEffect(.lift)
+            }
+            .buttonStyle(PressableStyle())
+        }
+    }
+
+    private func subtitle(_ position: Double) -> String {
+        let left = live.duration > 0 ? Fmt.remaining(live.duration - position) : Fmt.clock(position)
+        if let s = live.season, let e = live.episode { return "S\(s) · E\(e) · \(left)" }
+        return left
     }
 }
 

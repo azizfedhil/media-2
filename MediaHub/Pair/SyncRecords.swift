@@ -273,13 +273,36 @@ enum Merge {
         return (best.season, best.episode)
     }
 
-    /// The entry that wins on everything else (the newer one), with the merged watched marker.
-    static func history(local: WatchHistory.Entry?, remote: WatchHistory.Entry) -> WatchHistory.Entry {
+    /// The entry that wins on everything else (the newer one), with the merged watched marker. `force` takes the remote one
+    /// whatever the times say: used when the server refused this device's write because it holds a newer record.
+    /// When the two sides know the title under different ids (tt… and tmdb:…), the result keeps the local id, and the
+    /// remote id is kept as its alias, so one title never becomes two entries and no stray delete is sent for either id.
+    static func history(local: WatchHistory.Entry?, remote: WatchHistory.Entry, force: Bool = false) -> WatchHistory.Entry {
         let marker = watched(local: local, remote: remote)
         var out = remote
-        if let local, local.updated > remote.updated { out = local }
+        if let local, !force, local.updated > remote.updated { out = local }
+        if let local, local.item.id != out.item.id {
+            out = rebased(out, onto: local.item)
+            out.alias = remote.item.id
+        } else if let local, out.alias == nil { out.alias = local.alias }
         out.wS = marker.season
         out.wE = marker.episode
+        return out
+    }
+
+    /// `e` with another `MetaPreview` as its item: everything else is kept.
+    static func rebased(_ e: WatchHistory.Entry, onto item: MetaPreview) -> WatchHistory.Entry {
+        var out = WatchHistory.Entry(item: item, key: e.key, position: e.position, duration: e.duration, updated: e.updated)
+        out.season = e.season
+        out.episode = e.episode
+        out.episodeTitle = e.episodeTitle
+        out.thumb = e.thumb
+        out.wS = e.wS
+        out.wE = e.wE
+        out.done = e.done
+        out.alias = e.alias
+        out.hS = e.hS
+        out.hE = e.hE
         return out
     }
 
@@ -312,36 +335,52 @@ struct HistoryLists {
     var live: [WatchHistory.Entry]
     var archive: [WatchHistory.Entry]
 
-    /// Takes `remote` as the title's record, merged with what is here.
-    mutating func upsert(_ remote: WatchHistory.Entry) {
-        let local = (live + archive).first { $0.id == remote.id }
-        let merged = Merge.history(local: local, remote: remote)
+    /// The entry a pulled record belongs to: the one with the same id, or whose alias is that id, or that is the record's alias.
+    func localEntry(_ id: String, alias: String? = nil) -> WatchHistory.Entry? {
+        (live + archive).first { e in e.matches(id) || (alias.map { e.matches($0) } ?? false) }
+    }
+
+    /// Takes `remote` as the title's record, merged with what is here (matched by id or alias). Returns the id the entry
+    /// has here, which is the key its record has in this device's snapshot.
+    @discardableResult
+    mutating func upsert(_ remote: WatchHistory.Entry, force: Bool = false) -> String {
+        let local = localEntry(remote.id, alias: remote.alias)
+        let merged = Merge.history(local: local, remote: remote, force: force)
+        if let local { remove(local.id) }
         remove(remote.id)
         place(merged)
+        return merged.id
     }
 
-    mutating func remove(_ id: String) {
-        live.removeAll { $0.id == id }
-        archive.removeAll { $0.id == id }
+    /// Removes the title, whichever of its ids is given. Returns the ids that were removed here.
+    @discardableResult
+    mutating func remove(_ id: String) -> [String] {
+        let ids = (live + archive).filter { $0.matches(id) }.map(\.id)
+        live.removeAll { $0.matches(id) }
+        archive.removeAll { $0.matches(id) }
+        return ids
     }
 
-    /// Playback progress from another device, for a title already here. Only a newer record is applied, and only the
-    /// position, length and episode move; the watched marker stays. Returns false when nothing was applied.
-    mutating func applyProgress(_ titleID: String, _ progress: ProgressData, updatedAt: Double) -> Bool {
-        guard let local = (live + archive).first(where: { $0.id == titleID }) else { return false }
-        if updatedAt <= local.updated.unixMs { return false }
+    /// Playback progress from another device, for a title already here (matched by id or alias). It is applied when it is
+    /// newer than what is here, or when `force` is set (the server holds it and refused this device's write). Only the
+    /// position, length and episode move; the watched marker stays. `localShiftMs` is how far the server's clock is ahead of
+    /// this device's, so the two times compare on one clock. Returns the id the entry has here, or nil when nothing was applied.
+    mutating func applyProgress(_ titleID: String, _ progress: ProgressData, updatedAt: Double,
+                                localShiftMs: Double = 0, force: Bool = false) -> String? {
+        guard let local = localEntry(titleID) else { return nil }
+        if !force && updatedAt <= local.updated.unixMs + localShiftMs { return nil }
         var moved = local
         moved.position = progress.position
         moved.duration = progress.duration
-        moved.updated = Date(timeIntervalSince1970: updatedAt / 1000)
+        moved.updated = Date(timeIntervalSince1970: (updatedAt - localShiftMs) / 1000)
         moved.season = progress.season ?? local.season
         moved.episode = progress.episode ?? local.episode
         if let season = progress.season, let episode = progress.episode {
             moved.key = "\(season):\(episode)"
         }
-        remove(titleID)
+        remove(local.id)
         place(moved)
-        return true
+        return moved.id
     }
 
     /// Newest first, at most the live cap. The rest go to the archive, except the ones that must stay live.

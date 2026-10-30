@@ -625,6 +625,9 @@ struct PlayerScreen: View {
     @State private var hideTask: Task<Void, Never>?
     @State private var scrobbled = false
     @State private var closing = false
+    /// "Currently watching": the point this file opened at. No position is announced before the player has reached it, so
+    /// another device never sees "S1E5 at 0:00" while the file is still loading. Nil until the start is known; 0 once reached.
+    @State private var presenceFloor: Double?
     /// When playback time was last added to the watch log.
     @State private var lastTick = Date()
     /// True until the first frame plays: the "pear." loader covers the black screen while the source opens.
@@ -756,6 +759,14 @@ struct PlayerScreen: View {
                 save(isFinal: false)
             }
         }
+        .task {
+            // "Currently watching": a beat every 15 s while playing (a pause and the background send one at once).
+            try? await Task.sleep(for: .seconds(4))
+            while !Task.isCancelled {
+                if !model.isPaused { sendPresence(paused: false) }
+                try? await Task.sleep(for: .seconds(SyncRules.presenceBeatSeconds))
+            }
+        }
         .onChange(of: model.isPlaying) { _, playing in
             if playing && !scrobbled { scrobbled = true; if libraryPrefs.usesSimkl(simkl) { simkl.scrobble("start", current, progress: 0) } }
             if playing && launching { withAnimation(.easeOut(duration: 0.25)) { launching = false } }
@@ -781,6 +792,7 @@ struct PlayerScreen: View {
                 // A pause pushes the position at once (cloud/CLOUD_API.md §4), not on the 60-second cadence.
                 PairSync.shared.progressSaved(titleID: current.item.id, immediate: true)
             }
+            sendPresence(paused: paused)
             updateIdleTimer()
         }
         // Same for leaving the app while playing (PiP, background audio): the system may end it without notice.
@@ -790,6 +802,7 @@ struct PlayerScreen: View {
                 save(isFinal: false)
                 // The 5 second timer of a quiet save never fires once the app is suspended, so send the position now.
                 PairSync.shared.progressSaved(titleID: current.item.id, immediate: true)
+                sendPresence(paused: model.isPaused)
             }
         }
         .onChange(of: model.error) { _, _ in updateIdleTimer() }
@@ -1734,12 +1747,14 @@ struct PlayerScreen: View {
                                season: current.season, episode: current.episode, episodeTitle: current.episodeTitle,
                                logo: current.logo, thumb: current.thumb,
                                sourceAddonID: addon.id, sourceSignature: s.signature, p2p: t.p2p)
+        presenceFloor = nil               // the old playhead must not be announced under the new stream
         current = next
         hostAdapter?.loadSource(from: next, resumeAt: resume)
         if partyGuest { partyChip = PartySourceResolver.chipText(addon: addon, stream: s) }
         withAnimation(.snappy(duration: 0.3)) { showSources = false; showControls = true }
         Task {
             await model.start(next, resume: resume, replacing: true)
+            presenceFloor = resume
             scheduleHide()
         }
     }
@@ -1779,12 +1794,15 @@ struct PlayerScreen: View {
             switching = nil
             guard !closing else { return }
             guard let next else { flash("No playable source found for that episode"); return }
+            presenceFloor = nil               // the old playhead must not be announced under the new episode
             finalizeCurrent()                 // save + scrobble the episode we are leaving
             current = next
-            hostAdapter?.loadSource(from: next, resumeAt: resumePoint(for: next))
+            let resume = resumePoint(for: next)
+            hostAdapter?.loadSource(from: next, resumeAt: resume)
             scrobbled = false
             withAnimation(.snappy(duration: 0.3)) { showEpisodes = false; showControls = true }
-            await model.start(next, resume: resumePoint(for: next), replacing: true)
+            await model.start(next, resume: resume, replacing: true)
+            presenceFloor = resume ?? 0
             scheduleHide()
         }
     }
@@ -1880,8 +1898,10 @@ struct PlayerScreen: View {
         // Pear.pair: the resume point should be the account's. Waits a couple of seconds at most; the launch screen covers it.
         await PairSync.shared.freshen()
         history.reload()
-        hostAdapter?.loadSource(from: current, resumeAt: resumePoint(for: current))
-        await model.start(current, resume: resumePoint(for: current))
+        let resume = resumePoint(for: current)
+        hostAdapter?.loadSource(from: current, resumeAt: resume)
+        await model.start(current, resume: resume)
+        presenceFloor = resume ?? 0
         scheduleHide()
     }
 
@@ -2029,6 +2049,10 @@ struct PlayerScreen: View {
     }
 
     private func resumePoint(for r: PlayRequest) -> Double? {
+        // Another device is playing this very episode: start where it is now. Its saved position can lag by up to a minute.
+        if let live = PresenceService.shared.livePosition(titleID: r.item.id, season: r.season, episode: r.episode), live > 30 {
+            return live
+        }
         if let e = history.entry(for: r.item.id), e.key == r.key, e.position > 30, !e.isFinished { return e.position }
         return nil
     }
@@ -2270,6 +2294,21 @@ struct PlayerScreen: View {
         lastTick = now
     }
 
+    /// Tells the account what this device is playing ("currently watching"). Not for a watch-party guest, who follows a room.
+    /// Nothing goes out before the start is known and reached, or while the length is unknown.
+    private func sendPresence(paused: Bool) {
+        guard !partyGuest, !closing, let floor = presenceFloor else { return }
+        let p = model.playhead.position, d = model.playhead.duration
+        guard d > 0, p > 0 else { return }
+        if floor > 0 {
+            guard p + 2 >= floor else { return }
+            presenceFloor = 0
+        }
+        PresenceService.shared.beat(item: current.item, key: current.key, season: current.season, episode: current.episode,
+                                    episodeTitle: current.episodeTitle, thumb: current.thumb?.absoluteString,
+                                    position: p, duration: d, paused: paused)
+    }
+
     /// Keeps the screen awake only while something is actually playing: a paused or failed player lets the
     /// auto-lock timer run, instead of holding the display on indefinitely.
     private func updateIdleTimer() {
@@ -2299,6 +2338,8 @@ struct PlayerScreen: View {
         logPlayTime()
         watchLog.flush()
         save()
+        // Leaving the episode (a close or a switch): the other devices stop showing it as playing.
+        PresenceService.shared.stop()
         let d = model.playhead.duration
         if d > 0, libraryPrefs.usesSimkl(simkl) { simkl.scrobble("stop", current, progress: model.playhead.position / d * 100) }
     }
