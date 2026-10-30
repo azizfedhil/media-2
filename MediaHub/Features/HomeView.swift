@@ -307,8 +307,7 @@ struct HomeView: View {
                 .task(id: listsTaskID) { await model.loadLists(selected: selectedLists, rules: contentPrefs.rules, key: listsTaskID) }
                 .task(id: suggestionsTaskID) { await model.loadSuggestions(last: history.lastWatched, rules: contentPrefs.rules, key: suggestionsTaskID) }
                 .task(id: history.finishedSeries) { await model.loadUpNext(history.finishedEntries, key: history.finishedSeries.sorted().joined(separator: ",")) }
-                // "Currently watching": looks for what the other devices are playing while Home is up and the app is in front.
-                .task(id: phase) { if phase == .active { await PresenceService.shared.poll() } }
+                .modifier(PresencePolling())
         }
         .onReceive(NotificationCenter.default.publisher(for: Notification.Name("pear.refresh"))) { _ in
             Task { await refresh() }
@@ -898,6 +897,18 @@ struct ContinueCard: View {
 }
 
 // MARK: - Currently watching
+
+/// "Currently watching": looks for what the other devices are playing while Home is up and the app is in front. A modifier of
+/// its own, so Home's long modifier chain stays easy on the compiler.
+struct PresencePolling: ViewModifier {
+    @Environment(\.scenePhase) private var scenePhase
+
+    func body(content: Content) -> some View {
+        content.task(id: scenePhase) {
+            if scenePhase == ScenePhase.active { await PresenceService.shared.poll() }
+        }
+    }
+}
 
 /// Like a Continue Watching card, for a title another device is playing now: a green badge names the device, and the position
 /// moves on while it plays. Opens the title at that episode; the player then starts at the live position.

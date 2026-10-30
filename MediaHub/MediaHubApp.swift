@@ -317,20 +317,25 @@ struct RootView: View {
         .sheet(item: $router.openTitle) { item in
             NavigationStack { DetailView(item: item) }
         }
-        .onChange(of: connectivity.isOnline) { _, on in if on == true { downloads.networkReturned(); PairSync.shared.networkReturned() } }
-        .onChange(of: phase) { _, p in
-            P2PManager.shared.scenePhaseChanged(p)
-            if p == .active {
-                PartySession.shared.reconnectNow()
-                PairSync.shared.foreground()
-                ArtworkRotation.shared.refresh()          // the only place the day's artwork can change
-                MediaServerStore.shared.warm()
-                Task { await refreshLibrary() }
-            } else {
-                watchLog.flush()
-                PairSync.shared.background()
-                ArtworkPool.shared.flush()
-                Task { await TMDBClient.shared.flushPending(); await LogoResolver.shared.flush() }
+        .onChange(of: connectivity.isOnline) { _, on in if on == true { downloads.networkReturned() } }
+        .onChange(of: phase) { _, p in scenePhaseChanged(p) }
+    }
+
+    /// Kept out of the `body` modifier chain: inline, the chain was too much for the compiler to type-check.
+    private func scenePhaseChanged(_ p: ScenePhase) {
+        P2PManager.shared.scenePhaseChanged(p)
+        if p == ScenePhase.active {
+            PartySession.shared.reconnectNow()
+            PairSync.shared.foreground()
+            ArtworkRotation.shared.refresh()          // the only place the day's artwork can change
+            MediaServerStore.shared.warm()
+            Task { await refreshLibrary() }
+        } else {
+            watchLog.flush()
+            ArtworkPool.shared.flush()
+            Task {
+                await TMDBClient.shared.flushPending()
+                await LogoResolver.shared.flush()
             }
         }
     }
